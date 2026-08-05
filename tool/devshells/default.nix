@@ -198,6 +198,7 @@ in
 
             includes = [
               "*.el"
+              "*.el.in"
             ];
           };
 

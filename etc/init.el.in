@@ -1,0 +1,44 @@
+;;; init.el --- Local configuration for emacs-tessera  -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; This file is copied to local/init.el on the first launch.  Edit
+;; that copy; subsequent launches leave it unchanged.
+
+;;; Code:
+
+(require 'better-defaults)
+(require 'modus-themes)
+(require 'mood-line)
+
+(setq modus-themes-to-toggle '(modus-operandi modus-vivendi))
+(load-theme 'modus-operandi t)
+(mood-line-mode 1)
+
+(let ((feeds-directory (expand-file-name "feeds/" user-emacs-directory))
+      (news-directory (expand-file-name "news/" user-emacs-directory)))
+  (make-directory feeds-directory t)
+  (make-directory news-directory t)
+  (setq elfeed-db-directory feeds-directory
+	elfeed-enclosure-default-dir (expand-file-name "enclosures/" feeds-directory)
+	elfeed-feeds '("https://planet.emacslife.com/atom.xml"
+		       "https://sachachua.com/blog/category/emacs-news/feed")
+	gnus-agent-directory (expand-file-name "agent/" news-directory)
+	gnus-directory news-directory
+	gnus-dribble-directory news-directory
+	gnus-home-directory news-directory
+	gnus-options-subscribe "\\`gmane\\.emacs\\.\\(?:devel\\|help\\)\\'"
+	gnus-select-method '(nntp "news.gmane.io")
+	gnus-startup-file (expand-file-name ".newsrc" news-directory)
+	message-directory (expand-file-name "mail/" news-directory)))
+
+;; Set `mu4e-maildir' to your own Maildir and add your mu4e accounts.
+
+;; Add any other Gnus servers or account settings you need.
+
+;; Add any other feeds you follow to `elfeed-feeds'.
+
+;;; init.el ends here
+;; Local Variables:
+;; flymake-diagnostic-functions: nil
+;; End:
