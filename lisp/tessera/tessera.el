@@ -5,7 +5,7 @@
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (alert "1.2") (vui "1.3.0"))
+;; Package-Requires: ((emacs "30.1") (alert "1.2") (vui "1.3.0"))
 ;; Keywords: convenience, mail, news
 
 ;; This file is not part of GNU Emacs.
@@ -28,6 +28,11 @@
 ;; Common foundation for the Tessera interface packages.
 
 ;;; Code:
+
+(defgroup tessera nil
+  "Modern interfaces for Emacs communication tools."
+  :group 'applications
+  :prefix "tessera-")
 
 (provide 'tessera)
 ;;; tessera.el ends here
