@@ -10,10 +10,14 @@
 (require 'better-defaults)
 (require 'modus-themes)
 (require 'mood-line)
+(require 'server)
 
 (setq modus-themes-to-toggle '(modus-operandi modus-vivendi))
 (load-theme 'modus-operandi t)
 (mood-line-mode 1)
+
+(setq server-socket-dir (locate-user-emacs-file "server/"))
+(unless (server-running-p) (server-start))
 
 (let ((feeds-directory (expand-file-name "feeds/" user-emacs-directory))
       (news-directory (expand-file-name "news/" user-emacs-directory)))
