@@ -20,6 +20,7 @@ let
       mood-line
       modus-themes
       mu4e
+      tessera-gnus
     ]
   );
 

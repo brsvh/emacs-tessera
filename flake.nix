@@ -20,6 +20,8 @@
   outputs =
     inputs@{
       flake-parts,
+      nixpkgs,
+      self,
       ...
     }:
     let
@@ -46,6 +48,103 @@
           flake-parts.flakeModules.partitions
         ];
 
+        flake = {
+          overlays = {
+            default =
+              final: prev:
+              let
+                inherit (prev)
+                  emacsPackagesFor
+                  ;
+
+                emacs-tessera =
+                  {
+                    alert,
+                    lib,
+                    melpaBuild,
+                    projectRoot,
+                    vui,
+                    ...
+                  }:
+                  let
+                    inherit (lib)
+                      licenses
+                      maintainers
+                      ;
+                  in
+                  melpaBuild {
+                    files = ''("*.el")'';
+
+                    packageRequires = [
+                      alert
+                      vui
+                    ];
+
+                    meta = {
+                      description = "Common foundation for Tessera interface packages";
+                      homepage = "https://github.com/brsvh/emacs-tessera";
+                      license = licenses.gpl3Plus;
+                      maintainers = with maintainers; [ brsvh ];
+                    };
+
+                    pname = "tessera";
+                    src = projectRoot + /lisp/tessera;
+                    version = "0.1.0";
+                  };
+
+                emacs-tessera-gnus =
+                  {
+                    lib,
+                    melpaBuild,
+                    projectRoot,
+                    tessera,
+                    ...
+                  }:
+                  let
+                    inherit (lib)
+                      licenses
+                      maintainers
+                      ;
+                  in
+                  melpaBuild {
+                    files = ''("*.el")'';
+
+                    packageRequires = [
+                      tessera
+                    ];
+
+                    meta = {
+                      description = "Tessera interface integration for Gnus";
+                      homepage = "https://github.com/brsvh/emacs-tessera";
+                      license = licenses.gpl3Plus;
+                      maintainers = with maintainers; [ brsvh ];
+                    };
+
+                    pname = "tessera-gnus";
+                    src = projectRoot + /lisp/tessera-gnus;
+                    version = "0.1.0";
+                  };
+
+                scope = finalAttrs: _: {
+                  tessera = finalAttrs.callPackage emacs-tessera {
+                    inherit
+                      projectRoot
+                      ;
+                  };
+
+                  tessera-gnus = finalAttrs.callPackage emacs-tessera-gnus {
+                    inherit
+                      projectRoot
+                      ;
+                  };
+                };
+              in
+              {
+                emacsPackagesFor = p: (emacsPackagesFor p).overrideScope scope;
+              };
+          };
+        };
+
         partitionedAttrs = {
           apps = "tool";
           devShells = "tool";
@@ -67,6 +166,28 @@
               };
           };
         };
+
+        perSystem =
+          {
+            pkgs,
+            system,
+            ...
+          }:
+          {
+            _module = {
+              args = {
+                pkgs = import nixpkgs {
+                  inherit
+                    system
+                    ;
+
+                  overlays = [
+                    self.overlays.default
+                  ];
+                };
+              };
+            };
+          };
 
         systems = [
           "x86_64-linux"
