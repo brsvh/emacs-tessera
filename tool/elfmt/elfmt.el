@@ -88,34 +88,32 @@
 (defun elfmt--apply-editorconfig ()
   "Apply EditorConfig properties to the current buffer."
   (when buffer-file-name
-    (if (fboundp 'editorconfig-apply)
-        (editorconfig-apply)
-      (let ((properties
-             (editorconfig-call-get-properties-function
-              buffer-file-name)))
-        (condition-case err
-            (run-hook-with-args
-             'editorconfig-hack-properties-functions
-             properties)
-          (error
-           (display-warning
-            'elfmt
-            (format "EditorConfig property hook failed: %S" err)
-            :warning)))
-        (setq editorconfig-properties-hash properties)
-        (editorconfig-set-local-variables properties)
-        (editorconfig-set-coding-system-revert
-         (gethash 'end_of_line properties)
-         (gethash 'charset properties))
-        (condition-case err
-            (run-hook-with-args
-             'editorconfig-after-apply-functions
-             properties)
-          (error
-           (display-warning
-            'elfmt
-            (format "EditorConfig after-apply hook failed: %S" err)
-            :warning)))))))
+    (let ((properties
+           (editorconfig-call-get-properties-function
+            buffer-file-name)))
+      (condition-case err
+          (run-hook-with-args
+           'editorconfig-hack-properties-functions
+           properties)
+        (error
+         (display-warning
+          'elfmt
+          (format "EditorConfig property hook failed: %S" err)
+          :warning)))
+      (editorconfig-set-coding-system-revert
+       (gethash 'end_of_line properties)
+       (gethash 'charset properties))
+      (setq editorconfig-properties-hash properties)
+      (editorconfig-set-local-variables properties)
+      (condition-case err
+          (run-hook-with-args
+           'editorconfig-after-apply-functions
+           properties)
+        (error
+         (display-warning
+          'elfmt
+          (format "EditorConfig after-apply hook failed: %S" err)
+          :warning))))))
 
 (defun elfmt--check-mode (file)
   "Ensure the current buffer uses a mode supported for FILE."
@@ -220,6 +218,21 @@
                (nth 2 saved-property))
         (cl-remprop symbol 'lisp-indent-function)))))
 
+(defun elfmt--normalize-indentation ()
+  "Normalize leading whitespace for the applied EditorConfig style."
+  (let ((normalizer
+         (pcase (gethash 'indent_style editorconfig-properties-hash)
+           ("space" #'untabify)
+           ("tab" #'tabify))))
+    (when normalizer
+      (save-excursion
+        (goto-char (point-min))
+        (while (not (eobp))
+          (let ((start (point)))
+            (back-to-indentation)
+            (funcall normalizer start (point)))
+          (forward-line 1))))))
+
 (defun elfmt--indent-buffer ()
   "Indent the current buffer using declarations from its source."
   (let ((saved-properties (elfmt--install-indent-specs)))
@@ -230,7 +243,8 @@
                    (lambda (&rest _) nil))
                   ((symbol-function 'progress-reporter-done)
                    (lambda (&rest _) nil)))
-          (indent-region (point-min) (point-max)))
+          (indent-region (point-min) (point-max))
+          (elfmt--normalize-indentation))
       (elfmt--restore-indent-specs saved-properties))))
 
 (defun elfmt--format-file (file)
