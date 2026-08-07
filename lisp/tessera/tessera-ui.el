@@ -83,11 +83,63 @@
   "Face for a visible count in header statistics."
   :group 'tessera)
 
+(defface tessera-entry-timestamp
+  '((t :inherit shadow :weight normal))
+  "Face for an entry timestamp."
+  :group 'tessera)
+
+(defface tessera-entry-timestamp-unread
+  '((t :weight bold))
+  "Face added to the timestamp of an unread entry."
+  :group 'tessera)
+
+(defface tessera-entry-current
+  '((t :inherit highlight :extend t))
+  "Face for the current complete entry."
+  :group 'tessera)
+
+(defface tessera-entry-subject
+  '((t :inherit tessera-entry-timestamp :weight bold))
+  "Face for the subject of a read entry."
+  :group 'tessera)
+
+(defface tessera-entry-unread
+  '((t :inherit font-lock-keyword-face :weight bold))
+  "Face for the subject of an unread entry."
+  :group 'tessera)
+
+(defface tessera-entry-author
+  '((t :inherit tessera-entry-timestamp :slant italic))
+  "Face for the author of a read entry."
+  :group 'tessera)
+
+(defface tessera-entry-author-unread
+  '((t :weight bold :slant italic))
+  "Face added to the author of an unread entry."
+  :group 'tessera)
+
+(defface tessera-entry-feature
+  '((t :inherit shadow))
+  "Face for an entry content feature."
+  :group 'tessera)
+
 (defconst tessera-ui--header-top-padding 4
   "Header padding above the content row, in pixels.")
 
 (defconst tessera-ui--header-bottom-padding 4
   "Header padding below the content row, in pixels.")
+
+(defconst tessera-ui--entry-top-padding 8
+  "Entry padding above the primary row, in pixels.")
+
+(defconst tessera-ui--entry-bottom-padding 8
+  "Entry padding below the secondary row, in pixels.")
+
+(defconst tessera-ui--entry-horizontal-padding 2
+  "Entry padding at each horizontal edge, in spaces.")
+
+(defconst tessera-ui--entry-safety-gap 1
+  "Gap between an entry and each window edge, in pixels.")
 
 (defun tessera-ui--header-space (element)
   "Return one header space named ELEMENT."
@@ -96,18 +148,26 @@
    'face 'tessera-header
    'tessera-element element))
 
-(defun tessera-ui--header-vertical-padding (element pixels top-p window)
-  "Return zero-width vertical padding named ELEMENT.
+(defun tessera-ui--vertical-padding (face element pixels top-p window)
+  "Return zero-width vertical padding using FACE and named ELEMENT.
 
 PIXELS is the added height.  Add it above the baseline when TOP-P is
 non-nil, and below otherwise.  Use WINDOW to resolve font metrics."
   (let* ((frame (window-frame window))
-         (font (face-font 'tessera-header frame))
+         (font (face-font face frame))
          (font-info (and font (font-info font frame)))
          (display
           (if (and (vectorp font-info) (>= (length font-info) 9))
-              (let ((height (aref font-info 3))
-                    (ascent (aref font-info 8)))
+              (let* ((font-height (aref font-info 3))
+                     (font-ascent (aref font-info 8))
+                     (height
+                      (if (eq face 'default)
+                          (window-default-font-height window)
+                        font-height))
+                     (ascent
+                      (round
+                       (* height
+                          (/ (float font-ascent) font-height)))))
                 `(space
                   :width (0)
                   :height (,(+ height pixels))
@@ -115,24 +175,75 @@ non-nil, and below otherwise.  Use WINDOW to resolve font metrics."
             '(space :width (0)))))
     (propertize
      " "
-     'face 'tessera-header
+     'face face
      'display display
      'tessera-element element)))
 
-(defun tessera-ui--truncate-pixels (text width)
+(defun tessera-ui--header-vertical-padding
+    (element pixels top-p window)
+  "Return header padding named ELEMENT.
+
+PIXELS, TOP-P, and WINDOW are passed to
+`tessera-ui--vertical-padding'."
+  (tessera-ui--vertical-padding
+   'tessera-header element pixels top-p window))
+
+(defun tessera-ui-entry-space (element)
+  "Return one entry space named ELEMENT."
+  (propertize " " 'tessera-element element))
+
+(defun tessera-ui-entry-padding (element)
+  "Return horizontal entry padding named ELEMENT."
+  (propertize
+   (make-string tessera-ui--entry-horizontal-padding ?\s)
+   'tessera-element element))
+
+(defun tessera-ui-entry-leading-safety-gap ()
+  "Return the safety gap before an entry row."
+  (propertize
+   " "
+   'display `(space :width (,tessera-ui--entry-safety-gap))
+   'tessera-element 'entry.safety-gap))
+
+(defun tessera-ui-entry-trailing-safety-gap ()
+  "Return the marker for the safety gap after an entry row."
+  (propertize
+   " "
+   'display '(space :width (0))
+   'tessera-element 'entry.safety-gap))
+
+(defun tessera-ui-entry-top-padding ()
+  "Return zero-width padding above an entry."
+  (tessera-ui--vertical-padding
+   'default
+   'entry.top-padding
+   tessera-ui--entry-top-padding
+   t
+   (or (get-buffer-window (current-buffer) t)
+       (selected-window))))
+
+(defun tessera-ui-entry-bottom-padding ()
+  "Return zero-width padding below an entry."
+  (tessera-ui--vertical-padding
+   'default
+   'entry.bottom-padding
+   tessera-ui--entry-bottom-padding
+   nil
+   (or (get-buffer-window (current-buffer) t)
+       (selected-window))))
+
+(defun tessera-ui-truncate-pixels (text width)
   "Truncate TEXT with an ellipsis to at most WIDTH pixels."
   (cond
    ((<= width 0) "")
    ((<= (string-pixel-width text) width) text)
    (t
     (let* ((end (1- (length text)))
-           (face (get-text-property end 'face text))
-           (element (get-text-property end 'tessera-element text))
            (ellipsis
-            (propertize
-             "…"
-             'face face
-             'tessera-element element))
+            (let ((ellipsis (copy-sequence "…")))
+              (add-text-properties
+               0 1 (text-properties-at end text) ellipsis)
+              ellipsis))
            (ellipsis-width
             (string-pixel-width ellipsis))
            (glyphs (string-glyph-split text))
@@ -157,7 +268,8 @@ non-nil, and below otherwise.  Use WINDOW to resolve font metrics."
      '(tessera-element header.query.prefix)
      prefix)
     (add-face-text-property
-     0 (length condition) 'tessera-header-query-condition nil condition)
+     0 (length condition)
+     'tessera-header-query-condition nil condition)
     (add-text-properties
      0 (length condition)
      '(tessera-element header.query.condition)
@@ -202,17 +314,35 @@ non-nil, and below otherwise.  Use WINDOW to resolve font metrics."
   (concat
    (tessera-ui--statistics-unread unread)
    (tessera-ui--statistics-separator " ")
-   (tessera-ui--statistics-text "unread" 'header.statistics.unread-text)
+   (tessera-ui--statistics-text
+    "unread" 'header.statistics.unread-text)
    (tessera-ui--statistics-separator " · ")
    (tessera-ui--statistics-visible visible)
    (tessera-ui--statistics-separator " ")
-   (tessera-ui--statistics-text "visible" 'header.statistics.visible-text)
+   (tessera-ui--statistics-text
+    "visible" 'header.statistics.visible-text)
    (tessera-ui--statistics-separator " · ")
    (tessera-ui--statistics-text
     (number-to-string total)
     'header.statistics.total-count)
    (tessera-ui--statistics-separator " ")
-   (tessera-ui--statistics-text "total" 'header.statistics.total-text)))
+   (tessera-ui--statistics-text
+    "total" 'header.statistics.total-text)))
+
+(defun tessera-ui-entry-flex-gap (right)
+  "Return a pixel-aligned gap before RIGHT.
+
+RIGHT is the complete text that follows the gap.  Reserve the trailing
+entry safety gap at the window edge."
+  (propertize
+   " "
+   'display
+   `(space
+     :align-to
+     (- right
+        (+ (,(string-pixel-width right))
+           (,tessera-ui--entry-safety-gap))))
+   'tessera-element 'entry.flex-gap))
 
 (defun tessera-ui-header-line (status query statistics)
   "Return a header line containing STATUS, QUERY, and STATISTICS.
@@ -241,10 +371,16 @@ available pixel width, and right-align STATISTICS."
            tessera-ui--header-bottom-padding
            nil
            window)))
-    (add-face-text-property 0 (length status) 'tessera-header-status t status)
-    (add-text-properties 0 (length status) '(tessera-element header.status) status)
-    (add-face-text-property 0 (length query) 'tessera-header-query t query)
-    (add-face-text-property 0 (length statistics) 'tessera-header-statistics t statistics)
+    (add-face-text-property
+     0 (length status) 'tessera-header-status t status)
+    (add-text-properties
+     0 (length status)
+     '(tessera-element header.status) status)
+    (add-face-text-property
+     0 (length query) 'tessera-header-query t query)
+    (add-face-text-property
+     0 (length statistics)
+     'tessera-header-statistics t statistics)
     (add-text-properties
      0 (length statistics)
      '(tessera-parent-element header.statistics)
@@ -252,11 +388,12 @@ available pixel width, and right-align STATISTICS."
     (let* ((fixed-width
             (string-pixel-width
              (concat
-              left-padding status separator statistics right-padding)))
+              left-padding status separator
+              statistics right-padding)))
            (query-width
             (max 0 (- (window-body-width window t) fixed-width)))
            (full-query (substring-no-properties query))
-           (query (tessera-ui--truncate-pixels query query-width)))
+           (query (tessera-ui-truncate-pixels query query-width)))
       (add-text-properties
        0 (length query)
        (list
