@@ -63,7 +63,6 @@
                     lib,
                     melpaBuild,
                     projectRoot,
-                    vui,
                     ...
                   }:
                   let
@@ -77,7 +76,6 @@
 
                     packageRequires = [
                       alert
-                      vui
                     ];
 
                     meta = {

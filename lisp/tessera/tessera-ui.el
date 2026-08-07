@@ -2,9 +2,6 @@
 
 ;; Copyright (C) 2026 Bingshan Chang <chang@bingshan.org>
 
-;; Author: Bingshan Chang <chang@bingshan.org>
-;; Maintainer: Bingshan Chang <chang@bingshan.org>
-
 ;; This file is not part of GNU Emacs.
 
 ;; This file is free software: you can redistribute it and/or modify
