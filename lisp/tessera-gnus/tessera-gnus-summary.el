@@ -34,6 +34,10 @@
   '(:eval (tessera-gnus-summary--header-line))
   "Header-line format installed in Gnus Summary buffers.")
 
+(defvar-keymap tessera-gnus-summary--status-map
+  :doc "Keymap for the status in a Tessera Gnus Summary header."
+  "<header-line> <mouse-1>" #'tessera-gnus-summary--insert-new-articles)
+
 (defvar tessera-gnus-summary--enabled-p nil
   "Non-nil when the Tessera Gnus Summary interface is enabled.")
 
@@ -85,28 +89,52 @@
 
 (defun tessera-gnus-summary--format-status ()
   "Return the presentation of the current Summary operation status."
-  (pcase tessera-gnus-summary--status-state
-    ('processing
-     (propertize
-      (if tessera-gnus-summary--fetch-total
-          (format "FETCHING %d/%d"
-                  tessera-gnus-summary--fetch-current
-                  tessera-gnus-summary--fetch-total)
-        "FETCHING")
-      'face 'tessera-header-status-processing
-      'help-echo "Gnus is fetching article headers"))
-    ('fail
-     (propertize
-      (if tessera-gnus-summary--fetch-failed
-          (format "FETCH FAILED %d" tessera-gnus-summary--fetch-failed)
-        "FETCH FAILED")
-      'face 'tessera-header-status-fail
-      'help-echo "The last Gnus header fetch failed"))
-    (_
-     (propertize
-      "IDLE"
-      'face 'tessera-header-status-success
-      'help-echo "Gnus is idle"))))
+  (let (face help-echo text)
+    (pcase tessera-gnus-summary--status-state
+      ('processing
+       (setq face 'tessera-header-status-processing
+             help-echo "Gnus is fetching article headers"
+             text
+             (if tessera-gnus-summary--fetch-total
+                 (format "FETCHING %d/%d"
+                         tessera-gnus-summary--fetch-current
+                         tessera-gnus-summary--fetch-total)
+               "FETCHING")))
+      ('fail
+       (setq face 'tessera-header-status-fail
+             help-echo "The last fetch failed; mouse-1: Get new articles"
+             text
+             (if tessera-gnus-summary--fetch-failed
+                 (format "FETCH FAILED %d"
+                         tessera-gnus-summary--fetch-failed)
+               "FETCH FAILED")))
+      (_
+       (setq face 'tessera-header-status-success
+             help-echo "mouse-1: Get new articles"
+             text "IDLE")))
+    (propertize
+     text
+     'face face
+     'help-echo help-echo
+     'keymap tessera-gnus-summary--status-map
+     'mouse-face 'header-line-highlight)))
+
+(defun tessera-gnus-summary--insert-new-articles (event)
+  "Insert new articles in the Summary window from mouse EVENT."
+  (interactive "e")
+  (mouse-select-window event)
+  (if (eq tessera-gnus-summary--status-state 'processing)
+      (message "Gnus is already fetching article headers")
+    (tessera-gnus-summary--begin-fetch)
+    (condition-case err
+        (prog1
+            (gnus-summary-insert-new-articles)
+          (when (eq tessera-gnus-summary--status-state 'processing)
+            (tessera-gnus-summary--finish-fetch 0 nil)))
+      ((error quit)
+       (unless (eq tessera-gnus-summary--status-state 'fail)
+         (tessera-gnus-summary--fail-fetch))
+       (signal (car err) (cdr err))))))
 
 (defun tessera-gnus-summary--header-line ()
   "Return the Tessera header for the current Summary buffer."
@@ -120,14 +148,16 @@
   (force-mode-line-update)
   (redisplay))
 
-(defun tessera-gnus-summary--begin-fetch (total)
-  "Begin presenting a fetch of TOTAL article headers."
+(defun tessera-gnus-summary--begin-fetch (&optional total)
+  "Begin presenting a fetch of TOTAL article headers.
+
+When TOTAL is nil, display progress without a count."
   (setq tessera-gnus-summary--status-state 'processing
-        tessera-gnus-summary--fetch-current 0
+        tessera-gnus-summary--fetch-current (and total 0)
         tessera-gnus-summary--fetch-total total
         tessera-gnus-summary--fetch-failed nil
         tessera-gnus-summary--fetch-redraw-step
-        (max 1 (ceiling total 100))
+        (if total (max 1 (ceiling total 100)) 1)
         tessera-gnus-summary--fetch-next-redraw 1)
   (tessera-gnus-summary--redraw-status))
 
