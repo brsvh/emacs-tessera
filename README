@@ -14,9 +14,157 @@ in the section entitled "GNU Free Documentation License".
 
 ~emacs-tessera~ is a modern interface suite for ~elfeed~, ~gnus~, and ~mu4e~.
 
-** Getting Started
+** Tessera Gnus
+
+Tessera Gnus currently provides a two-row, pixel-aligned interface for
+~gnus-summary-mode~.  It changes presentation and interaction only; Gnus continues
+to own groups, articles, marks, scores, and persistent state.
+
+#+HTML: <p align="center"><img width="49%" src="https://github.com/user-attachments/assets/e7a31a6d-ceba-4818-8b8a-20c5e0a6059d" alt="Threaded Gnus Summary"><img width="49%" src="https://github.com/user-attachments/assets/3530c048-ddf8-4259-991a-49e2003a2358" alt="Flat Gnus Summary"><br><sub>Threaded Summary (left) and Flat Summary (right).</sub></p>
+
+*** Install and Configure
+
+Tessera requires Emacs 30.1 or later.  The core and Gnus integration are
+separate packages in this repository, so install both:
+
+#+begin_src emacs-lisp
+(use-package tessera
+  :vc (:url "https://github.com/brsvh/emacs-tessera.git"
+       :lisp-dir "lisp/tessera"))
+
+(use-package tessera-gnus
+  :after tessera
+  :vc (:url "https://github.com/brsvh/emacs-tessera.git"
+       :lisp-dir "lisp/tessera-gnus")
+  :config
+  (tessera-gnus-mode 1))
+#+end_src
+
+~tessera-gnus-mode~ is global, but enabling it does not start Gnus.  It installs
+the interface when Gnus becomes available and updates active Summary buffers.
+Disabling it restores the native Summary presentation.
+
+*** Customize
+
+Use ~M-x customize-group RET tessera-gnus RET~ to inspect the available options.
+They cover glyphs, feature categories, semantic dates, and the presentation
+refresh delay.  Changing an option through Customize redraws active Tessera
+Summary buffers.
+
+**** Threaded Summaries
+
+Tessera follows the native ~gnus-show-threads~ option.  Set it before entering or
+regenerating a Summary buffer:
+
+#+begin_src emacs-lisp
+(setq gnus-show-threads t)            ; Threaded Summary.
+;; (setq gnus-show-threads nil)       ; Flat Summary.
+#+end_src
+
+Threading changes only the Summary organization.  Tessera derives the tree,
+thread counts, and marks from Gnus rather than maintaining a second thread
+model.
+
+**** Symbols and Icons
+
+The default glyph style is ~unicode~.  Set the global default with ~setq-default~,
+because individual Summary buffers may override it:
+
+#+begin_src emacs-lisp
+(setq-default tessera-gnus-summary-symbol-style 'unicode)
+#+end_src
+
+The accepted values are ~native~, ~unicode~, and ~nerd-icons~.  The ~nerd-icons~ style
+is optional and requires the ~nerd-icons~ package and its fonts; unavailable icons
+fall back to ordinary symbols.
+
+#+HTML: <p align="center"><img width="32%" src="https://github.com/user-attachments/assets/6689eff2-5f44-4a4d-a485-98acf4829144" alt="Native Gnus Summary symbols"><img width="32%" src="https://github.com/user-attachments/assets/f7094d90-aa3b-48f4-924b-81498d96a83b" alt="Unicode Gnus Summary symbols"><img width="32%" src="https://github.com/user-attachments/assets/e7a31a6d-ceba-4818-8b8a-20c5e0a6059d" alt="Nerd Icons Gnus Summary symbols"><br><sub>Native (left), Unicode (center), and Nerd Icons (right).</sub></p>
+
+Use ~tessera-gnus-summary-mark-symbol-alist~ and
+~tessera-gnus-summary-feature-symbol-alist~ to override individual glyphs:
+
+#+begin_src emacs-lisp
+(setq tessera-gnus-summary-mark-symbol-alist
+      '((gnus-ticked-mark . "★")))
+(setq tessera-gnus-summary-feature-symbol-alist
+      '((attachment . "▣")))
+#+end_src
+
+Set ~tessera-gnus-summary-use-uniform-glyph-color~ to non-nil to make marks follow
+the subject color and features follow the author color.  Otherwise, glyphs use
+colors associated with their semantic roles.
+
+** Tessera Mu4e
 
 /This work still in progress/.
+
+** Tessera Elfeed
+
+/This work still in progress/.
+
+** Tessera
+
+Tessera is the common foundation shared by the backend packages.  It defines the
+common UI vocabulary, semantic faces, pixel-aware layout helpers, and
+notification dependency; it does not replace any backend data model.
+
+*** Install and Configure
+
+Backend packages depend on Tessera.  It may also be installed independently:
+
+#+begin_src emacs-lisp
+(use-package tessera
+  :vc (:url "https://github.com/brsvh/emacs-tessera.git"
+       :lisp-dir "lisp/tessera"))
+#+end_src
+
+There is no global Tessera mode.  Enable the global mode for each backend you
+want Tessera to present, such as ~tessera-gnus-mode~.
+
+*** Customize
+
+Use ~M-x customize-group RET tessera RET~ for shared faces.  Faces such as
+~tessera-entry-subject~, ~tessera-entry-author~, and ~tessera-thread-connector~
+currently affect Tessera Gnus and are intended to remain consistent across
+future backends.
+
+**** Backend Symbols and Icons
+
+The core package does not impose a glyph style.  Configure symbols and icons
+through the backend option; for Gnus, use ~tessera-gnus-summary-symbol-style~ and
+the override alists described above.
+
+** Build
+
+The build requires GNU Make, Emacs 30.1 or later, and ~tar~.  Build both
+packages with:
+
+#+begin_src sh
+make
+#+end_src
+
+Use ~make tessera~ or ~make tessera-gnus~ to build one package.  The build generates
+package descriptions, autoloads, byte-compiled files, and validated source
+archives under ~dist/~.  Run ~make clean~ to remove generated files.
+
+** Test
+
+There is no automated test suite yet.  ~make~ treats byte-compilation warnings as
+errors and validates the metadata in each generated package archive.
+
+For interactive inspection, first make Tessera and the packages required by
+~test/init.el.in~ available to Emacs.  Then create the local test configuration
+and start Emacs:
+
+#+begin_src sh
+mkdir -p local
+test -e local/init.el || cp test/init.el.in local/init.el
+emacs --init-directory "$PWD/local"
+#+end_src
+
+Run ~M-x tessera-gnus-fixture-open~ to open the representative local NNML group.
+The fixture definition is tracked under ~test/fixtures/~; generated articles and
+Gnus state remain under ~local/fixtures/gnus/~.
 
 ** License
 
