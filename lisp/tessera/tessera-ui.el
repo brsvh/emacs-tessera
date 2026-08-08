@@ -100,6 +100,31 @@
   "Face for a nonzero unread count in a month heading."
   :group 'tessera)
 
+(defface tessera-thread-heading
+  '((t :weight bold))
+  "Face for a thread heading in a Tessera list."
+  :group 'tessera)
+
+(defface tessera-thread-metric
+  '((t :inherit shadow :weight normal))
+  "Face for the member metric in a thread heading."
+  :group 'tessera)
+
+(defface tessera-thread-metric-unread
+  '((t :inherit (error tessera-thread-metric)))
+  "Face for a nonzero unread count in a thread heading."
+  :group 'tessera)
+
+(defface tessera-thread-subject
+  '((t :inherit tessera-thread-heading))
+  "Face for the subject in a thread heading."
+  :group 'tessera)
+
+(defface tessera-thread-connector
+  '((t :inherit (shadow fixed-pitch)))
+  "Face for every stroke in a thread tree."
+  :group 'tessera)
+
 (defface tessera-entry-timestamp
   '((t :inherit shadow :weight normal))
   "Face for an entry timestamp."
@@ -170,6 +195,12 @@
 (defconst tessera-ui--month-heading-safety-gap 1
   "Gap between a month heading and the window edge, in pixels.")
 
+(defconst tessera-ui--thread-heading-top-padding 8
+  "Thread heading padding above the content row, in pixels.")
+
+(defconst tessera-ui--thread-heading-bottom-padding 8
+  "Thread heading padding below the content row, in pixels.")
+
 (defun tessera-ui--header-space (element)
   "Return one header space named ELEMENT."
   (propertize
@@ -232,6 +263,15 @@ Use WINDOW to resolve font metrics."
    tessera-ui--month-heading-top-padding
    tessera-ui--month-heading-bottom-padding
    window))
+
+(defun tessera-ui--thread-heading-vertical-padding
+    (element top bottom window)
+  "Return thread heading padding named ELEMENT.
+
+TOP and BOTTOM are the added pixels.  Use WINDOW to resolve font
+metrics."
+  (tessera-ui--vertical-padding
+   'tessera-thread-heading element top bottom window))
 
 (defun tessera-ui-entry-space (element)
   "Return one entry space named ELEMENT."
@@ -393,6 +433,98 @@ Use WINDOW to resolve font metrics."
         (- (window-body-width window t)
            (string-pixel-width (concat left right))
            tessera-ui--month-heading-safety-gap))))
+
+(defun tessera-ui-thread-metric (unread members incomplete)
+  "Return a thread metric for UNREAD and MEMBERS.
+
+Append an incomplete indicator when INCOMPLETE is non-nil."
+  (let* ((unread-count
+          (and (> unread 0)
+               (propertize
+                (number-to-string unread)
+                'tessera-element 'thread.metric.unread-count)))
+         (separator
+          (and unread-count
+               (propertize
+                "/" 'tessera-element 'thread.metric.separator)))
+         (member-count
+          (propertize
+           (number-to-string members)
+           'tessera-element 'thread.metric.member-count))
+         (indicator
+          (and incomplete
+               (propertize
+                "+" 'tessera-element 'thread.metric.incomplete)))
+         (metric
+          (concat unread-count separator member-count indicator)))
+    (add-face-text-property
+     0 (length metric) 'tessera-thread-metric t metric)
+    (when unread-count
+      (add-face-text-property
+       0 (length unread-count)
+       'tessera-thread-metric-unread nil metric))
+    (add-text-properties
+     0 (length metric)
+     '(tessera-parent-element thread.metric)
+     metric)
+    metric))
+
+(defun tessera-ui-thread-heading (metric subject)
+  "Return a thread heading containing METRIC and SUBJECT."
+  (let* ((window
+          (or (get-buffer-window (current-buffer) t)
+              (selected-window)))
+         (top-padding
+          (tessera-ui--thread-heading-vertical-padding
+           'thread.heading.top-padding
+           tessera-ui--thread-heading-top-padding 0 window))
+         (leading-indent
+          (concat
+           (tessera-ui-entry-leading-safety-gap)
+           (tessera-ui-entry-padding
+            'thread.heading.leading-indent)))
+         (separator
+          (tessera-ui-entry-space
+           'thread.heading.after-metric-gap))
+         (right-padding
+          (tessera-ui-entry-padding 'entry.right-padding))
+         (safety-gap
+          (tessera-ui-entry-trailing-safety-gap))
+         (trailing (concat right-padding safety-gap))
+         (flex-gap
+          (let ((gap (tessera-ui-entry-flex-gap trailing)))
+            (put-text-property
+             0 (length gap)
+             'tessera-element 'thread.heading.flex-gap gap)
+            gap))
+         (bottom-padding
+          (tessera-ui--thread-heading-vertical-padding
+           'thread.heading.bottom-padding 0
+           tessera-ui--thread-heading-bottom-padding window))
+         (metric (copy-sequence metric))
+         (subject
+          (let ((text (copy-sequence subject)))
+            (add-face-text-property
+             0 (length text) 'tessera-thread-subject t text)
+            text))
+         (heading
+          (concat top-padding leading-indent metric separator
+                  subject flex-gap trailing bottom-padding)))
+    (add-face-text-property
+     0 (length heading) 'tessera-thread-heading t heading)
+    (let ((position 0))
+      (while (< position (length heading))
+        (let ((next
+               (next-single-property-change
+                position 'tessera-parent-element
+                heading (length heading))))
+          (unless (get-text-property
+                   position 'tessera-parent-element heading)
+            (put-text-property
+             position next 'tessera-parent-element
+             'thread.heading heading))
+          (setq position next))))
+    heading))
 
 (defun tessera-ui-truncate-pixels (text width)
   "Truncate TEXT with an ellipsis to at most WIDTH pixels."

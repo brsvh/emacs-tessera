@@ -19,8 +19,7 @@
 
 ;;; Commentary:
 
-;; Header-line presentation and flat subject formatting for native
-;; Gnus Summary buffers.
+;; Header-line and list presentation for native Gnus Summary buffers.
 
 ;;; Code:
 
@@ -29,8 +28,11 @@
 (require 'tessera-ui)
 
 (defvar gnus-tmp-name)
+(defvar gnus-tmp-level)
 (defvar gnus-tmp-replied)
 (defvar gnus-tmp-score-char)
+(defvar gnus-tmp-thread)
+(defvar gnus-tmp-thread-tree-header-string)
 (defvar gnus-tmp-unread)
 
 (defvar-local tessera-gnus-summary--installed-p nil
@@ -199,6 +201,21 @@ is either a literal string or a Nerd Icons specification of the form
           "%z%O%R%U%u&tessera-gnus-summary-subject;\n"
           "%u&tessera-gnus-summary-metadata;\n")
   "Gnus Summary line format installed by Tessera in flat buffers.")
+
+(defconst tessera-gnus-summary--thread-line-format
+  (concat "%z%O%R%U"
+          "%u&tessera-gnus-summary-thread-member;\n")
+  "Gnus Summary line format installed in threaded buffers.")
+
+(defconst tessera-gnus-summary--thread-tree-settings
+  '((gnus-sum-thread-tree-root . "* ")
+    (gnus-sum-thread-tree-false-root . "* ")
+    (gnus-sum-thread-tree-single-indent . "* ")
+    (gnus-sum-thread-tree-vertical . "│  ")
+    (gnus-sum-thread-tree-indent . "   ")
+    (gnus-sum-thread-tree-leaf-with-other . "├─ ")
+    (gnus-sum-thread-tree-single-leaf . "└─ "))
+  "Gnus thread tree settings installed by Tessera.")
 
 (defconst tessera-gnus-summary--sort-functions
   '((not gnus-article-sort-by-number)
@@ -459,6 +476,9 @@ is either a literal string or a Nerd Icons specification of the form
 (defvar-local tessera-gnus-summary--original-line-format-local-p nil
   "Non-nil when `gnus-summary-line-format' was buffer-local.")
 
+(defvar-local tessera-gnus-summary--original-thread-tree-settings nil
+  "Thread tree settings saved before installing Tessera values.")
+
 (defvar-local tessera-gnus-summary--sort-installed-p nil
   "Non-nil when Tessera installed the current article sort order.")
 
@@ -514,14 +534,24 @@ is either a literal string or a Nerd Icons specification of the form
 (defvar tessera-gnus-summary--fetch-buffer nil
   "Summary buffer whose synchronous Gnus fetch is active.")
 
-(defun
-    gnus-user-format-function-tessera-gnus-summary-primary-prefix
-    (_header)
-  "Return the padding before a Tessera Gnus Summary primary row."
+(defun tessera-gnus-summary--entry-leading ()
+  "Return the padding before a Gnus Summary entry."
   (concat
    (tessera-ui-entry-top-padding)
    (tessera-ui-entry-leading-safety-gap)
    (tessera-ui-entry-padding 'entry.left-padding)))
+
+(defun tessera-gnus-summary--thread-member-leading ()
+  "Return the padding before a Gnus thread member."
+  (concat
+   (tessera-ui-entry-leading-safety-gap)
+   (tessera-ui-entry-padding 'entry.left-padding)))
+
+(defun
+    gnus-user-format-function-tessera-gnus-summary-primary-prefix
+    (_header)
+  "Return the padding before a Tessera Gnus Summary primary row."
+  (tessera-gnus-summary--entry-leading))
 
 (defun gnus-user-format-function-tessera-gnus-summary-subject (header)
   "Return the primary-row suffix from Gnus HEADER."
@@ -584,6 +614,89 @@ is either a literal string or a Nerd Icons specification of the form
        flex
        right
        (tessera-ui-entry-bottom-padding)))))
+
+(defun tessera-gnus-summary--thread-tree-prefix ()
+  "Return Gnus's current thread tree prefix with Tessera properties."
+  (let* ((text
+          (copy-sequence
+           (or gnus-tmp-thread-tree-header-string "")))
+         (branch
+          (alist-get
+           'gnus-sum-thread-tree-leaf-with-other
+           tessera-gnus-summary--thread-tree-settings))
+         (last
+          (alist-get
+           'gnus-sum-thread-tree-single-leaf
+           tessera-gnus-summary--thread-tree-settings))
+         (suffix
+          (cond
+           ((zerop gnus-tmp-level)
+            (alist-get
+             'gnus-sum-thread-tree-root
+             tessera-gnus-summary--thread-tree-settings))
+           ((string-suffix-p branch text) branch)
+           (t last)))
+         (connector-end
+          (max 0 (1- (length text))))
+         (connector-start
+          (max 0 (- (length text) (length suffix)))))
+    (when (> connector-start 0)
+      (add-text-properties
+       0 connector-start
+       '(face tessera-thread-connector
+              tessera-element thread.indentation)
+       text))
+    (when (> connector-end connector-start)
+      (add-text-properties
+       connector-start connector-end
+       '(face tessera-thread-connector
+              tessera-element thread.connector)
+       text))
+    (when (< connector-end (length text))
+      (put-text-property
+       connector-end (length text)
+       'tessera-element 'thread.after-connector-gap text))
+    (add-text-properties
+     0 (length text)
+     '(tessera-parent-element thread.tree-prefix)
+     text)
+    (when (zerop gnus-tmp-level)
+      (put-text-property
+       0 (length text) 'tessera-thread-known-count
+       (gnus-summary-number-of-articles-in-thread
+        (and (boundp 'gnus-tmp-thread)
+             (car gnus-tmp-thread))
+        gnus-tmp-level)
+       text))
+    text))
+
+(defun
+    gnus-user-format-function-tessera-gnus-summary-thread-member
+    (header)
+  "Return the threaded member suffix from Gnus HEADER."
+  (if (not (mail-header-p header))
+      ""
+    (let* ((separator
+            (tessera-ui-entry-space 'entry.separator))
+           (tree (tessera-gnus-summary--thread-tree-prefix))
+           (author
+            (tessera-gnus-summary--field
+             gnus-tmp-name
+             "(Unknown sender)"
+             'entry.author
+             'entry.author.placeholder))
+           (features (tessera-gnus-summary--features header))
+           (right-padding
+            (tessera-ui-entry-padding 'entry.right-padding))
+           (safety-gap
+            (tessera-ui-entry-trailing-safety-gap))
+           (trailing (concat right-padding safety-gap))
+           (timestamp (tessera-gnus-summary--timestamp header))
+           (right (concat timestamp trailing)))
+      (concat
+       separator tree author features
+       (tessera-ui-entry-flex-gap right)
+       right))))
 
 (defun tessera-gnus-summary--field
     (value placeholder element placeholder-element)
@@ -1153,14 +1266,6 @@ the adjacent author face."
              key 'tessera-month-fold)
         (overlay-put overlay 'display nil)))))
 
-(defun tessera-gnus-summary--update-current-month-metric ()
-  "Update the month metric for the current Gnus article."
-  (when-let* ((article
-               (get-text-property (point) 'gnus-number))
-              (data (gnus-data-find article)))
-    (tessera-gnus-summary--update-month-metric
-     (tessera-gnus-summary--month-key data))))
-
 (defun tessera-gnus-summary--timestamp (header)
   "Return an age-sensitive date for Gnus HEADER."
   (let* ((date (mail-header-date header))
@@ -1385,7 +1490,8 @@ LIMIT, FORCE-NEW, and DEPENDENCIES are passed to
 
 Only normalize point when Tessera's two-row format is active."
   (let* ((article
-          (and tessera-gnus-summary--line-format-installed-p
+          (and (eq gnus-summary-line-format
+                   tessera-gnus-summary--line-format)
                (get-text-property (point) 'gnus-number)))
          (data (and article (gnus-data-find article)))
          (position (and data (gnus-data-pos data))))
@@ -1400,12 +1506,32 @@ Only normalize point when Tessera's two-row format is active."
          (list position))))))
 
 (defun tessera-gnus-summary--entry-bounds (anchor)
-  "Return the two-row entry bounds containing ANCHOR."
+  "Return the entry bounds containing ANCHOR."
   (save-excursion
     (goto-char anchor)
     (let ((start (line-beginning-position)))
-      (forward-line 2)
+      (forward-line
+       (if (eq gnus-summary-line-format
+               tessera-gnus-summary--line-format)
+           2
+         1))
       (cons start (point)))))
+
+(defun tessera-gnus-summary--set-thread-tree-face (start end)
+  "Set the connector face between START and END."
+  (save-restriction
+    (narrow-to-region start end)
+    (save-excursion
+      (goto-char (point-min))
+      (while-let
+          ((match
+            (text-property-search-forward 'tessera-element)))
+        (when (memq (prop-match-value match)
+                    '(thread.indentation thread.connector))
+          (put-text-property
+           (prop-match-beginning match)
+           (prop-match-end match)
+           'face 'tessera-thread-connector))))))
 
 (defun tessera-gnus-summary--update-entry
     (&optional defer-presentation)
@@ -1503,6 +1629,9 @@ to the caller."
           (put-text-property
            (car timestamp) (cdr timestamp) 'face
            (list timestamp-face face))))
+      (when (eq gnus-summary-line-format
+                tessera-gnus-summary--thread-line-format)
+        (tessera-gnus-summary--set-thread-tree-face start end))
       (unless defer-presentation
         (tessera-gnus-summary--refresh-presentations-at
          (list anchor))))))
@@ -1513,6 +1642,159 @@ to the caller."
     (dolist (data gnus-newsgroup-data)
       (goto-char (gnus-data-pos data))
       (tessera-gnus-summary--update-entry t))))
+
+(defun tessera-gnus-summary--thread-known-count (data)
+  "Return the native known thread count stored on Gnus DATA."
+  (save-excursion
+    (goto-char (gnus-data-pos data))
+    (let* ((start (line-beginning-position))
+           (end (line-end-position))
+           (position
+            (text-property-not-all
+             start end 'tessera-thread-known-count nil)))
+      (and position
+           (get-text-property
+            position 'tessera-thread-known-count)))))
+
+(defun tessera-gnus-summary--thread-subject (header)
+  "Return the normalized thread subject from Gnus HEADER."
+  (tessera-gnus-summary--field
+   (gnus-simplify-subject-fully
+    (or (mail-header-subject header) ""))
+   "(No subject)"
+   'thread.subject
+   'entry.subject.placeholder))
+
+(defun tessera-gnus-summary--thread-root-data-list (data)
+  "Return Gnus data beginning with the thread containing DATA."
+  (let ((article (gnus-data-number data))
+        parent)
+    (while (setq parent
+                 (gnus-summary-article-parent article))
+      (setq article parent))
+    (gnus-data-find-list article)))
+
+(defun tessera-gnus-summary--thread-rest (data-list)
+  "Return the data following the thread at DATA-LIST."
+  (let ((rest (cdr data-list)))
+    (while (and rest
+                (> (gnus-data-level (car rest)) 0))
+      (setq rest (cdr rest)))
+    rest))
+
+(defun tessera-gnus-summary--thread-metric (data-list rest)
+  "Return the metric for thread members before REST in DATA-LIST."
+  (let ((members 0)
+        (unread 0)
+        (scan data-list))
+    (while (not (eq scan rest))
+      (setq members (1+ members))
+      (when (gnus-data-unread-p (car scan))
+        (setq unread (1+ unread)))
+      (setq scan (cdr scan)))
+    (let ((known
+           (max members
+                (or (tessera-gnus-summary--thread-known-count
+                     (car data-list))
+                    members))))
+      (tessera-ui-thread-metric
+       unread members (> known members)))))
+
+(defun tessera-gnus-summary--set-thread-member-metric
+    (data-list rest metric)
+  "Set METRIC on thread members before REST in DATA-LIST.
+
+Return the member buffer positions."
+  (let ((metric (substring-no-properties metric))
+        positions)
+    (with-silent-modifications
+      (let ((inhibit-read-only t))
+        (while (not (eq data-list rest))
+          (let ((position (gnus-data-pos (car data-list))))
+            (push position positions)
+            (save-excursion
+              (goto-char position)
+              (put-text-property
+               (line-beginning-position) (line-end-position)
+               'tessera-thread-metric metric)))
+          (setq data-list (cdr data-list)))))
+    (nreverse positions)))
+
+(defun tessera-gnus-summary--insert-thread-headings ()
+  "Insert headings in the current threaded Summary buffer."
+  (when (and tessera-gnus-summary--line-format-installed-p
+             gnus-show-threads)
+    (let ((data-list gnus-newsgroup-data)
+          (inhibit-read-only t))
+      (while data-list
+        (let* ((root (car data-list))
+               (rest
+                (tessera-gnus-summary--thread-rest data-list))
+               (metric
+                (tessera-gnus-summary--thread-metric
+                 data-list rest))
+               (subject
+                (tessera-gnus-summary--thread-subject
+                 (gnus-data-header root)))
+               (heading
+                (tessera-ui-thread-heading metric subject)))
+          (goto-char (gnus-data-pos root))
+          (beginning-of-line)
+          (let ((start (point)))
+            (insert heading "\n")
+            (put-text-property
+             start (point) 'tessera-thread-heading t)
+            (gnus-data-update-list
+             data-list (- (point) start)))
+          (tessera-gnus-summary--set-thread-member-metric
+           data-list rest metric)
+          (setq data-list rest))))))
+
+(defun tessera-gnus-summary--update-thread-metric (data)
+  "Update the metric for the thread containing Gnus DATA."
+  (when-let* ((data-list
+               (tessera-gnus-summary--thread-root-data-list data)))
+    (let* ((rest
+            (tessera-gnus-summary--thread-rest data-list))
+           (metric
+            (tessera-gnus-summary--thread-metric data-list rest))
+           (root (car data-list)))
+      (save-excursion
+        (goto-char (gnus-data-pos root))
+        (forward-line -1)
+        (let* ((heading-start (line-beginning-position))
+               (heading-end (line-end-position))
+               (bounds
+                (and (get-text-property
+                      heading-start 'tessera-thread-heading)
+                     (tessera-gnus-summary--parent-element-bounds
+                      heading-start heading-end '(thread.metric)))))
+          (when bounds
+            (let ((positions
+                   (tessera-gnus-summary--set-thread-member-metric
+                    data-list rest metric))
+                  (inhibit-read-only t))
+              (with-silent-modifications
+                (put-text-property
+                 (car bounds) (cdr bounds) 'display metric))
+              (tessera-gnus-summary--refresh-presentations-at
+               (cons heading-start positions)))))))))
+
+(defun tessera-gnus-summary--update-current-metric ()
+  "Update the aggregate metric for the current Gnus article."
+  (when-let* ((article
+               (get-text-property (point) 'gnus-number))
+              (data (gnus-data-find article)))
+    (cond
+     ((eq gnus-summary-line-format
+          tessera-gnus-summary--thread-line-format)
+      (when (get-text-property
+             (point) 'tessera-thread-metric)
+        (tessera-gnus-summary--update-thread-metric data)))
+     ((eq gnus-summary-line-format
+          tessera-gnus-summary--line-format)
+      (tessera-gnus-summary--update-month-metric
+       (tessera-gnus-summary--month-key data))))))
 
 (defun tessera-gnus-summary--insert-month-headings ()
   "Insert month headings in the current flat Summary buffer."
@@ -1715,7 +1997,7 @@ to the caller."
 
 (defun tessera-gnus-summary--set-article-display-arrow
     (orig-fun position)
-  "Call ORIG-FUN for POSITION unless the flat layout is active."
+  "Call ORIG-FUN for POSITION unless a Tessera layout is active."
   (if tessera-gnus-summary--line-format-installed-p
       (tessera-gnus-summary--hide-display-arrow)
     (funcall orig-fun position)))
@@ -1767,24 +2049,57 @@ to the caller."
     (gnus-update-format-specifications nil 'summary)
     (gnus-update-summary-mark-positions)))
 
-(defun tessera-gnus-summary--install-line-format ()
-  "Install the Tessera line format in the current Summary buffer."
+(defun tessera-gnus-summary--install-thread-tree-settings ()
+  "Install Tessera thread tree settings in the current buffer."
+  (unless tessera-gnus-summary--original-thread-tree-settings
+    (setq tessera-gnus-summary--original-thread-tree-settings
+          (mapcar
+           (lambda (setting)
+             (let ((variable (car setting)))
+               (list variable
+                     (local-variable-p variable)
+                     (symbol-value variable))))
+           tessera-gnus-summary--thread-tree-settings)))
+  (dolist (setting tessera-gnus-summary--thread-tree-settings)
+    (set (make-local-variable (car setting)) (cdr setting))))
+
+(defun tessera-gnus-summary--restore-thread-tree-settings ()
+  "Restore the native thread tree settings in the current buffer."
+  (when tessera-gnus-summary--original-thread-tree-settings
+    (dolist
+        (saved
+         tessera-gnus-summary--original-thread-tree-settings)
+      (let* ((variable (nth 0 saved))
+             (local-p (nth 1 saved))
+             (value (nth 2 saved))
+             (installed
+              (alist-get
+               variable tessera-gnus-summary--thread-tree-settings)))
+        (when (equal (symbol-value variable) installed)
+          (if local-p
+              (set variable value)
+            (kill-local-variable variable)))))
+    (setq tessera-gnus-summary--original-thread-tree-settings nil)))
+
+(defun tessera-gnus-summary--install-line-format (format)
+  "Install Tessera line FORMAT in the current Summary buffer."
   (unless tessera-gnus-summary--line-format-installed-p
     (setq tessera-gnus-summary--original-line-format-local-p
           (local-variable-p 'gnus-summary-line-format)
           tessera-gnus-summary--original-line-format
           gnus-summary-line-format
-          tessera-gnus-summary--line-format-installed-p t)
-    (setq-local gnus-summary-line-format
-                tessera-gnus-summary--line-format)
+          tessera-gnus-summary--line-format-installed-p t))
+  (unless (eq gnus-summary-line-format format)
+    (setq-local gnus-summary-line-format format)
     (tessera-gnus-summary--update-format-specification)
     (tessera-gnus-summary--hide-display-arrow)))
 
 (defun tessera-gnus-summary--restore-line-format ()
   "Restore the native line format in the current Summary buffer."
   (when tessera-gnus-summary--line-format-installed-p
-    (when (eq gnus-summary-line-format
-              tessera-gnus-summary--line-format)
+    (when (memq gnus-summary-line-format
+                (list tessera-gnus-summary--line-format
+                      tessera-gnus-summary--thread-line-format))
       (if tessera-gnus-summary--original-line-format-local-p
           (setq-local gnus-summary-line-format
                       tessera-gnus-summary--original-line-format)
@@ -1821,14 +2136,18 @@ to the caller."
     t))
 
 (defun tessera-gnus-summary--update-line-format ()
-  "Use the Tessera format and sort order in a flat Summary buffer."
+  "Install the Tessera format for the current Summary layout."
   (if gnus-show-threads
       (progn
         (tessera-gnus-summary--delete-window-overlays)
         (tessera-gnus-summary--delete-month-overlays)
-        (tessera-gnus-summary--restore-line-format)
+        (tessera-gnus-summary--install-thread-tree-settings)
+        (tessera-gnus-summary--install-line-format
+         tessera-gnus-summary--thread-line-format)
         (tessera-gnus-summary--restore-sort-functions))
-    (tessera-gnus-summary--install-line-format)
+    (tessera-gnus-summary--restore-thread-tree-settings)
+    (tessera-gnus-summary--install-line-format
+     tessera-gnus-summary--line-format)
     (tessera-gnus-summary--install-sort-functions)))
 
 (defun tessera-gnus-summary--regenerate ()
@@ -1882,6 +2201,20 @@ ELEMENTS is a list of accepted `tessera-parent-element' values."
   (let ((overlay (make-overlay start end)))
     (overlay-put overlay 'window window)
     (overlay-put overlay 'display display)
+    (overlay-put overlay 'evaporate t)
+    (overlay-put overlay 'tessera-window-presentation t)
+    (overlay-put overlay 'tessera-presentation-anchor
+                 tessera-gnus-summary--presentation-anchor)
+    (push overlay tessera-gnus-summary--window-overlays)
+    overlay))
+
+(defun tessera-gnus-summary--make-before-string-overlay
+    (start end display window)
+  "Replace text from START to END with DISPLAY in WINDOW."
+  (let ((overlay (make-overlay start end)))
+    (overlay-put overlay 'window window)
+    (overlay-put overlay 'before-string display)
+    (overlay-put overlay 'display "")
     (overlay-put overlay 'evaporate t)
     (overlay-put overlay 'tessera-window-presentation t)
     (overlay-put overlay 'tessera-presentation-anchor
@@ -2034,8 +2367,7 @@ Return the string displayed in WINDOW."
 (defun tessera-gnus-summary--make-marks-overlay
     (start end display window)
   "Display the mark sequence from START to END as DISPLAY in WINDOW."
-  (let ((overlay (make-overlay start end))
-        (display (copy-sequence display)))
+  (let ((display (copy-sequence display)))
     (add-text-properties
      0 (length display)
      (list 'keymap tessera-gnus-summary--entry-map
@@ -2046,30 +2378,28 @@ Return the string displayed in WINDOW."
     (when (tessera-gnus-summary--current-entry-p start)
       (add-face-text-property
        0 (length display) 'tessera-entry-current t display))
-    (overlay-put overlay 'window window)
-    (overlay-put overlay 'before-string display)
-    (overlay-put overlay 'display "")
-    (overlay-put overlay 'evaporate t)
-    (overlay-put overlay 'tessera-window-presentation t)
-    (overlay-put overlay 'tessera-presentation-anchor
-                 tessera-gnus-summary--presentation-anchor)
-    (push overlay tessera-gnus-summary--window-overlays)))
+    (tessera-gnus-summary--make-before-string-overlay
+     start end display window)))
 
 (defun tessera-gnus-summary--present-marks
-    (window start subject-start)
-  "Present native marks from START to SUBJECT-START in WINDOW.
+    (window start content-start &optional rail-width leading)
+  "Present native marks from START to CONTENT-START in WINDOW.
 
-Return the complete visual prefix before the subject."
+Return the complete visual prefix before the following content.  Use
+RAIL-WIDTH instead of the standard mark rail width when non-nil.
+Prepend LEADING to the displayed rail when it is non-nil."
   (let ((separator
          (tessera-gnus-summary--glyph-gap
           'entry.state.inline-gap))
         mark-start mark-end
         (marks "")
-        (rail-width (tessera-gnus-summary--mark-rail-width)))
+        (rail-width
+         (or rail-width
+             (tessera-gnus-summary--mark-rail-width))))
     (dolist (mark tessera-gnus-summary--mark-elements)
       (when-let* ((bounds
                    (tessera-gnus-summary--element-bounds
-                    start subject-start (list (cdr mark)))))
+                    start content-start (list (cdr mark)))))
         (let ((display (tessera-gnus-summary--mark-display bounds)))
           (unless (string-blank-p display)
             (setq marks
@@ -2079,11 +2409,12 @@ Return the complete visual prefix before the subject."
           (setq mark-start (or mark-start (car bounds))
                 mark-end (cdr bounds)))))
     (if (not mark-start)
-        (buffer-substring start subject-start)
+        (buffer-substring start content-start)
       (let* ((fill-width
               (max 0 (- rail-width (string-pixel-width marks))))
              (display
               (concat
+               leading
                (propertize
                 " " 'display
                 (tessera-gnus-summary--space-display fill-width))
@@ -2093,7 +2424,7 @@ Return the complete visual prefix before the subject."
         (concat
          (buffer-substring start mark-start)
          display
-         (buffer-substring mark-end subject-start))))))
+         (buffer-substring mark-end content-start))))))
 
 (defun tessera-gnus-summary--space-display (width)
   "Return a pixel WIDTH display space."
@@ -2204,6 +2535,66 @@ Return the complete visual prefix before the subject."
        (car bounds) (cdr bounds) display window))
     display))
 
+(defun tessera-gnus-summary--present-metadata-row
+    (window start end left)
+  "Present a metadata row from START to END in WINDOW.
+
+LEFT is the complete displayed prefix before the author."
+  (let ((author
+         (tessera-gnus-summary--element-bounds
+          start end '(entry.author entry.author.placeholder)))
+        (features
+         (tessera-gnus-summary--parent-element-bounds
+          start end '(entry.features)))
+        (flex
+         (tessera-gnus-summary--element-bounds
+          start end '(entry.flex-gap)))
+        (timestamp
+         (tessera-gnus-summary--element-bounds
+          start end
+          '(entry.timestamp entry.timestamp.placeholder))))
+    (when (and author flex timestamp)
+      (let* ((trailing
+              (buffer-substring (cdr timestamp) end))
+             (timestamp-display
+              (tessera-gnus-summary--present-field
+               window timestamp
+               (tessera-gnus-summary--available-width
+                window left trailing)))
+             (right (concat timestamp-display trailing))
+             (available
+              (tessera-gnus-summary--available-width
+               window left right))
+             (author-text
+              (buffer-substring (car author) (cdr author)))
+             (feature-display
+              (if (and features
+                       (<= (string-pixel-width author-text)
+                           available))
+                  (tessera-gnus-summary--present-features
+                   window features
+                   (- available
+                      (string-pixel-width author-text)))
+                (when features
+                  (tessera-gnus-summary--make-window-overlay
+                   (car features) (cdr features) "" window))
+                ""))
+             (author-display
+              (tessera-gnus-summary--present-field
+               window author
+               (max 0
+                    (- available
+                       (string-pixel-width feature-display)))))
+             (remaining
+              (max 0
+                   (- available
+                      (string-pixel-width author-display)
+                      (string-pixel-width feature-display)))))
+        (tessera-gnus-summary--make-window-overlay
+         (car flex) (cdr flex)
+         (tessera-gnus-summary--space-display remaining)
+         window)))))
+
 (defun tessera-gnus-summary--present-entry (window start end)
   "Present the entry from START to END in WINDOW."
   (let* ((tessera-gnus-summary--presentation-anchor start)
@@ -2247,24 +2638,8 @@ Return the complete visual prefix before the subject."
                 (and secondary-end
                      (tessera-gnus-summary--element-bounds
                       secondary-start secondary-end
-                      '(entry.secondary-indent))))
-               (features
-                (and secondary-end
-                     (tessera-gnus-summary--parent-element-bounds
-                      secondary-start secondary-end
-                      '(entry.features))))
-               (timestamp-flex
-                (and secondary-end
-                     (tessera-gnus-summary--element-bounds
-                      secondary-start secondary-end
-                      '(entry.flex-gap))))
-               (timestamp
-                (and secondary-end
-                     (tessera-gnus-summary--element-bounds
-                      secondary-start secondary-end
-                      '(entry.timestamp
-                        entry.timestamp.placeholder)))))
-          (when (and author indent timestamp-flex timestamp)
+                      '(entry.secondary-indent)))))
+          (when (and author indent secondary-end)
             (let* ((base-left
                     (buffer-substring secondary-start (car indent)))
                    (indent-width
@@ -2273,50 +2648,102 @@ Return the complete visual prefix before the subject."
                             (string-pixel-width base-left))))
                    (indent-display
                     (tessera-gnus-summary--space-display
-                     indent-width))
-                   (left primary-prefix)
-                   (trailing
-                    (buffer-substring (cdr timestamp) secondary-end))
-                   (timestamp-display
-                    (tessera-gnus-summary--present-field
-                     window timestamp
-                     (tessera-gnus-summary--available-width
-                      window left trailing)))
-                   (right (concat timestamp-display trailing))
-                   (available
-                    (tessera-gnus-summary--available-width
-                     window left right))
-                   (author-text
-                    (buffer-substring (car author) (cdr author)))
-                   (feature-display
-                    (if (and features
-                             (<= (string-pixel-width author-text)
-                                 available))
-                        (tessera-gnus-summary--present-features
-                         window features
-                         (- available
-                            (string-pixel-width author-text)))
-                      (when features
-                        (tessera-gnus-summary--make-window-overlay
-                         (car features) (cdr features) "" window))
-                      ""))
-                   (author-display
-                    (tessera-gnus-summary--present-field
-                     window author
-                     (max 0
-                          (- available
-                             (string-pixel-width feature-display)))))
-                   (remaining
-                    (max 0
-                         (- available
-                            (string-pixel-width author-display)
-                            (string-pixel-width feature-display)))))
+                     indent-width)))
               (tessera-gnus-summary--make-window-overlay
                (car indent) (cdr indent) indent-display window)
-              (tessera-gnus-summary--make-window-overlay
-               (car timestamp-flex) (cdr timestamp-flex)
-               (tessera-gnus-summary--space-display remaining)
-               window))))))))
+              (tessera-gnus-summary--present-metadata-row
+               window secondary-start secondary-end
+               primary-prefix))))))))
+
+(defun tessera-gnus-summary--thread-rail-width (position)
+  "Return the thread metric and mark rail width at POSITION."
+  (let ((metric
+         (get-text-property position 'tessera-thread-metric)))
+    (max (tessera-gnus-summary--mark-rail-width)
+         (if (stringp metric)
+             (string-pixel-width metric)
+           0))))
+
+(defun tessera-gnus-summary--present-thread-member
+    (window start _end)
+  "Present the threaded member at START in WINDOW."
+  (let* ((tessera-gnus-summary--presentation-anchor start)
+         (line-start
+          (save-excursion
+            (goto-char start)
+            (line-beginning-position)))
+         (line-end
+          (save-excursion
+            (goto-char start)
+            (line-end-position)))
+         (tree
+          (tessera-gnus-summary--parent-element-bounds
+           line-start line-end '(thread.tree-prefix)))
+         (author
+          (tessera-gnus-summary--element-bounds
+           line-start line-end
+           '(entry.author entry.author.placeholder))))
+    (when (and tree author)
+      (let* ((prefix
+              (tessera-gnus-summary--present-marks
+               window line-start (car tree)
+               (tessera-gnus-summary--thread-rail-width
+                line-start)
+               (tessera-gnus-summary--thread-member-leading)))
+             (left
+              (concat prefix
+                      (buffer-substring
+                       (car tree) (cdr tree)))))
+        (tessera-gnus-summary--present-metadata-row
+         window line-start line-end left)))))
+
+(defun tessera-gnus-summary--present-thread-heading
+    (window start end)
+  "Present a thread heading from START to END in WINDOW."
+  (let* ((tessera-gnus-summary--presentation-anchor start)
+         (metric
+          (tessera-gnus-summary--parent-element-bounds
+           start end '(thread.metric)))
+         (subject
+          (tessera-gnus-summary--element-bounds
+           start end '(thread.subject entry.subject.placeholder)))
+         (flex
+          (tessera-gnus-summary--element-bounds
+           start end '(thread.heading.flex-gap))))
+    (when (and metric subject flex)
+      (let* ((display
+              (get-text-property (car metric) 'display))
+             (metric-text
+              (if (stringp display)
+                  display
+                (buffer-substring (car metric) (cdr metric))))
+             (rail-width
+              (max (tessera-gnus-summary--mark-rail-width)
+                   (string-pixel-width metric-text)))
+             (fill-width
+              (max 0
+                   (- rail-width
+                      (string-pixel-width metric-text))))
+             (metric-display
+              (concat
+               (propertize
+                " " 'display
+                (tessera-gnus-summary--space-display fill-width))
+               metric-text))
+             (prefix
+              (concat
+               (buffer-substring start (car metric))
+               metric-display
+               (buffer-substring (cdr metric) (car subject))))
+             (right
+              (buffer-substring (cdr flex) end)))
+        (unless (zerop fill-width)
+          (tessera-gnus-summary--make-before-string-overlay
+           (car metric) (cdr metric) metric-display window))
+        (tessera-gnus-summary--present-field
+         window subject
+         (tessera-gnus-summary--available-width
+          window prefix right))))))
 
 (defun tessera-gnus-summary--present-month-heading
     (window start end)
@@ -2393,6 +2820,19 @@ Stop at LIMIT when it is non-nil."
             (tessera-gnus-summary--present-month-heading
              window start end))
           (setq position (min limit (1+ end)))))
+       ((get-text-property position 'tessera-thread-heading)
+        (let* ((start
+                (save-excursion
+                  (goto-char position)
+                  (line-beginning-position)))
+               (end
+                (save-excursion
+                  (goto-char position)
+                  (line-end-position))))
+          (unless (tessera-gnus-summary--presented-p window start)
+            (tessera-gnus-summary--present-thread-heading
+             window start end))
+          (setq position (min limit (1+ end)))))
        ((invisible-p position)
         (setq position
               (next-single-char-property-change
@@ -2409,8 +2849,12 @@ Stop at LIMIT when it is non-nil."
               (progn
                 (unless (tessera-gnus-summary--presented-p
                          window start)
-                  (tessera-gnus-summary--present-entry
-                   window start end))
+                  (if (eq gnus-summary-line-format
+                          tessera-gnus-summary--thread-line-format)
+                      (tessera-gnus-summary--present-thread-member
+                       window start end)
+                    (tessera-gnus-summary--present-entry
+                     window start end)))
                 (setq position end))
             (setq position
                   (next-single-property-change
@@ -2493,7 +2937,7 @@ Stop at LIMIT when it is non-nil."
     (tessera-gnus-summary--schedule-window-presentations)))
 
 (defun tessera-gnus-summary--refresh-presentation (&rest _args)
-  "Regenerate the current flat Summary presentation."
+  "Regenerate the current Summary presentation."
   (when (and tessera-gnus-summary--installed-p
              tessera-gnus-summary--line-format-installed-p
              gnus-newsgroup-prepared)
@@ -2544,9 +2988,11 @@ Stop at LIMIT when it is non-nil."
               #'tessera-gnus-summary--update-entry nil t)
     (add-hook
      'gnus-summary-update-hook
-     #'tessera-gnus-summary--update-current-month-metric t t)
+     #'tessera-gnus-summary--update-current-metric t t)
     (add-hook 'gnus-summary-prepare-hook
               #'tessera-gnus-summary--insert-month-headings -10 t)
+    (add-hook 'gnus-summary-prepare-hook
+              #'tessera-gnus-summary--insert-thread-headings -10 t)
     (add-hook 'gnus-summary-prepare-hook
               #'tessera-gnus-summary--update-selected-entry nil t)
     (add-hook
@@ -2566,8 +3012,7 @@ Stop at LIMIT when it is non-nil."
     (add-hook
      'kill-buffer-hook
      #'tessera-gnus-summary--cancel-presentation-update nil t)
-    (when (and gnus-newsgroup-prepared
-               (not gnus-show-threads))
+    (when gnus-newsgroup-prepared
       (tessera-gnus-summary--regenerate))
     (force-mode-line-update)))
 
@@ -2580,9 +3025,11 @@ Stop at LIMIT when it is non-nil."
                  #'tessera-gnus-summary--update-entry t)
     (remove-hook
      'gnus-summary-update-hook
-     #'tessera-gnus-summary--update-current-month-metric t)
+     #'tessera-gnus-summary--update-current-metric t)
     (remove-hook 'gnus-summary-prepare-hook
                  #'tessera-gnus-summary--insert-month-headings t)
+    (remove-hook 'gnus-summary-prepare-hook
+                 #'tessera-gnus-summary--insert-thread-headings t)
     (remove-hook
      'gnus-summary-prepare-hook
      #'tessera-gnus-summary--update-window-presentations t)
@@ -2615,6 +3062,7 @@ Stop at LIMIT when it is non-nil."
           tessera-gnus-summary--original-header-line-format nil
           tessera-gnus-summary--original-header-line-local-p nil
           tessera-gnus-summary--selected-entry-anchor nil)
+    (tessera-gnus-summary--restore-thread-tree-settings)
     (let ((line-format-restored-p
            (tessera-gnus-summary--restore-line-format))
           (sort-functions-restored-p
