@@ -217,10 +217,16 @@ is either a literal string or a Nerd Icons specification of the form
     (gnus-sum-thread-tree-single-leaf . "└─ "))
   "Gnus thread tree settings installed by Tessera.")
 
-(defconst tessera-gnus-summary--sort-functions
+(defconst tessera-gnus-summary--article-sort-functions
   '((not gnus-article-sort-by-number)
     (not gnus-article-sort-by-date))
   "Article sort functions installed by Tessera in flat buffers.")
+
+(defconst tessera-gnus-summary--thread-sort-functions
+  '(gnus-thread-sort-by-number
+    (not gnus-thread-sort-by-date)
+    tessera-gnus-summary--thread-sort-by-month)
+  "Thread sort functions installed by Tessera in threaded buffers.")
 
 (defconst tessera-gnus-summary--mark-elements
   '((score . entry.native-score-mark)
@@ -479,15 +485,22 @@ is either a literal string or a Nerd Icons specification of the form
 (defvar-local tessera-gnus-summary--original-thread-tree-settings nil
   "Thread tree settings saved before installing Tessera values.")
 
-(defvar-local tessera-gnus-summary--sort-installed-p nil
-  "Non-nil when Tessera installed the current article sort order.")
+(defvar-local tessera-gnus-summary--sort-variable nil
+  "Sort variable currently controlled by Tessera.")
 
 (defvar-local tessera-gnus-summary--original-sort-functions nil
-  "Article sort functions saved before installing Tessera.")
+  "Sort functions saved before installing Tessera.")
 
 (defvar-local
     tessera-gnus-summary--original-sort-functions-local-p nil
-  "Non-nil when `gnus-article-sort-functions' was buffer-local.")
+  "Non-nil when the saved sort variable was buffer-local.")
+
+(defvar-local tessera-gnus-summary--subthread-sort-installed-p nil
+  "Non-nil when Tessera preserved the native subthread order.")
+
+(defvar-local
+    tessera-gnus-summary--original-subthread-sort-local-p nil
+  "Non-nil when the native subthread sort was buffer-local.")
 
 (defvar-local tessera-gnus-summary--window-overlays nil
   "Window-local display overlays in the current Summary buffer.")
@@ -1129,14 +1142,19 @@ the adjacent author face."
              (gnus-date-get-time date)
            (error nil)))))
 
+(defun tessera-gnus-summary--month-at-time (time)
+  "Return the local calendar month containing TIME."
+  (if time
+      (let ((decoded (decode-time time)))
+        (list (decoded-time-year decoded)
+              (decoded-time-month decoded)
+              (format-time-string "%B" time)))
+    '(nil nil "Unknown date")))
+
 (defun tessera-gnus-summary--month (header)
   "Return the local calendar month represented by Gnus HEADER."
-  (if-let* ((time (tessera-gnus-summary--date-time header))
-            (decoded (decode-time time)))
-      (list (decoded-time-year decoded)
-            (decoded-time-month decoded)
-            (format-time-string "%B" time))
-    '(nil nil "Unknown date")))
+  (tessera-gnus-summary--month-at-time
+   (tessera-gnus-summary--date-time header)))
 
 (defun tessera-gnus-summary--month-key (data)
   "Return the calendar month key for Gnus DATA."
@@ -1144,16 +1162,96 @@ the adjacent author face."
    (tessera-gnus-summary--month
     (gnus-data-header data))))
 
+(defun tessera-gnus-summary--thread-rest (data-list)
+  "Return the data following the thread at DATA-LIST."
+  (let ((rest (cdr data-list)))
+    (while (and rest
+                (> (gnus-data-level (car rest)) 0))
+      (setq rest (cdr rest)))
+    rest))
+
+(defun tessera-gnus-summary--thread-month (thread)
+  "Return the latest member month of Gnus THREAD."
+  (tessera-gnus-summary--month-at-time
+   (seconds-to-time (gnus-thread-latest-date thread))))
+
+(defun tessera-gnus-summary--thread-sort-by-month
+    (thread-1 thread-2)
+  "Return non-nil when THREAD-1 is in a newer month than THREAD-2."
+  (let ((month-1
+         (tessera-gnus-summary--thread-month thread-1))
+        (month-2
+         (tessera-gnus-summary--thread-month thread-2)))
+    (or (> (car month-1) (car month-2))
+        (and (= (car month-1) (car month-2))
+             (> (nth 1 month-1) (nth 1 month-2))))))
+
+(defun tessera-gnus-summary--month-item (data-list threads)
+  "Return month data for the first item in DATA-LIST and THREADS.
+
+The return value is (MONTH DATA-REST THREAD-REST UNREAD TOTAL).  A
+threaded item is a complete thread; a flat item is one article."
+  (let* ((data-rest
+          (if gnus-show-threads
+              (tessera-gnus-summary--thread-rest data-list)
+            (cdr data-list)))
+         (thread-rest
+          (and gnus-show-threads (cdr threads)))
+         (month
+          (if gnus-show-threads
+              (tessera-gnus-summary--thread-month (car threads))
+            (tessera-gnus-summary--month
+             (gnus-data-header (car data-list)))))
+         (scan data-list)
+         (unread 0)
+         (total 0))
+    (while (not (eq scan data-rest))
+      (setq total (1+ total))
+      (when (gnus-data-unread-p (car scan))
+        (setq unread (1+ unread)))
+      (setq scan (cdr scan)))
+    (list month data-rest thread-rest unread total)))
+
+(defun tessera-gnus-summary--month-group (data-list threads)
+  "Return the first month group in DATA-LIST and THREADS.
+
+The return value is (MONTH DATA-REST THREAD-REST UNREAD TOTAL)."
+  (let* ((item
+          (tessera-gnus-summary--month-item data-list threads))
+         (month (nth 0 item))
+         (key (butlast month))
+         (data-rest (nth 1 item))
+         (thread-rest (nth 2 item))
+         (unread (nth 3 item))
+         (total (nth 4 item))
+         next)
+    (while (and data-rest
+                (setq next
+                      (tessera-gnus-summary--month-item
+                       data-rest thread-rest))
+                (equal key (butlast (nth 0 next))))
+      (setq data-rest (nth 1 next)
+            thread-rest (nth 2 next)
+            unread (+ unread (nth 3 next))
+            total (+ total (nth 4 next))))
+    (list month data-rest thread-rest unread total)))
+
 (defun tessera-gnus-summary--month-counts (key)
   "Return unread and total article counts for month KEY."
-  (let ((unread 0)
-        (total 0))
-    (dolist (data gnus-newsgroup-data)
-      (when (equal key (tessera-gnus-summary--month-key data))
-        (setq total (1+ total))
-        (when (gnus-data-unread-p data)
-          (setq unread (1+ unread)))))
-    (cons unread total)))
+  (let ((data-list gnus-newsgroup-data)
+        (threads (and gnus-show-threads gnus-newsgroup-threads))
+        counts)
+    (while (and data-list (not counts))
+      (let* ((group
+              (tessera-gnus-summary--month-group
+               data-list threads))
+             (month (nth 0 group)))
+        (if (equal key (butlast month))
+            (setq counts
+                  (cons (nth 3 group) (nth 4 group)))
+          (setq data-list (nth 1 group)
+                threads (nth 2 group)))))
+    counts))
 
 (defun tessera-gnus-summary--month-overlay (key property)
   "Return the month overlay for KEY marked by PROPERTY."
@@ -1203,6 +1301,15 @@ the adjacent author face."
         (cons (line-beginning-position)
               (min (point-max)
                    (1+ (line-end-position))))))))
+
+(defun tessera-gnus-summary--month-key-before (position)
+  "Return the month key preceding POSITION."
+  (save-excursion
+    (goto-char position)
+    (when-let* ((match
+                 (text-property-search-backward
+                  'tessera-month-key)))
+      (prop-match-value match))))
 
 (defun tessera-gnus-summary--month-body-bounds (key)
   "Return article body bounds of the month identified by KEY."
@@ -1674,14 +1781,6 @@ to the caller."
       (setq article parent))
     (gnus-data-find-list article)))
 
-(defun tessera-gnus-summary--thread-rest (data-list)
-  "Return the data following the thread at DATA-LIST."
-  (let ((rest (cdr data-list)))
-    (while (and rest
-                (> (gnus-data-level (car rest)) 0))
-      (setq rest (cdr rest)))
-    rest))
-
 (defun tessera-gnus-summary--thread-metric (data-list rest)
   "Return the metric for thread members before REST in DATA-LIST."
   (let ((members 0)
@@ -1778,7 +1877,11 @@ Return the member buffer positions."
                 (put-text-property
                  (car bounds) (cdr bounds) 'display metric))
               (tessera-gnus-summary--refresh-presentations-at
-               (cons heading-start positions)))))))))
+               (cons heading-start positions))))))
+      (when-let* ((key
+                   (tessera-gnus-summary--month-key-before
+                    (gnus-data-pos root))))
+        (tessera-gnus-summary--update-month-metric key)))))
 
 (defun tessera-gnus-summary--update-current-metric ()
   "Update the aggregate metric for the current Gnus article."
@@ -1797,29 +1900,23 @@ Return the member buffer positions."
        (tessera-gnus-summary--month-key data))))))
 
 (defun tessera-gnus-summary--insert-month-headings ()
-  "Insert month headings in the current flat Summary buffer."
+  "Insert month headings in the current Summary buffer."
   (tessera-gnus-summary--delete-month-overlays)
-  (when (and tessera-gnus-summary--line-format-installed-p
-             (not gnus-show-threads))
+  (when tessera-gnus-summary--line-format-installed-p
     (let ((data-list gnus-newsgroup-data)
+          (threads (and gnus-show-threads gnus-newsgroup-threads))
           (inhibit-read-only t))
       (while data-list
         (let* ((data (car data-list))
-               (month
-                (tessera-gnus-summary--month
-                 (gnus-data-header data)))
+               (group
+                (tessera-gnus-summary--month-group
+                 data-list threads))
+               (month (nth 0 group))
                (key (butlast month))
-               (rest data-list)
-               (unread 0)
-               (total 0))
-          (while (and rest
-                      (equal key
-                             (tessera-gnus-summary--month-key
-                              (car rest))))
-            (setq total (1+ total))
-            (when (gnus-data-unread-p (car rest))
-              (setq unread (1+ unread)))
-            (setq rest (cdr rest)))
+               (rest (nth 1 group))
+               (thread-rest (nth 2 group))
+               (unread (nth 3 group))
+               (total (nth 4 group)))
           (let* ((collapsed
                   (and (member key
                                tessera-gnus-summary--collapsed-months)
@@ -1887,7 +1984,8 @@ Return the member buffer positions."
                       (overlay-put
                        overlay 'isearch-open-invisible
                        #'tessera-gnus-summary--open-month)))))))
-          (setq data-list rest))))))
+          (setq data-list rest
+                threads thread-rest))))))
 
 (defun tessera-gnus-summary--open-month (overlay)
   "Expand the month hidden by OVERLAY."
@@ -2110,27 +2208,59 @@ Return the member buffer positions."
     (tessera-gnus-summary--update-format-specification)
     t))
 
-(defun tessera-gnus-summary--install-sort-functions ()
-  "Sort flat Summary entries from newest to oldest."
-  (unless tessera-gnus-summary--sort-installed-p
+(defun tessera-gnus-summary--install-sort-functions
+    (variable functions)
+  "Install FUNCTIONS as the buffer-local sort VARIABLE."
+  (unless (eq tessera-gnus-summary--sort-variable variable)
+    (tessera-gnus-summary--restore-sort-functions))
+  (unless tessera-gnus-summary--sort-variable
     (setq tessera-gnus-summary--original-sort-functions-local-p
-          (local-variable-p 'gnus-article-sort-functions)
+          (local-variable-p variable)
           tessera-gnus-summary--original-sort-functions
-          gnus-article-sort-functions
-          tessera-gnus-summary--sort-installed-p t)
-    (setq-local gnus-article-sort-functions
-                tessera-gnus-summary--sort-functions)))
+          (symbol-value variable)
+          tessera-gnus-summary--sort-variable variable)
+    (set (make-local-variable variable) functions)))
+
+(defun tessera-gnus-summary--preserve-subthread-sort-functions ()
+  "Preserve native subthread sorting in the current buffer."
+  (when (and
+         (not tessera-gnus-summary--subthread-sort-installed-p)
+         (eq gnus-subthread-sort-functions
+             'gnus-thread-sort-functions))
+    (setq
+     tessera-gnus-summary--original-subthread-sort-local-p
+     (local-variable-p 'gnus-subthread-sort-functions)
+     tessera-gnus-summary--subthread-sort-installed-p t)
+    (setq-local gnus-subthread-sort-functions
+                tessera-gnus-summary--original-sort-functions)))
+
+(defun tessera-gnus-summary--restore-subthread-sort-functions ()
+  "Restore native subthread sorting in the current buffer."
+  (when tessera-gnus-summary--subthread-sort-installed-p
+    (when (equal gnus-subthread-sort-functions
+                 tessera-gnus-summary--original-sort-functions)
+      (if tessera-gnus-summary--original-subthread-sort-local-p
+          (setq-local gnus-subthread-sort-functions
+                      'gnus-thread-sort-functions)
+        (kill-local-variable 'gnus-subthread-sort-functions)))
+    (setq tessera-gnus-summary--subthread-sort-installed-p nil
+          tessera-gnus-summary--original-subthread-sort-local-p nil)))
 
 (defun tessera-gnus-summary--restore-sort-functions ()
-  "Restore native article sorting in the current Summary buffer."
-  (when tessera-gnus-summary--sort-installed-p
-    (when (equal gnus-article-sort-functions
-                 tessera-gnus-summary--sort-functions)
-      (if tessera-gnus-summary--original-sort-functions-local-p
-          (setq-local gnus-article-sort-functions
-                      tessera-gnus-summary--original-sort-functions)
-        (kill-local-variable 'gnus-article-sort-functions)))
-    (setq tessera-gnus-summary--sort-installed-p nil
+  "Restore native sorting in the current Summary buffer."
+  (when tessera-gnus-summary--sort-variable
+    (tessera-gnus-summary--restore-subthread-sort-functions)
+    (let* ((variable tessera-gnus-summary--sort-variable)
+           (installed
+            (if (eq variable 'gnus-thread-sort-functions)
+                tessera-gnus-summary--thread-sort-functions
+              tessera-gnus-summary--article-sort-functions)))
+      (when (equal (symbol-value variable) installed)
+        (if tessera-gnus-summary--original-sort-functions-local-p
+            (set variable
+                 tessera-gnus-summary--original-sort-functions)
+          (kill-local-variable variable))))
+    (setq tessera-gnus-summary--sort-variable nil
           tessera-gnus-summary--original-sort-functions nil
           tessera-gnus-summary--original-sort-functions-local-p nil)
     t))
@@ -2144,11 +2274,16 @@ Return the member buffer positions."
         (tessera-gnus-summary--install-thread-tree-settings)
         (tessera-gnus-summary--install-line-format
          tessera-gnus-summary--thread-line-format)
-        (tessera-gnus-summary--restore-sort-functions))
+        (tessera-gnus-summary--install-sort-functions
+         'gnus-thread-sort-functions
+         tessera-gnus-summary--thread-sort-functions)
+        (tessera-gnus-summary--preserve-subthread-sort-functions))
     (tessera-gnus-summary--restore-thread-tree-settings)
     (tessera-gnus-summary--install-line-format
      tessera-gnus-summary--line-format)
-    (tessera-gnus-summary--install-sort-functions)))
+    (tessera-gnus-summary--install-sort-functions
+     'gnus-article-sort-functions
+     tessera-gnus-summary--article-sort-functions)))
 
 (defun tessera-gnus-summary--regenerate ()
   "Regenerate the current Summary while preserving its article."
@@ -2990,7 +3125,7 @@ Stop at LIMIT when it is non-nil."
      'gnus-summary-update-hook
      #'tessera-gnus-summary--update-current-metric t t)
     (add-hook 'gnus-summary-prepare-hook
-              #'tessera-gnus-summary--insert-month-headings -10 t)
+              #'tessera-gnus-summary--insert-month-headings -20 t)
     (add-hook 'gnus-summary-prepare-hook
               #'tessera-gnus-summary--insert-thread-headings -10 t)
     (add-hook 'gnus-summary-prepare-hook
