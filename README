@@ -20,7 +20,7 @@ Tessera Gnus currently provides a two-row, pixel-aligned interface for
 ~gnus-summary-mode~.  It changes presentation and interaction only; Gnus continues
 to own groups, articles, marks, scores, and persistent state.
 
-#+HTML: <p align="center"><img width="49%" src="https://github.com/user-attachments/assets/e7a31a6d-ceba-4818-8b8a-20c5e0a6059d" alt="Threaded Gnus Summary"><img width="49%" src="https://github.com/user-attachments/assets/3530c048-ddf8-4259-991a-49e2003a2358" alt="Flat Gnus Summary"><br><sub>Threaded Summary (left) and Flat Summary (right).</sub></p>
+#+HTML: <p align="center"><img width="80%" src="https://github.com/user-attachments/assets/97728c71-4861-4a02-9126-1d207fd25b80"><br><sub>Tessera Gnus displaying a threaded gmane.emacs.devel Summary.</sub></p>
 
 *** Install and Configure
 
@@ -64,6 +64,8 @@ regenerating a Summary buffer:
 Threading changes only the Summary organization.  Tessera derives the tree,
 thread counts, and marks from Gnus rather than maintaining a second thread
 model.
+
+#+HTML: <p align="center"><img width="49%" src="https://github.com/user-attachments/assets/e7a31a6d-ceba-4818-8b8a-20c5e0a6059d" alt="Threaded Gnus Summary"><img width="49%" src="https://github.com/user-attachments/assets/3530c048-ddf8-4259-991a-49e2003a2358" alt="Flat Gnus Summary"><br><sub>Threaded Summary (left) and Flat Summary (right).</sub></p>
 
 **** Symbols and Icons
 
