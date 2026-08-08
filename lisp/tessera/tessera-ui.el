@@ -578,7 +578,7 @@ Append an incomplete indicator when INCOMPLETE is non-nil."
   (let ((text (number-to-string count)))
     (add-text-properties
      0 (length text)
-     '(tessera-element header.statistics.unread-count)
+     '(tessera-element header.query.statistics.unread-count)
      text)
     (when (> count 0)
       (add-face-text-property
@@ -591,7 +591,7 @@ Append an incomplete indicator when INCOMPLETE is non-nil."
     (add-text-properties
      0 (length text)
      '(face tessera-header-statistics-visible
-            tessera-element header.statistics.visible-count)
+            tessera-element header.query.statistics.visible-count)
      text)
     text))
 
@@ -601,7 +601,8 @@ Append an incomplete indicator when INCOMPLETE is non-nil."
 
 (defun tessera-ui--statistics-separator (text)
   "Return statistics separator TEXT."
-  (tessera-ui--statistics-text text 'header.statistics.separator))
+  (tessera-ui--statistics-text
+   text 'header.query.statistics.separator))
 
 (defun tessera-ui-statistics (unread visible total)
   "Return structured statistics for UNREAD, VISIBLE, and TOTAL."
@@ -609,19 +610,19 @@ Append an incomplete indicator when INCOMPLETE is non-nil."
    (tessera-ui--statistics-unread unread)
    (tessera-ui--statistics-separator " ")
    (tessera-ui--statistics-text
-    "unread" 'header.statistics.unread-text)
+    "unread" 'header.query.statistics.unread-text)
    (tessera-ui--statistics-separator " · ")
    (tessera-ui--statistics-visible visible)
    (tessera-ui--statistics-separator " ")
    (tessera-ui--statistics-text
-    "visible" 'header.statistics.visible-text)
+    "visible" 'header.query.statistics.visible-text)
    (tessera-ui--statistics-separator " · ")
    (tessera-ui--statistics-text
     (number-to-string total)
-    'header.statistics.total-count)
+    'header.query.statistics.total-count)
    (tessera-ui--statistics-separator " ")
    (tessera-ui--statistics-text
-    "total" 'header.statistics.total-text)))
+    "total" 'header.query.statistics.total-text)))
 
 (defun tessera-ui--flex-gap (right inset element)
   "Return a pixel-aligned gap before RIGHT named ELEMENT.
@@ -678,7 +679,7 @@ available pixel width, and right-align STATISTICS."
      'tessera-header-statistics t statistics)
     (add-text-properties
      0 (length statistics)
-     '(tessera-parent-element header.statistics)
+     '(tessera-parent-element header.query.statistics)
      statistics)
     (let* ((fixed-width
             (string-pixel-width
