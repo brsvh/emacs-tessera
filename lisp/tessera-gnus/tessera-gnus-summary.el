@@ -1799,6 +1799,14 @@ to the caller."
       (tessera-ui-thread-metric
        unread members (> known members)))))
 
+(defun tessera-gnus-summary--thread-subject-face (metric)
+  "Return the flat subject face represented by thread METRIC."
+  (if (text-property-any
+       0 (length metric) 'tessera-element
+       'thread.metric.unread-count metric)
+      'tessera-entry-unread
+    'tessera-entry-subject))
+
 (defun tessera-gnus-summary--set-thread-member-metric
     (data-list rest metric)
   "Set METRIC on thread members before REST in DATA-LIST.
@@ -1836,7 +1844,13 @@ Return the member buffer positions."
                 (tessera-gnus-summary--thread-subject
                  (gnus-data-header root)))
                (heading
-                (tessera-ui-thread-heading metric subject)))
+                (progn
+                  (put-text-property
+                   0 (length subject) 'face
+                   (tessera-gnus-summary--thread-subject-face
+                    metric)
+                   subject)
+                  (tessera-ui-thread-heading metric subject))))
           (goto-char (gnus-data-pos root))
           (beginning-of-line)
           (let ((start (point)))
@@ -1867,7 +1881,11 @@ Return the member buffer positions."
                 (and (get-text-property
                       heading-start 'tessera-thread-heading)
                      (tessera-gnus-summary--parent-element-bounds
-                      heading-start heading-end '(thread.metric)))))
+                      heading-start heading-end '(thread.metric))))
+               (subject
+                (tessera-gnus-summary--element-bounds
+                 heading-start heading-end
+                 '(thread.subject entry.subject.placeholder))))
           (when bounds
             (let ((positions
                    (tessera-gnus-summary--set-thread-member-metric
@@ -1875,7 +1893,15 @@ Return the member buffer positions."
                   (inhibit-read-only t))
               (with-silent-modifications
                 (put-text-property
-                 (car bounds) (cdr bounds) 'display metric))
+                 (car bounds) (cdr bounds) 'display metric)
+                (when subject
+                  (put-text-property
+                   (car subject) (cdr subject) 'face
+                   (list
+                    (tessera-gnus-summary--thread-subject-face
+                     metric)
+                    'tessera-thread-subject
+                    'tessera-thread-heading))))
               (tessera-gnus-summary--refresh-presentations-at
                (cons heading-start positions))))))
       (when-let* ((key
