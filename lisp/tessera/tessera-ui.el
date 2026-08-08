@@ -80,6 +80,26 @@
   "Face for a visible count in header statistics."
   :group 'tessera)
 
+(defface tessera-month-heading
+  '((t :inherit bold))
+  "Face for a month heading in a Tessera list."
+  :group 'tessera)
+
+(defface tessera-month-heading-highlight
+  '((t :inherit highlight :extend t))
+  "Face for a month heading under the mouse."
+  :group 'tessera)
+
+(defface tessera-month-metric
+  '((t :inherit shadow :weight normal))
+  "Face for statistics in a collapsed month heading."
+  :group 'tessera)
+
+(defface tessera-month-metric-unread
+  '((t :inherit (error tessera-month-metric)))
+  "Face for a nonzero unread count in a month heading."
+  :group 'tessera)
+
 (defface tessera-entry-timestamp
   '((t :inherit shadow :weight normal))
   "Face for an entry timestamp."
@@ -138,6 +158,15 @@
 (defconst tessera-ui--entry-safety-gap 1
   "Gap between an entry and each window edge, in pixels.")
 
+(defconst tessera-ui--month-heading-top-padding 8
+  "Month heading padding above the content row, in pixels.")
+
+(defconst tessera-ui--month-heading-bottom-padding 8
+  "Month heading padding below the content row, in pixels.")
+
+(defconst tessera-ui--month-heading-horizontal-padding 2
+  "Month heading padding at each horizontal edge, in spaces.")
+
 (defun tessera-ui--header-space (element)
   "Return one header space named ELEMENT."
   (propertize
@@ -145,11 +174,12 @@
    'face 'tessera-header
    'tessera-element element))
 
-(defun tessera-ui--vertical-padding (face element pixels top-p window)
+(defun tessera-ui--vertical-padding
+    (face element top bottom window)
   "Return zero-width vertical padding using FACE and named ELEMENT.
 
-PIXELS is the added height.  Add it above the baseline when TOP-P is
-non-nil, and below otherwise.  Use WINDOW to resolve font metrics."
+TOP and BOTTOM are the added pixels above and below the baseline.
+Use WINDOW to resolve font metrics."
   (let* ((frame (window-frame window))
          (font (face-font face frame))
          (font-info (and font (font-info font frame)))
@@ -167,8 +197,8 @@ non-nil, and below otherwise.  Use WINDOW to resolve font metrics."
                           (/ (float font-ascent) font-height)))))
                 `(space
                   :width (0)
-                  :height (,(+ height pixels))
-                  :ascent (,(+ ascent (if top-p pixels 0)))))
+                  :height (,(+ height top bottom))
+                  :ascent (,(+ ascent top))))
             '(space :width (0)))))
     (propertize
      " "
@@ -177,13 +207,28 @@ non-nil, and below otherwise.  Use WINDOW to resolve font metrics."
      'tessera-element element)))
 
 (defun tessera-ui--header-vertical-padding
-    (element pixels top-p window)
+    (element window)
   "Return header padding named ELEMENT.
 
-PIXELS, TOP-P, and WINDOW are passed to
-`tessera-ui--vertical-padding'."
+Use WINDOW to resolve font metrics."
   (tessera-ui--vertical-padding
-   'tessera-header element pixels top-p window))
+   'tessera-header
+   element
+   tessera-ui--header-top-padding
+   tessera-ui--header-bottom-padding
+   window))
+
+(defun tessera-ui--month-heading-vertical-padding
+    (element window)
+  "Return month heading padding named ELEMENT.
+
+Use WINDOW to resolve font metrics."
+  (tessera-ui--vertical-padding
+   'tessera-month-heading
+   element
+   tessera-ui--month-heading-top-padding
+   tessera-ui--month-heading-bottom-padding
+   window))
 
 (defun tessera-ui-entry-space (element)
   "Return one entry space named ELEMENT."
@@ -215,7 +260,7 @@ PIXELS, TOP-P, and WINDOW are passed to
    'default
    'entry.top-padding
    tessera-ui--entry-top-padding
-   t
+   0
    (or (get-buffer-window (current-buffer) t)
        (selected-window))))
 
@@ -224,10 +269,108 @@ PIXELS, TOP-P, and WINDOW are passed to
   (tessera-ui--vertical-padding
    'default
    'entry.bottom-padding
+   0
    tessera-ui--entry-bottom-padding
-   nil
    (or (get-buffer-window (current-buffer) t)
        (selected-window))))
+
+(defun tessera-ui--month-metric-text (text element)
+  "Return month metric TEXT named ELEMENT."
+  (propertize text 'tessera-element element))
+
+(defun tessera-ui-month-metric (unread total)
+  "Return a month heading metric for UNREAD and TOTAL entries."
+  (let* ((unread-count
+          (tessera-ui--month-metric-text
+           (number-to-string unread)
+           'month.metric.unread-count))
+         (total-count
+          (tessera-ui--month-metric-text
+           (number-to-string total)
+           'month.metric.total-count))
+         (metric
+          (concat
+           unread-count
+           (tessera-ui--month-metric-text
+            " " 'month.metric.separator)
+           (tessera-ui--month-metric-text
+            "unread" 'month.metric.unread-text)
+           (tessera-ui--month-metric-text
+            " · " 'month.metric.separator)
+           total-count
+           (tessera-ui--month-metric-text
+            " " 'month.metric.separator)
+           (tessera-ui--month-metric-text
+            "total" 'month.metric.total-text))))
+    (when (> unread 0)
+      (add-face-text-property
+       0 (length unread-count)
+       'tessera-month-metric-unread nil metric))
+    (add-face-text-property
+     0 (length metric) 'tessera-month-metric t metric)
+    (add-text-properties
+     0 (length metric)
+     '(tessera-parent-element month.metric)
+     metric)
+    (concat
+     (propertize
+      " · "
+      'face 'tessera-month-metric
+      'tessera-element 'month.heading.metric-gap)
+     metric)))
+
+(defun tessera-ui-month-heading (year name &optional metric)
+  "Return a month heading made from YEAR, NAME, and optional METRIC."
+  (let* ((window
+          (or (get-buffer-window (current-buffer) t)
+              (selected-window)))
+         (top-padding
+          (tessera-ui--month-heading-vertical-padding
+           'month.heading.top-padding window))
+         (left-padding
+          (propertize
+           (make-string
+            tessera-ui--month-heading-horizontal-padding ?\s)
+           'tessera-element 'month.heading.left-padding))
+         (year
+          (and year
+               (propertize
+                (format "%04d" year)
+                'tessera-element 'month.heading.year)))
+         (separator
+          (and year
+               (propertize
+                " " 'tessera-element 'month.heading.separator)))
+         (name
+          (propertize
+           (copy-sequence name)
+           'tessera-element 'month.heading.name))
+         (right-padding
+          (propertize
+           (make-string
+            tessera-ui--month-heading-horizontal-padding ?\s)
+           'tessera-element 'month.heading.right-padding))
+         (bottom-padding
+          (tessera-ui--month-heading-vertical-padding
+           'month.heading.bottom-padding window))
+         (heading
+          (concat top-padding left-padding year separator name metric
+                  right-padding bottom-padding)))
+    (add-face-text-property
+     0 (length heading) 'tessera-month-heading t heading)
+    (let ((position 0))
+      (while (< position (length heading))
+        (let ((next
+               (next-single-property-change
+                position 'tessera-parent-element
+                heading (length heading))))
+          (unless (get-text-property
+                   position 'tessera-parent-element heading)
+            (put-text-property
+             position next 'tessera-parent-element
+             'month.heading heading))
+          (setq position next))))
+    heading))
 
 (defun tessera-ui-truncate-pixels (text width)
   "Truncate TEXT with an ellipsis to at most WIDTH pixels."
@@ -349,10 +492,7 @@ available pixel width, and right-align STATISTICS."
   (let* ((window (selected-window))
          (top-padding
           (tessera-ui--header-vertical-padding
-           'header.top-padding
-           tessera-ui--header-top-padding
-           t
-           window))
+           'header.top-padding window))
          (left-padding
           (tessera-ui--header-space 'header.left-padding))
          (status (copy-sequence status))
@@ -364,10 +504,7 @@ available pixel width, and right-align STATISTICS."
           (tessera-ui--header-space 'header.right-padding))
          (bottom-padding
           (tessera-ui--header-vertical-padding
-           'header.bottom-padding
-           tessera-ui--header-bottom-padding
-           nil
-           window)))
+           'header.bottom-padding window)))
     (add-face-text-property
      0 (length status) 'tessera-header-status t status)
     (add-text-properties

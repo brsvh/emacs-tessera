@@ -219,7 +219,7 @@ is either a literal string or a Nerd Icons specification of the form
      gnus-expirable-mark gnus-del-mark gnus-read-mark
      gnus-killed-mark gnus-kill-file-mark gnus-low-score-mark
      gnus-catchup-mark gnus-ancient-mark gnus-sparse-mark
-     gnus-canceled-mark gnus-duplicate-mark)
+     gnus-canceled-mark gnus-duplicate-mark gnus-recent-mark)
     (replied
      gnus-process-mark gnus-cached-mark gnus-replied-mark
      gnus-forwarded-mark gnus-saved-mark gnus-unseen-mark
@@ -246,7 +246,8 @@ is either a literal string or a Nerd Icons specification of the form
     (gnus-ancient-mark . "◌")
     (gnus-sparse-mark . "◇")
     (gnus-canceled-mark . "⊘")
-    (gnus-duplicate-mark . "⧉"))
+    (gnus-duplicate-mark . "⧉")
+    (gnus-recent-mark . "◉"))
   "Unicode glyphs for main Gnus marks.")
 
 (defconst tessera-gnus-summary--unicode-secondary-mark-symbols
@@ -320,7 +321,8 @@ is either a literal string or a Nerd Icons specification of the form
     (gnus-ancient-mark mdicon . "nf-md-history")
     (gnus-sparse-mark mdicon . "nf-md-link_variant_off")
     (gnus-canceled-mark mdicon . "nf-md-cancel")
-    (gnus-duplicate-mark mdicon . "nf-md-content_duplicate"))
+    (gnus-duplicate-mark mdicon . "nf-md-content_duplicate")
+    (gnus-recent-mark mdicon . "nf-md-new_box"))
   "Nerd Icons specifications for main Gnus marks.")
 
 (defconst tessera-gnus-summary--nerd-secondary-mark-icons
@@ -385,6 +387,7 @@ is either a literal string or a Nerd Icons specification of the form
     (gnus-sparse-mark . tessera-gnus-summary-glyph-availability)
     (gnus-canceled-mark . tessera-gnus-summary-glyph-error)
     (gnus-duplicate-mark . tessera-gnus-summary-glyph)
+    (gnus-recent-mark . tessera-gnus-summary-glyph-attention)
     (gnus-process-mark . tessera-gnus-summary-glyph-workflow)
     (gnus-cached-mark . tessera-gnus-summary-glyph-availability)
     (gnus-replied-mark . tessera-gnus-summary-glyph-workflow)
@@ -422,7 +425,18 @@ is either a literal string or a Nerd Icons specification of the form
 (defvar-keymap tessera-gnus-summary--entry-map
   :doc "Keymap for Tessera Gnus Summary entries."
   "<mouse-1>" #'tessera-gnus-summary--mouse-select
+  "<mouse-2>" #'tessera-gnus-summary--mouse-select
   "<double-mouse-1>" #'tessera-gnus-summary--mouse-open)
+
+(defvar-keymap tessera-gnus-summary--month-map
+  :doc "Keymap for month headings in a Tessera Gnus Summary."
+  "C-n" #'tessera-gnus-summary--next-month-line
+  "C-p" #'tessera-gnus-summary--previous-month-line
+  "RET" #'tessera-gnus-summary--toggle-month
+  "TAB" #'tessera-gnus-summary--toggle-month
+  "<tab>" #'tessera-gnus-summary--toggle-month
+  "<mouse-1>" #'tessera-gnus-summary--mouse-toggle-month
+  "<mouse-2>" #'tessera-gnus-summary--mouse-toggle-month)
 
 (defvar tessera-gnus-summary--enabled-p nil
   "Non-nil when the Tessera Gnus Summary interface is enabled.")
@@ -457,6 +471,12 @@ is either a literal string or a Nerd Icons specification of the form
 
 (defvar-local tessera-gnus-summary--window-overlays nil
   "Window-local display overlays in the current Summary buffer.")
+
+(defvar-local tessera-gnus-summary--month-overlays nil
+  "Overlays presenting month headings and folds in this buffer.")
+
+(defvar-local tessera-gnus-summary--collapsed-months nil
+  "Calendar month keys collapsed in the current Summary buffer.")
 
 (defvar-local tessera-gnus-summary--selected-entry-anchor nil
   "Gnus anchor of the entry last presented as selected.")
@@ -996,6 +1016,135 @@ the adjacent author face."
              (gnus-date-get-time date)
            (error nil)))))
 
+(defun tessera-gnus-summary--month (header)
+  "Return the local calendar month represented by Gnus HEADER."
+  (if-let* ((time (tessera-gnus-summary--date-time header))
+            (decoded (decode-time time)))
+      (list (decoded-time-year decoded)
+            (decoded-time-month decoded)
+            (format-time-string "%B" time))
+    '(nil nil "Unknown date")))
+
+(defun tessera-gnus-summary--month-key (data)
+  "Return the calendar month key for Gnus DATA."
+  (butlast
+   (tessera-gnus-summary--month
+    (gnus-data-header data))))
+
+(defun tessera-gnus-summary--month-counts (key)
+  "Return unread and total article counts for month KEY."
+  (let ((unread 0)
+        (total 0))
+    (dolist (data gnus-newsgroup-data)
+      (when (equal key (tessera-gnus-summary--month-key data))
+        (setq total (1+ total))
+        (when (gnus-data-unread-p data)
+          (setq unread (1+ unread)))))
+    (cons unread total)))
+
+(defun tessera-gnus-summary--month-overlay (key property)
+  "Return the month overlay for KEY marked by PROPERTY."
+  (catch 'overlay
+    (dolist (overlay tessera-gnus-summary--month-overlays)
+      (when (and (overlay-buffer overlay)
+                 (overlay-get overlay property)
+                 (equal key
+                        (overlay-get overlay
+                                     'tessera-month-key)))
+        (throw 'overlay overlay)))))
+
+(defun tessera-gnus-summary--make-month-overlay
+    (start end key property)
+  "Make a month overlay from START to END for KEY and PROPERTY."
+  (let ((overlay (make-overlay start end)))
+    (overlay-put overlay 'evaporate t)
+    (overlay-put overlay 'tessera-month-key key)
+    (overlay-put overlay property t)
+    (push overlay tessera-gnus-summary--month-overlays)
+    overlay))
+
+(defun tessera-gnus-summary--delete-month-overlays ()
+  "Delete every month overlay owned by the current buffer."
+  (mapc #'delete-overlay tessera-gnus-summary--month-overlays)
+  (setq tessera-gnus-summary--month-overlays nil))
+
+(defun tessera-gnus-summary--month-help (collapsed)
+  "Return help text for a month heading in state COLLAPSED."
+  (format "mouse-1, RET, TAB: %s month"
+          (if collapsed "Expand" "Collapse")))
+
+(defun tessera-gnus-summary--month-heading-bounds (key)
+  "Return bounds of the month heading identified by KEY."
+  (let ((position (point-min)))
+    (while (and (< position (point-max))
+                (not (equal
+                      key
+                      (get-text-property
+                       position 'tessera-month-key))))
+      (setq position
+            (next-single-property-change
+             position 'tessera-month-key nil (point-max))))
+    (when (< position (point-max))
+      (save-excursion
+        (goto-char position)
+        (cons (line-beginning-position)
+              (min (point-max)
+                   (1+ (line-end-position))))))))
+
+(defun tessera-gnus-summary--month-body-bounds (key)
+  "Return article body bounds of the month identified by KEY."
+  (when-let* ((heading
+               (tessera-gnus-summary--month-heading-bounds key)))
+    (let* ((start
+            (save-excursion
+              (goto-char (car heading))
+              (forward-line 1)
+              (point)))
+           (position start))
+      (while (and (< position (point-max))
+                  (not (get-text-property
+                        position 'tessera-month-key)))
+        (setq position
+              (next-single-property-change
+               position 'tessera-month-key nil (point-max))))
+      (cons start position))))
+
+(defun tessera-gnus-summary--set-month-help (key collapsed)
+  "Set help text for month KEY according to COLLAPSED."
+  (when-let* ((bounds
+               (tessera-gnus-summary--month-heading-bounds key)))
+    (with-silent-modifications
+      (put-text-property
+       (car bounds) (cdr bounds) 'help-echo
+       (tessera-gnus-summary--month-help collapsed))))
+  (when-let* ((overlay
+               (tessera-gnus-summary--month-overlay
+                key 'tessera-month-metric)))
+    (overlay-put overlay 'help-echo
+                 (tessera-gnus-summary--month-help collapsed))))
+
+(defun tessera-gnus-summary--update-month-metric (key)
+  "Update the collapsed month metric identified by KEY."
+  (when-let* ((overlay
+               (tessera-gnus-summary--month-overlay
+                key 'tessera-month-metric))
+              (counts (tessera-gnus-summary--month-counts key)))
+    (let ((display
+           (tessera-ui-month-metric
+            (car counts) (cdr counts))))
+      (overlay-put overlay 'tessera-month-metric-display display)
+      (when (tessera-gnus-summary--month-overlay
+             key 'tessera-month-fold)
+        (overlay-put overlay 'display display)))))
+
+(defun tessera-gnus-summary--update-current-month-metric ()
+  "Update the month metric for the current Gnus article."
+  (when-let* ((article
+               (get-text-property (point) 'gnus-number))
+              (data (gnus-data-find article)))
+    (tessera-gnus-summary--update-month-metric
+     (tessera-gnus-summary--month-key data))))
+
 (defun tessera-gnus-summary--timestamp (header)
   "Return an age-sensitive date for Gnus HEADER."
   (let* ((date (mail-header-date header))
@@ -1242,8 +1391,12 @@ Only normalize point when Tessera's two-row format is active."
       (forward-line 2)
       (cons start (point)))))
 
-(defun tessera-gnus-summary--update-entry ()
-  "Update presentation properties on the current entry."
+(defun tessera-gnus-summary--update-entry
+    (&optional defer-presentation)
+  "Update presentation properties on the current entry.
+
+When DEFER-PRESENTATION is non-nil, leave window presentation updates
+to the caller."
   (when-let* ((article (get-text-property (point) 'gnus-number))
               (data (gnus-data-find article))
               (anchor (gnus-data-pos data))
@@ -1333,14 +1486,211 @@ Only normalize point when Tessera's two-row format is active."
                  'tessera-entry-timestamp)))
           (put-text-property
            (car timestamp) (cdr timestamp) 'face
-           (list timestamp-face face)))))))
+           (list timestamp-face face))))
+      (unless defer-presentation
+        (tessera-gnus-summary--refresh-entry-presentations
+         (list anchor))))))
 
 (defun tessera-gnus-summary--update-entries ()
   "Apply Tessera properties to every native Summary entry."
   (save-excursion
     (dolist (data gnus-newsgroup-data)
       (goto-char (gnus-data-pos data))
-      (tessera-gnus-summary--update-entry))))
+      (tessera-gnus-summary--update-entry t))))
+
+(defun tessera-gnus-summary--insert-month-headings ()
+  "Insert month headings in the current flat Summary buffer."
+  (tessera-gnus-summary--delete-month-overlays)
+  (when (and tessera-gnus-summary--line-format-installed-p
+             (not gnus-show-threads))
+    (let ((data-list gnus-newsgroup-data)
+          (inhibit-read-only t))
+      (while data-list
+        (let* ((data (car data-list))
+               (month
+                (tessera-gnus-summary--month
+                 (gnus-data-header data)))
+               (key (butlast month))
+               (rest data-list)
+               (unread 0)
+               (total 0))
+          (while (and rest
+                      (equal key
+                             (tessera-gnus-summary--month-key
+                              (car rest))))
+            (setq total (1+ total))
+            (when (gnus-data-unread-p (car rest))
+              (setq unread (1+ unread)))
+            (setq rest (cdr rest)))
+          (let* ((collapsed
+                  (and (member key
+                               tessera-gnus-summary--collapsed-months)
+                       t))
+                 (metric
+                  (tessera-ui-month-metric unread total))
+                 (heading
+                  (tessera-ui-month-heading
+                   (car month) (nth 2 month) metric)))
+            (goto-char (gnus-data-pos data))
+            (beginning-of-line)
+            (let ((start (point)))
+              (insert heading "\n")
+              (add-text-properties
+               start (point)
+               (list
+                'keymap tessera-gnus-summary--month-map
+                'mouse-face 'tessera-month-heading-highlight
+                'help-echo
+                (tessera-gnus-summary--month-help collapsed)
+                'tessera-month-key key))
+              (let* ((body-start (point))
+                     (metric-start
+                      (text-property-any
+                       start body-start 'tessera-element
+                       'month.heading.metric-gap))
+                     (metric-end
+                      (text-property-any
+                       metric-start body-start 'tessera-element
+                       'month.heading.right-padding))
+                     (metric-overlay
+                      (tessera-gnus-summary--make-month-overlay
+                       metric-start metric-end key
+                       'tessera-month-metric)))
+                (overlay-put metric-overlay 'display
+                             (if collapsed metric ""))
+                (overlay-put metric-overlay
+                             'tessera-month-metric-display metric)
+                (overlay-put metric-overlay 'keymap
+                             tessera-gnus-summary--month-map)
+                (overlay-put metric-overlay 'mouse-face
+                             'tessera-month-heading-highlight)
+                (overlay-put
+                 metric-overlay 'help-echo
+                 (tessera-gnus-summary--month-help collapsed))
+                (gnus-data-update-list
+                 data-list (- body-start start))
+                (when collapsed
+                  (let ((body-end
+                         (if rest
+                             (save-excursion
+                               (goto-char
+                                (gnus-data-pos (car rest)))
+                               (line-beginning-position))
+                           (point-max))))
+                    (let ((overlay
+                           (tessera-gnus-summary--make-month-overlay
+                            body-start body-end key
+                            'tessera-month-fold)))
+                      (overlay-put
+                       overlay 'invisible
+                       'tessera-gnus-summary-month)
+                      (overlay-put
+                       overlay 'isearch-open-invisible
+                       #'tessera-gnus-summary--open-month)))))))
+          (setq data-list rest))))))
+
+(defun tessera-gnus-summary--open-month (overlay)
+  "Expand the month hidden by OVERLAY."
+  (when (overlay-buffer overlay)
+    (let ((key (overlay-get overlay 'tessera-month-key)))
+      (setq tessera-gnus-summary--collapsed-months
+            (delete key tessera-gnus-summary--collapsed-months)
+            tessera-gnus-summary--month-overlays
+            (delq overlay tessera-gnus-summary--month-overlays))
+      (delete-overlay overlay)
+      (when-let* ((metric
+                   (tessera-gnus-summary--month-overlay
+                    key 'tessera-month-metric)))
+        (overlay-put metric 'display ""))
+      (tessera-gnus-summary--set-month-help key nil)
+      (tessera-gnus-summary--update-window-presentations))))
+
+(defun tessera-gnus-summary--collapse-month (key)
+  "Collapse the month identified by KEY."
+  (unless (tessera-gnus-summary--month-overlay
+           key 'tessera-month-fold)
+    (when-let* ((bounds
+                 (tessera-gnus-summary--month-body-bounds key))
+                (metric
+                 (tessera-gnus-summary--month-overlay
+                  key 'tessera-month-metric)))
+      (let ((overlay
+             (tessera-gnus-summary--make-month-overlay
+              (car bounds) (cdr bounds) key
+              'tessera-month-fold)))
+        (overlay-put overlay 'invisible
+                     'tessera-gnus-summary-month)
+        (overlay-put overlay 'isearch-open-invisible
+                     #'tessera-gnus-summary--open-month)
+        (unless (member key
+                        tessera-gnus-summary--collapsed-months)
+          (push key tessera-gnus-summary--collapsed-months))
+        (overlay-put
+         metric 'display
+         (overlay-get metric 'tessera-month-metric-display))
+        (tessera-gnus-summary--set-month-help key t)
+        (tessera-gnus-summary--update-window-presentations)))))
+
+(defun tessera-gnus-summary--toggle-month ()
+  "Toggle the month heading at point."
+  (interactive)
+  (let ((key (get-text-property (point) 'tessera-month-key)))
+    (unless key
+      (user-error "Point is not on a month heading"))
+    (if-let* ((overlay
+               (tessera-gnus-summary--month-overlay
+                key 'tessera-month-fold)))
+        (tessera-gnus-summary--open-month overlay)
+      (tessera-gnus-summary--collapse-month key))))
+
+(defun tessera-gnus-summary--mouse-toggle-month (event)
+  "Toggle the month heading clicked by mouse EVENT."
+  (interactive "e")
+  (mouse-set-point event)
+  (tessera-gnus-summary--toggle-month))
+
+(defun tessera-gnus-summary--next-month-line ()
+  "Move to the next visible line from a month heading."
+  (interactive)
+  (let* ((key (get-text-property (point) 'tessera-month-key))
+         (overlay
+          (and key
+               (tessera-gnus-summary--month-overlay
+                key 'tessera-month-fold))))
+    (if overlay
+        (goto-char (overlay-end overlay))
+      (call-interactively #'next-line))))
+
+(defun tessera-gnus-summary--previous-month-line ()
+  "Move to the previous visible line from a month heading."
+  (interactive)
+  (let ((position (line-beginning-position))
+        overlay)
+    (when (> position (point-min))
+      (catch 'found
+        (dolist (candidate (overlays-at (1- position)))
+          (when (overlay-get candidate 'tessera-month-fold)
+            (setq overlay candidate)
+            (throw 'found t)))))
+    (if-let* ((key (and overlay
+                        (overlay-get overlay
+                                     'tessera-month-key)))
+              (bounds
+               (tessera-gnus-summary--month-heading-bounds key)))
+        (goto-char (car bounds))
+      (call-interactively #'previous-line))))
+
+(defun tessera-gnus-summary--reveal-current-month ()
+  "Expand a collapsed month entered by a native Summary command."
+  (when (and tessera-gnus-summary--installed-p
+             (symbolp this-command)
+             (string-prefix-p
+              "gnus-summary-" (symbol-name this-command)))
+    (catch 'opened
+      (dolist (overlay (overlays-at (point)))
+        (when (overlay-get overlay 'tessera-month-fold)
+          (tessera-gnus-summary--open-month overlay)
+          (throw 'opened t))))))
 
 (defun tessera-gnus-summary--hide-display-arrow ()
   "Hide the native Summary display arrow in the current buffer."
@@ -1459,6 +1809,7 @@ Only normalize point when Tessera's two-row format is active."
   (if gnus-show-threads
       (progn
         (tessera-gnus-summary--delete-window-overlays)
+        (tessera-gnus-summary--delete-month-overlays)
         (tessera-gnus-summary--restore-line-format)
         (tessera-gnus-summary--restore-sort-functions))
     (tessera-gnus-summary--install-line-format)
@@ -1649,22 +2000,32 @@ Return the string displayed in WINDOW."
     (when glyph-face
       (add-face-text-property
        0 (length text) glyph-face t text))
-    (when (and (overlayp gnus-newsgroup-selected-overlay)
-               (overlay-buffer gnus-newsgroup-selected-overlay)
-               (eq (overlay-get gnus-newsgroup-selected-overlay 'face)
-                   'tessera-entry-current)
-               (<= (overlay-start gnus-newsgroup-selected-overlay)
-                   position)
-               (< position
-                  (overlay-end gnus-newsgroup-selected-overlay)))
-      (add-face-text-property
-       0 (length text) 'tessera-entry-current t text))
     text))
+
+(defun tessera-gnus-summary--current-entry-p (position)
+  "Return non-nil when POSITION belongs to the current entry."
+  (and (overlayp gnus-newsgroup-selected-overlay)
+       (overlay-buffer gnus-newsgroup-selected-overlay)
+       (eq (overlay-get gnus-newsgroup-selected-overlay 'face)
+           'tessera-entry-current)
+       (<= (overlay-start gnus-newsgroup-selected-overlay) position)
+       (< position (overlay-end gnus-newsgroup-selected-overlay))))
 
 (defun tessera-gnus-summary--make-marks-overlay
     (start end display window)
   "Display the mark sequence from START to END as DISPLAY in WINDOW."
-  (let ((overlay (make-overlay start end)))
+  (let ((overlay (make-overlay start end))
+        (display (copy-sequence display)))
+    (add-text-properties
+     0 (length display)
+     (list 'keymap tessera-gnus-summary--entry-map
+           'mouse-face 'highlight
+           'gnus-number (get-text-property start 'gnus-number)
+           'tessera-parent-element 'entry.state-rail)
+     display)
+    (when (tessera-gnus-summary--current-entry-p start)
+      (add-face-text-property
+       0 (length display) 'tessera-entry-current t display))
     (overlay-put overlay 'window window)
     (overlay-put overlay 'before-string display)
     (overlay-put overlay 'display "")
@@ -1944,32 +2305,37 @@ Stop at LIMIT when it is non-nil."
   (let ((position (window-start window))
         (limit (or limit (window-end window t) (point-max))))
     (while (< position limit)
-      (let* ((article (get-text-property position 'gnus-number))
-             (data (and article (gnus-data-find article)))
-             (start (and data (gnus-data-pos data)))
-             (end
-              (and start
-                   (next-single-property-change
-                    start 'gnus-number nil (point-max)))))
-        (if (and start end (> end position))
-            (progn
-              (unless (tessera-gnus-summary--entry-presented-p
-                       window start)
-                (tessera-gnus-summary--present-entry
-                 window start end))
-              (setq position end))
+      (if (invisible-p position)
           (setq position
-                (next-single-property-change
-                 position 'gnus-number nil limit)))))))
+                (next-single-char-property-change
+                 position 'invisible nil limit))
+        (let* ((article (get-text-property position 'gnus-number))
+               (data (and article (gnus-data-find article)))
+               (start (and data (gnus-data-pos data)))
+               (end
+                (and start
+                     (next-single-property-change
+                      start 'gnus-number nil (point-max)))))
+          (if (and start end (> end position))
+              (progn
+                (unless (tessera-gnus-summary--entry-presented-p
+                         window start)
+                  (tessera-gnus-summary--present-entry
+                   window start end))
+                (setq position end))
+            (setq position
+                  (next-single-property-change
+                   position 'gnus-number nil limit))))))))
 
 (defun tessera-gnus-summary--present-visible-windows ()
   "Create missing presentations in visible Summary windows."
   (when (and tessera-gnus-summary--installed-p
              tessera-gnus-summary--line-format-installed-p)
-    (dolist (window
-             (get-buffer-window-list (current-buffer) nil t))
-      (with-selected-window window
-        (tessera-gnus-summary--present-window window)))))
+    (save-excursion
+      (dolist (window
+               (get-buffer-window-list (current-buffer) nil t))
+        (with-selected-window window
+          (tessera-gnus-summary--present-window window))))))
 
 (defun tessera-gnus-summary--refresh-entry-presentations (anchors)
   "Refresh visible presentations for entries at ANCHORS."
@@ -1981,17 +2347,18 @@ Stop at LIMIT when it is non-nil."
   "Create presentations entering WINDOW at display position START."
   (when (and tessera-gnus-summary--installed-p
              tessera-gnus-summary--line-format-installed-p)
-    (let (begin limit)
-      (save-excursion
-        (goto-char start)
-        (forward-line -4)
-        (setq begin (point))
-        (goto-char start)
-        (forward-line (+ (window-body-height window) 4))
-        (setq limit (point)))
-      (tessera-gnus-summary--delete-presentations-outside
-       window begin limit)
-      (with-selected-window window
+    (with-selected-window window
+      (let (begin limit)
+        (save-excursion
+          (goto-char start)
+          (vertical-motion -4 window)
+          (setq begin (point))
+          (goto-char start)
+          (vertical-motion (+ (window-body-height window) 4)
+                           window)
+          (setq limit (point)))
+        (tessera-gnus-summary--delete-presentations-outside
+         window begin limit)
         (tessera-gnus-summary--present-window window limit)))))
 
 (defun tessera-gnus-summary--update-window-presentations ()
@@ -1999,10 +2366,12 @@ Stop at LIMIT when it is non-nil."
   (tessera-gnus-summary--delete-window-overlays)
   (when (and tessera-gnus-summary--installed-p
              tessera-gnus-summary--line-format-installed-p)
-    (dolist (window
-             (get-buffer-window-list (current-buffer) nil t))
-      (with-selected-window window
-        (tessera-gnus-summary--present-window window)))))
+    (force-window-update (current-buffer))
+    (save-excursion
+      (dolist (window
+               (get-buffer-window-list (current-buffer) nil t))
+        (with-selected-window window
+          (tessera-gnus-summary--present-window window))))))
 
 (defun tessera-gnus-summary--run-presentation-update (buffer)
   "Update window-local presentation in BUFFER after a delay."
@@ -2079,10 +2448,16 @@ Stop at LIMIT when it is non-nil."
     (setq-local
      header-line-format
      tessera-gnus-summary--installed-header-line-format)
+    (add-to-invisibility-spec 'tessera-gnus-summary-month)
     (add-hook 'gnus-summary-generate-hook
               #'tessera-gnus-summary--update-line-format nil t)
     (add-hook 'gnus-summary-update-hook
               #'tessera-gnus-summary--update-entry nil t)
+    (add-hook
+     'gnus-summary-update-hook
+     #'tessera-gnus-summary--update-current-month-metric t t)
+    (add-hook 'gnus-summary-prepare-hook
+              #'tessera-gnus-summary--insert-month-headings -10 t)
     (add-hook 'gnus-summary-prepare-hook
               #'tessera-gnus-summary--update-selected-entry nil t)
     (add-hook
@@ -2097,6 +2472,8 @@ Stop at LIMIT when it is non-nil."
               #'tessera-gnus-summary--window-scrolled nil t)
     (add-hook 'text-scale-mode-hook
               #'tessera-gnus-summary--refresh-presentation nil t)
+    (add-hook 'post-command-hook
+              #'tessera-gnus-summary--reveal-current-month nil t)
     (add-hook
      'kill-buffer-hook
      #'tessera-gnus-summary--cancel-presentation-update nil t)
@@ -2113,6 +2490,11 @@ Stop at LIMIT when it is non-nil."
     (remove-hook 'gnus-summary-update-hook
                  #'tessera-gnus-summary--update-entry t)
     (remove-hook
+     'gnus-summary-update-hook
+     #'tessera-gnus-summary--update-current-month-metric t)
+    (remove-hook 'gnus-summary-prepare-hook
+                 #'tessera-gnus-summary--insert-month-headings t)
+    (remove-hook
      'gnus-summary-prepare-hook
      #'tessera-gnus-summary--update-window-presentations t)
     (remove-hook 'gnus-summary-prepare-hook
@@ -2124,10 +2506,14 @@ Stop at LIMIT when it is non-nil."
                  #'tessera-gnus-summary--window-scrolled t)
     (remove-hook 'text-scale-mode-hook
                  #'tessera-gnus-summary--refresh-presentation t)
+    (remove-hook 'post-command-hook
+                 #'tessera-gnus-summary--reveal-current-month t)
     (remove-hook 'kill-buffer-hook
                  #'tessera-gnus-summary--cancel-presentation-update t)
     (tessera-gnus-summary--cancel-presentation-update)
     (tessera-gnus-summary--delete-window-overlays)
+    (tessera-gnus-summary--delete-month-overlays)
+    (remove-from-invisibility-spec 'tessera-gnus-summary-month)
     (when (eq
            header-line-format
            tessera-gnus-summary--installed-header-line-format)
