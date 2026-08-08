@@ -1413,7 +1413,7 @@ The return value is (MONTH DATA-REST THREAD-REST UNREAD TOTAL)."
   (let ((unread (length gnus-newsgroup-unreads))
         (visible (length gnus-newsgroup-data))
         (total (tessera-gnus-summary--total)))
-    (tessera-ui-statistics unread visible total)))
+    (tessera-ui-query-statistics unread visible total)))
 
 (defun tessera-gnus-summary--format-status ()
   "Return the presentation of the current Summary operation status."

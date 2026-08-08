@@ -38,6 +38,8 @@
 
 (declare-function tessera-gnus-summary-disable "tessera-gnus-summary")
 (declare-function tessera-gnus-summary-enable "tessera-gnus-summary")
+(declare-function tessera-gnus-group-disable "tessera-gnus-group")
+(declare-function tessera-gnus-group-enable "tessera-gnus-group")
 (declare-function tessera-gnus-notify-install
                   "tessera-gnus-notify")
 (declare-function tessera-gnus-notify-uninstall
@@ -75,6 +77,9 @@ enables Gnus notifications independently, while nil disables them."
 (defvar tessera-gnus--summary-load-pending-p nil
   "Non-nil when Summary activation is waiting for Gnus to load.")
 
+(defvar tessera-gnus--group-load-pending-p nil
+  "Non-nil when Group activation is waiting for Gnus to load.")
+
 (defvar tessera-gnus--notify-load-pending-p nil
   "Non-nil when notification activation waits for Gnus to load.")
 
@@ -95,6 +100,24 @@ enables Gnus notifications independently, while nil disables them."
   "Disable the Tessera Summary interface when it has been loaded."
   (when (featurep 'tessera-gnus-summary)
     (tessera-gnus-summary-disable)))
+
+(defun tessera-gnus--enable-group ()
+  "Enable Tessera when Gnus Group is available."
+  (if (featurep 'gnus-group)
+      (progn
+        (require 'tessera-gnus-group)
+        (tessera-gnus-group-enable))
+    (unless tessera-gnus--group-load-pending-p
+      (setq tessera-gnus--group-load-pending-p t)
+      (with-eval-after-load 'gnus-group
+        (setq tessera-gnus--group-load-pending-p nil)
+        (when tessera-gnus-mode
+          (tessera-gnus--enable-group))))))
+
+(defun tessera-gnus--disable-group ()
+  "Disable the Tessera Group interface when it has been loaded."
+  (when (featurep 'tessera-gnus-group)
+    (tessera-gnus-group-disable)))
 
 (defun tessera-gnus--enable-notify ()
   "Enable notifications when the Gnus Group feature is available."
@@ -128,8 +151,10 @@ available."
   :lighter nil
   (if tessera-gnus-mode
       (progn
+        (tessera-gnus--enable-group)
         (tessera-gnus--enable-summary)
         (tessera-gnus--enable-notify))
+    (tessera-gnus--disable-group)
     (tessera-gnus--disable-summary)
     (tessera-gnus--disable-notify)))
 

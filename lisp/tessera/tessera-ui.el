@@ -75,9 +75,9 @@
   "Face for a nonzero unread count in header statistics."
   :group 'tessera)
 
-(defface tessera-header-statistics-visible
+(defface tessera-header-statistics-success
   '((t :inherit (success tessera-header-statistics)))
-  "Face for a visible count in header statistics."
+  "Face for a successful count in header statistics."
   :group 'tessera)
 
 (defface tessera-month-heading
@@ -570,28 +570,39 @@ Append an incomplete indicator when INCOMPLETE is non-nil."
      condition)
     (concat
      prefix
-     (tessera-ui--header-space 'headers.separator)
+     (tessera-ui--header-space 'header.separator)
      condition)))
 
-(defun tessera-ui--statistics-unread (count)
-  "Return COUNT as a styled unread statistic."
-  (let ((text (number-to-string count)))
+(defun tessera-ui--statistics-element (scope name)
+  "Return the element NAME in statistics SCOPE."
+  (intern (format "%s.%s" scope name)))
+
+(defun tessera-ui--statistics-unread
+    (count scope &optional incomplete)
+  "Return COUNT as a styled unread statistic in SCOPE.
+
+Append a plus sign when INCOMPLETE is non-nil."
+  (let ((text (format "%d%s" count (if incomplete "+" ""))))
     (add-text-properties
      0 (length text)
-     '(tessera-element header.query.statistics.unread-count)
+     (list 'tessera-element
+           (tessera-ui--statistics-element
+            scope 'unread-count))
      text)
     (when (> count 0)
       (add-face-text-property
        0 (length text) 'tessera-header-statistics-unread nil text))
     text))
 
-(defun tessera-ui--statistics-visible (count)
-  "Return COUNT as a styled visible statistic."
+(defun tessera-ui--statistics-success (count scope name)
+  "Return COUNT as a styled NAME statistic in SCOPE."
   (let ((text (number-to-string count)))
     (add-text-properties
      0 (length text)
-     '(face tessera-header-statistics-visible
-            tessera-element header.query.statistics.visible-count)
+     (list
+      'face 'tessera-header-statistics-success
+      'tessera-element
+      (tessera-ui--statistics-element scope name))
      text)
     text))
 
@@ -599,30 +610,62 @@ Append an incomplete indicator when INCOMPLETE is non-nil."
   "Return statistics TEXT named ELEMENT."
   (propertize text 'tessera-element element))
 
-(defun tessera-ui--statistics-separator (text)
-  "Return statistics separator TEXT."
+(defun tessera-ui--statistics-separator (text scope)
+  "Return statistics separator TEXT in SCOPE."
   (tessera-ui--statistics-text
-   text 'header.query.statistics.separator))
+   text (tessera-ui--statistics-element scope 'separator)))
 
-(defun tessera-ui-statistics (unread visible total)
-  "Return structured statistics for UNREAD, VISIBLE, and TOTAL."
-  (concat
-   (tessera-ui--statistics-unread unread)
-   (tessera-ui--statistics-separator " ")
-   (tessera-ui--statistics-text
-    "unread" 'header.query.statistics.unread-text)
-   (tessera-ui--statistics-separator " · ")
-   (tessera-ui--statistics-visible visible)
-   (tessera-ui--statistics-separator " ")
-   (tessera-ui--statistics-text
-    "visible" 'header.query.statistics.visible-text)
-   (tessera-ui--statistics-separator " · ")
-   (tessera-ui--statistics-text
-    (number-to-string total)
-    'header.query.statistics.total-count)
-   (tessera-ui--statistics-separator " ")
-   (tessera-ui--statistics-text
-    "total" 'header.query.statistics.total-text)))
+(defun tessera-ui--statistics
+    (scope unread middle middle-name middle-text total
+           &optional unread-incomplete total-incomplete)
+  "Return statistics in SCOPE for UNREAD, MIDDLE, and TOTAL.
+
+MIDDLE-NAME names it and MIDDLE-TEXT is its label.  Append a plus
+sign to an incomplete UNREAD or TOTAL count."
+  (let ((text
+         (concat
+          (tessera-ui--statistics-unread
+           unread scope unread-incomplete)
+          (tessera-ui--statistics-separator " " scope)
+          (tessera-ui--statistics-text
+           "unread"
+           (tessera-ui--statistics-element scope 'unread-text))
+          (tessera-ui--statistics-separator " · " scope)
+          (tessera-ui--statistics-success
+           middle scope
+           (intern (format "%s-count" middle-name)))
+          (tessera-ui--statistics-separator " " scope)
+          (tessera-ui--statistics-text
+           middle-text
+           (tessera-ui--statistics-element
+            scope
+            (intern (format "%s-text" middle-name))))
+          (tessera-ui--statistics-separator " · " scope)
+          (tessera-ui--statistics-text
+           (format "%d%s" total (if total-incomplete "+" ""))
+           (tessera-ui--statistics-element scope 'total-count))
+          (tessera-ui--statistics-separator " " scope)
+          (tessera-ui--statistics-text
+           "total"
+           (tessera-ui--statistics-element scope 'total-text)))))
+    (add-text-properties
+     0 (length text) (list 'tessera-parent-element scope) text)
+    text))
+
+(defun tessera-ui-query-statistics (unread visible total)
+  "Return query statistics for UNREAD, VISIBLE, and TOTAL."
+  (tessera-ui--statistics
+   'header.query.statistics unread visible 'visible
+   "visible" total))
+
+(defun tessera-ui-all-statistics
+    (unread groups total &optional unread-incomplete total-incomplete)
+  "Return all-group statistics for UNREAD, GROUPS, and TOTAL.
+
+Append a plus sign to an incomplete UNREAD or TOTAL count."
+  (tessera-ui--statistics
+   'header.all.statistics unread groups 'groups
+   "groups" total unread-incomplete total-incomplete))
 
 (defun tessera-ui--flex-gap (right inset element)
   "Return a pixel-aligned gap before RIGHT named ELEMENT.
@@ -649,8 +692,8 @@ entry safety gap at the window edge."
 (defun tessera-ui-header-line (status query statistics)
   "Return a header line containing STATUS, QUERY, and STATISTICS.
 
-Inset the content from the window edges, truncate QUERY to the
-available pixel width, and right-align STATISTICS."
+Inset the content from the window edges, right-align STATISTICS, and
+truncate QUERY to the available pixel width.  QUERY may be nil."
   (let* ((window (selected-window))
          (top-padding
           (tessera-ui--header-vertical-padding
@@ -659,8 +702,8 @@ available pixel width, and right-align STATISTICS."
           (tessera-ui--header-space 'header.left-padding))
          (status (copy-sequence status))
          (separator
-          (tessera-ui--header-space 'headers.separator))
-         (query (copy-sequence query))
+          (tessera-ui--header-space 'header.separator))
+         (query (and query (copy-sequence query)))
          (statistics (copy-sequence statistics))
          (right-padding
           (tessera-ui--header-space 'header.right-padding))
@@ -672,15 +715,12 @@ available pixel width, and right-align STATISTICS."
     (add-text-properties
      0 (length status)
      '(tessera-element header.status) status)
-    (add-face-text-property
-     0 (length query) 'tessera-header-query t query)
+    (when query
+      (add-face-text-property
+       0 (length query) 'tessera-header-query t query))
     (add-face-text-property
      0 (length statistics)
      'tessera-header-statistics t statistics)
-    (add-text-properties
-     0 (length statistics)
-     '(tessera-parent-element header.query.statistics)
-     statistics)
     (let* ((fixed-width
             (string-pixel-width
              (concat
@@ -688,14 +728,18 @@ available pixel width, and right-align STATISTICS."
               statistics right-padding)))
            (query-width
             (max 0 (- (window-body-width window t) fixed-width)))
-           (full-query (substring-no-properties query))
-           (query (tessera-ui-truncate-pixels query query-width)))
-      (add-text-properties
-       0 (length query)
-       (list
-        'tessera-parent-element 'header.query
-        'help-echo full-query)
-       query)
+           (full-query
+            (and query (substring-no-properties query)))
+           (query
+            (and query
+                 (tessera-ui-truncate-pixels query query-width))))
+      (when query
+        (add-text-properties
+         0 (length query)
+         (list
+          'tessera-parent-element 'header.query
+          'help-echo full-query)
+         query))
       (let* ((parts
               (list
                top-padding
