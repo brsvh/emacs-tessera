@@ -1,0 +1,71 @@
+;;; init.el --- Local configuration for emacs-tessera  -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; This file is copied to local/init.el on the first launch.  Edit
+;; that copy; subsequent launches leave it unchanged.
+
+;;; Code:
+
+(require 'better-defaults)
+(require 'modus-themes)
+(require 'mood-line)
+(require 'server)
+
+(add-to-list
+ 'load-path
+ (expand-file-name "../test/fixtures/" user-emacs-directory))
+(require 'tessera-gnus-fixture)
+
+(setq modus-themes-to-toggle '(modus-operandi modus-vivendi))
+(load-theme 'modus-operandi t)
+(mood-line-mode 1)
+
+(setq server-socket-dir (locate-user-emacs-file "server/"))
+(unless (server-running-p) (server-start))
+
+(let ((feeds-directory
+       (expand-file-name "feeds/" user-emacs-directory))
+      (gnus-state-directory
+       (expand-file-name
+        "state/" tessera-gnus-fixture-directory)))
+  (make-directory feeds-directory t)
+  (make-directory gnus-state-directory t)
+  (setq elfeed-db-directory feeds-directory
+        elfeed-enclosure-default-dir
+        (expand-file-name "enclosures/" feeds-directory)
+        elfeed-feeds
+        '("https://planet.emacslife.com/atom.xml"
+          "https://sachachua.com/blog/category/emacs-news/feed")
+        gnus-agent-directory
+        (expand-file-name "agent/" gnus-state-directory)
+        gnus-check-new-newsgroups nil
+        gnus-directory gnus-state-directory
+        gnus-dribble-directory gnus-state-directory
+        gnus-home-directory gnus-state-directory
+        gnus-init-file nil
+        gnus-options-subscribe
+        (concat
+         "\\`" (regexp-quote tessera-gnus-fixture-group) "\\'")
+        gnus-select-method '(nnnil "")
+        gnus-show-threads t
+        gnus-site-init-file nil
+        gnus-startup-file
+        (expand-file-name ".newsrc" gnus-state-directory)
+        message-directory
+        (expand-file-name "mail/" gnus-state-directory)))
+
+;; Set `mu4e-maildir' to your own Maildir and add your mu4e accounts.
+
+;; Add any other Gnus servers or account settings you need.
+
+;; Add any other feeds you follow to `elfeed-feeds'.
+
+(setq-default tessera-gnus-summary-symbol-style 'nerd-icons)
+
+(tessera-gnus-mode +1)
+
+;;; init.el ends here
+;; Local Variables:
+;; flymake-diagnostic-functions: nil
+;; End:

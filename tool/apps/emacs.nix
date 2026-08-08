@@ -25,7 +25,7 @@ let
     ]
   );
 
-  initTemplate = projectRoot + /etc/init.el.in;
+  initTemplate = projectRoot + /test/init.el.in;
 in
 writeShellApplication {
   name = "emacs";
@@ -46,9 +46,9 @@ writeShellApplication {
       exit 1
     fi
 
-    if [ ! -f "$runtimeProjectRoot/etc/init.el.in" ]; then
+    if [ ! -f "$runtimeProjectRoot/test/init.el.in" ]; then
       printf '%s\n' \
-        'emacs-tessera: etc/init.el.in is missing from the project checkout' \
+        'emacs-tessera: test/init.el.in is missing from the project checkout' \
         >&2
       exit 1
     fi
