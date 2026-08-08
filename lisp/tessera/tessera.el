@@ -34,5 +34,7 @@
   :group 'applications
   :prefix "tessera-")
 
+(require 'tessera-notify)
+
 (provide 'tessera)
 ;;; tessera.el ends here

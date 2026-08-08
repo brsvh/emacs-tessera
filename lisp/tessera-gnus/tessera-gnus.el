@@ -38,11 +38,45 @@
 
 (declare-function tessera-gnus-summary-disable "tessera-gnus-summary")
 (declare-function tessera-gnus-summary-enable "tessera-gnus-summary")
+(declare-function tessera-gnus-notify-install
+                  "tessera-gnus-notify")
+(declare-function tessera-gnus-notify-uninstall
+                  "tessera-gnus-notify")
 
 (defvar tessera-gnus-mode)
 
+(defun tessera-gnus--set-notify-enable (symbol value)
+  "Set notification option SYMBOL to VALUE."
+  (set-default symbol value)
+  (when (bound-and-true-p tessera-gnus-mode)
+    (if value
+        (when (fboundp 'tessera-gnus--enable-notify)
+          (tessera-gnus--enable-notify))
+      (when (fboundp 'tessera-gnus--disable-notify)
+        (tessera-gnus--disable-notify)))))
+
+(defcustom tessera-gnus-notify-enable 'inherit
+  "Control notifications from `tessera-gnus-mode'.
+
+The value `inherit' follows `tessera-notify-enable'.  A value of t
+enables Gnus notifications independently, while nil disables them."
+  :type '(choice
+          (const :tag "Follow global setting" inherit)
+          (const :tag "Enabled" t)
+          (const :tag "Disabled" nil))
+  :set #'tessera-gnus--set-notify-enable
+  :group 'tessera-gnus)
+
+(defcustom tessera-gnus-notify-limit 4
+  "Maximum new articles sent as individual notifications."
+  :type 'natnum
+  :group 'tessera-gnus)
+
 (defvar tessera-gnus--summary-load-pending-p nil
   "Non-nil when Summary activation is waiting for Gnus to load.")
+
+(defvar tessera-gnus--notify-load-pending-p nil
+  "Non-nil when notification activation waits for Gnus to load.")
 
 (defun tessera-gnus--enable-summary ()
   "Enable Tessera when Gnus Summary is available."
@@ -62,6 +96,26 @@
   (when (featurep 'tessera-gnus-summary)
     (tessera-gnus-summary-disable)))
 
+(defun tessera-gnus--enable-notify ()
+  "Enable notifications when the Gnus Group feature is available."
+  (when tessera-gnus-notify-enable
+    (if (featurep 'gnus-group)
+        (progn
+          (require 'tessera-gnus-notify)
+          (tessera-gnus-notify-install))
+      (unless tessera-gnus--notify-load-pending-p
+        (setq tessera-gnus--notify-load-pending-p t)
+        (with-eval-after-load 'gnus-group
+          (setq tessera-gnus--notify-load-pending-p nil)
+          (when (and tessera-gnus-mode
+                     tessera-gnus-notify-enable)
+            (tessera-gnus--enable-notify)))))))
+
+(defun tessera-gnus--disable-notify ()
+  "Disable Tessera Gnus notifications when they have loaded."
+  (when (featurep 'tessera-gnus-notify)
+    (tessera-gnus-notify-uninstall)))
+
 ;;;###autoload
 (define-minor-mode tessera-gnus-mode
   "Toggle Tessera interfaces for Gnus.
@@ -73,8 +127,11 @@ available."
   :group 'tessera-gnus
   :lighter nil
   (if tessera-gnus-mode
-      (tessera-gnus--enable-summary)
-    (tessera-gnus--disable-summary)))
+      (progn
+        (tessera-gnus--enable-summary)
+        (tessera-gnus--enable-notify))
+    (tessera-gnus--disable-summary)
+    (tessera-gnus--disable-notify)))
 
 (provide 'tessera-gnus)
 ;;; tessera-gnus.el ends here

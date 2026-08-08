@@ -94,6 +94,20 @@ Set ~tessera-gnus-summary-use-uniform-glyph-color~ to non-nil to make marks foll
 the subject color and features follow the author color.  Otherwise, glyphs use
 colors associated with their semantic roles.
 
+**** Notifications
+
+Set ~tessera-gnus-notify-enable~ to ~t~ to enable Gnus notifications independently,
+or to nil to disable them.  Its default value, ~inherit~, follows the global
+setting.
+
+Updates containing at most ~tessera-gnus-notify-limit~ new unread articles send
+one notification per article; the default limit is four.  Larger updates send
+one summary without actions.  Individual notifications provide ~Read~ and ~Mark as
+Read~ actions backed by native Gnus operations.
+
+Individual notifications use the shared sender avatar support and fall back to
+the Gnus icon.
+
 ** Tessera Mu4e
 
 /This work still in progress/.
@@ -133,6 +147,16 @@ future backends.
 The core package does not impose a glyph style.  Configure symbols and icons
 through the backend option; for Gnus, use ~tessera-gnus-summary-symbol-style~ and
 the override alists described above.
+
+**** Notifications
+
+Notifications are globally disabled by default.  Backend notification options
+follow ~tessera-notify-enable~ unless explicitly overridden, and the global value
+may be changed at any time.
+
+Tessera maintains a shared cache of sender Gravatar images.  Set
+~tessera-notify-use-gravatar~ to ~nil~ to disable sender avatars, or set
+~tessera-notify-use-icons~ to ~nil~ to disable notification icons.
 
 ** Build
 

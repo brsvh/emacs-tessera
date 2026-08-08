@@ -1173,7 +1173,11 @@ the adjacent author face."
 (defun tessera-gnus-summary--thread-month (thread)
   "Return the latest member month of Gnus THREAD."
   (tessera-gnus-summary--month-at-time
-   (seconds-to-time (gnus-thread-latest-date thread))))
+   (seconds-to-time
+    (gnus-thread-latest-date
+     (if (stringp (car-safe thread))
+         (cdr thread)
+       thread)))))
 
 (defun tessera-gnus-summary--thread-sort-by-month
     (thread-1 thread-2)
