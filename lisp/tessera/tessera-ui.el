@@ -167,6 +167,9 @@
 (defconst tessera-ui--month-heading-horizontal-padding 2
   "Month heading padding at each horizontal edge, in spaces.")
 
+(defconst tessera-ui--month-heading-safety-gap 1
+  "Gap between a month heading and the window edge, in pixels.")
+
 (defun tessera-ui--header-space (element)
   "Return one header space named ELEMENT."
   (propertize
@@ -296,7 +299,7 @@ Use WINDOW to resolve font metrics."
            (tessera-ui--month-metric-text
             "unread" 'month.metric.unread-text)
            (tessera-ui--month-metric-text
-            " · " 'month.metric.separator)
+            " · " 'month.metric.special-separator)
            total-count
            (tessera-ui--month-metric-text
             " " 'month.metric.separator)
@@ -312,12 +315,20 @@ Use WINDOW to resolve font metrics."
      0 (length metric)
      '(tessera-parent-element month.metric)
      metric)
-    (concat
-     (propertize
-      " · "
-      'face 'tessera-month-metric
-      'tessera-element 'month.heading.metric-gap)
-     metric)))
+    metric))
+
+(defun tessera-ui-month-flex-gap (metric)
+  "Return a pixel-aligned gap before month METRIC."
+  (let ((right
+         (concat
+          metric
+          (propertize
+           (make-string
+            tessera-ui--month-heading-horizontal-padding ?\s)
+           'face 'tessera-month-heading))))
+    (tessera-ui--flex-gap
+     right tessera-ui--month-heading-safety-gap
+     'month.heading.flex-gap)))
 
 (defun tessera-ui-month-heading (year name &optional metric)
   "Return a month heading made from YEAR, NAME, and optional METRIC."
@@ -354,8 +365,10 @@ Use WINDOW to resolve font metrics."
           (tessera-ui--month-heading-vertical-padding
            'month.heading.bottom-padding window))
          (heading
-          (concat top-padding left-padding year separator name metric
-                  right-padding bottom-padding)))
+          (concat top-padding left-padding year separator name
+                  (and metric
+                       (tessera-ui-month-flex-gap metric))
+                  metric right-padding bottom-padding)))
     (add-face-text-property
      0 (length heading) 'tessera-month-heading t heading)
     (let ((position 0))
@@ -371,6 +384,15 @@ Use WINDOW to resolve font metrics."
              'month.heading heading))
           (setq position next))))
     heading))
+
+(defun tessera-ui-fit-month-title (window title left right)
+  "Fit month TITLE between LEFT and RIGHT in WINDOW."
+  (tessera-ui-truncate-pixels
+   title
+   (max 0
+        (- (window-body-width window t)
+           (string-pixel-width (concat left right))
+           tessera-ui--month-heading-safety-gap))))
 
 (defun tessera-ui-truncate-pixels (text width)
   "Truncate TEXT with an ellipsis to at most WIDTH pixels."
@@ -469,11 +491,10 @@ Use WINDOW to resolve font metrics."
    (tessera-ui--statistics-text
     "total" 'header.statistics.total-text)))
 
-(defun tessera-ui-entry-flex-gap (right)
-  "Return a pixel-aligned gap before RIGHT.
+(defun tessera-ui--flex-gap (right inset element)
+  "Return a pixel-aligned gap before RIGHT named ELEMENT.
 
-RIGHT is the complete text that follows the gap.  Reserve the trailing
-entry safety gap at the window edge."
+INSET is the additional distance reserved at the window edge."
   (propertize
    " "
    'display
@@ -481,8 +502,16 @@ entry safety gap at the window edge."
      :align-to
      (- right
         (+ (,(string-pixel-width right))
-           (,tessera-ui--entry-safety-gap))))
-   'tessera-element 'entry.flex-gap))
+           (,inset))))
+   'tessera-element element))
+
+(defun tessera-ui-entry-flex-gap (right)
+  "Return a pixel-aligned gap before RIGHT.
+
+RIGHT is the complete text that follows the gap.  Reserve the trailing
+entry safety gap at the window edge."
+  (tessera-ui--flex-gap
+   right tessera-ui--entry-safety-gap 'entry.flex-gap))
 
 (defun tessera-ui-header-line (status query statistics)
   "Return a header line containing STATUS, QUERY, and STATISTICS.
