@@ -195,10 +195,10 @@
 (defconst tessera-ui--month-heading-safety-gap 1
   "Gap between a month heading and the window edge, in pixels.")
 
-(defconst tessera-ui--thread-heading-top-padding 8
+(defconst tessera-ui--thread-heading-top-padding 12
   "Thread heading padding above the content row, in pixels.")
 
-(defconst tessera-ui--thread-heading-bottom-padding 8
+(defconst tessera-ui--thread-heading-bottom-padding 4
   "Thread heading padding below the content row, in pixels.")
 
 (defun tessera-ui--header-space (element)
