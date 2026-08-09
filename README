@@ -116,10 +116,23 @@ Use ~tessera-gnus-summary-mark-symbol-alist~ and
 Use ~tessera-gnus-group-mark-symbol-alist~ to override the Group process and
 subscription marks.
 
-Set ~tessera-gnus-use-uniform-glyph-color~ to non-nil to make marks follow their
-adjacent text color in Summary buffers.  Summary features follow the author
-color, while Group marks use one neutral mark face.  Otherwise, glyphs use
-colors associated with their semantic roles.
+Marks are the leading glyphs for native Gnus article state, such as unread,
+ticked, dormant, workflow, and score marks.  Features are the glyphs following
+the author for content properties such as encryption, signatures, attachments,
+calendar data, audience, and overflow.  Tessera presents these facts without
+storing another copy of them.
+
+Set ~tessera-gnus-glyph-color-style~ to nil to make their foregrounds follow the
+surrounding entry.  In a flat Summary, marks follow the subject while features
+follow the author.  In a threaded Summary, both marks and features follow the
+author of their article.  Only the foreground follows; text weight and slant do
+not.  Group marks use one neutral mark face because they have no subject or
+author.
+
+Set the option to t to retain colors associated with each semantic role, or set
+it to a color string to apply one foreground to every Gnus mark and feature.
+
+#+HTML: <p align="center"><img width="32%" src="https://github.com/user-attachments/assets/4baf66ac-b5d8-4e0e-91c9-d8148ddd37cb" alt="Semantic Gnus glyph colors"><img width="32%" src="https://github.com/user-attachments/assets/2effd23a-1e92-44c6-8882-5100ded3c9a3" alt="Contextual Gnus glyph colors"><img width="32%" src="https://github.com/user-attachments/assets/f0ba3e6c-76ca-46b3-9573-be1916f75a59" alt="Fixed Gnus glyph color"><br><sub>Semantic colors (<code>t</code>, left), contextual colors (<code>nil</code>, center), and a fixed <code>#4169E1</code> foreground (right).</sub></p>
 
 **** Notifications
 

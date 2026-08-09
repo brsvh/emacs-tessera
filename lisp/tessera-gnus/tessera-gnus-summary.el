@@ -781,29 +781,52 @@ Use PLACEHOLDER and PLACEHOLDER-ELEMENT when VALUE is empty."
                 0 (length glyph) 'face nil glyph)))
     (get-text-property position 'face glyph)))
 
-(defun tessera-gnus-summary--glyph-color-face
-    (key faces &optional uniform-face)
-  "Return the color face for KEY from FACES.
+(defun tessera-gnus-summary--glyph-color
+    (key faces &optional context-color)
+  "Return the face or color for KEY from FACES.
 
-Use UNIFORM-FACE when uniform glyph colors are enabled."
-  (if tessera-gnus-use-uniform-glyph-color
-      (or uniform-face 'tessera-gnus-summary-glyph)
+Use CONTEXT-COLOR when glyphs follow adjacent text."
+  (cond
+   ((stringp tessera-gnus-glyph-color-style)
+    tessera-gnus-glyph-color-style)
+   ((null tessera-gnus-glyph-color-style)
+    (or context-color
+        (face-foreground 'tessera-gnus-summary-glyph nil t)
+        (face-foreground 'default nil t)))
+   (t
     (or (alist-get key faces)
-        'tessera-gnus-summary-glyph)))
+        'tessera-gnus-summary-glyph))))
 
-(defun tessera-gnus-summary--face-foreground (face)
-  "Return the inherited foreground of FACE or the default face."
-  (or (face-foreground face nil t)
-      (face-foreground 'default nil t)))
+(defun tessera-gnus-summary--glyph-color-spec (color)
+  "Return the display face for COLOR."
+  (if (stringp color)
+      (list :foreground color :weight 'normal :slant 'normal)
+    (list :inherit color :weight 'normal :slant 'normal)))
 
-(defun tessera-gnus-summary--glyph-color-spec (face)
-  "Return the display color specification for FACE."
-  (if tessera-gnus-use-uniform-glyph-color
-      (if-let* ((foreground
-                 (tessera-gnus-summary--face-foreground face)))
-          (list :foreground foreground)
-        'default)
-    face))
+(defun tessera-gnus-summary--glyph-foreground (color)
+  "Return the foreground selected by COLOR."
+  (if (stringp color)
+      color
+    (or (face-foreground color nil t)
+        (face-foreground 'default nil t))))
+
+(defun tessera-gnus-summary--glyph-face-color
+    (face foreground)
+  "Return a copy of FACE using FOREGROUND."
+  (let ((face
+         (if (and (consp face) (keywordp (car face)))
+             (copy-sequence face)
+           (list :inherit (or face 'default)))))
+    (setq face (plist-put face :foreground foreground))
+    (setq face (plist-put face :weight 'normal))
+    (plist-put face :slant 'normal)))
+
+(defun tessera-gnus-summary--foreground-at (position)
+  "Return the displayed foreground at POSITION."
+  (save-excursion
+    (goto-char position)
+    (or (foreground-color-at-point)
+        (face-foreground 'default nil t))))
 
 (defun tessera-gnus-summary--article-unread-p (article)
   "Return non-nil when native Gnus ARTICLE is unread."
@@ -904,18 +927,18 @@ Use UNIFORM-FACE when uniform glyph colors are enabled."
     (cons (nreverse selected) hidden)))
 
 (defun tessera-gnus-summary--feature-token
-    (feature hidden &optional uniform-face)
+    (feature hidden &optional context-color)
   "Return the display token for FEATURE.
 
-HIDDEN is the list represented by an overflow token.  UNIFORM-FACE is
-the adjacent author face."
+HIDDEN is the list represented by an overflow token.  CONTEXT-COLOR is
+the adjacent author foreground."
   (let* ((category
           (if (eq feature 'overflow)
               'overflow
             (tessera-gnus-summary--feature-category feature)))
-         (color-face
-          (tessera-gnus-summary--glyph-color-face
-           feature tessera-gnus-summary--feature-faces uniform-face))
+         (color
+          (tessera-gnus-summary--glyph-color
+           feature tessera-gnus-summary--feature-faces context-color))
          (symbol (tessera-gnus-summary--feature-symbol feature))
          (help
           (if (eq feature 'overflow)
@@ -929,14 +952,13 @@ the adjacent author face."
            (display-face
             (if glyph-face
                 (let ((foreground
-                       (tessera-gnus-summary--face-foreground
-                        color-face)))
+                       (tessera-gnus-summary--glyph-foreground
+                        color)))
                   (if foreground
-                      (plist-put
-                       (copy-sequence glyph-face)
-                       :foreground foreground)
+                      (tessera-gnus-summary--glyph-face-color
+                       glyph-face foreground)
                     glyph-face))
-              (tessera-gnus-summary--glyph-color-spec color-face))))
+              (tessera-gnus-summary--glyph-color-spec color))))
       (remove-text-properties
        0 (length text) '(font-lock-face nil) text)
       (put-text-property
@@ -950,21 +972,46 @@ the adjacent author face."
         'help-echo help
         'tessera-feature feature
         'tessera-hidden-features hidden
-        'tessera-uniform-glyph-face uniform-face
+        'tessera-glyph-context-color context-color
         'tessera-element
         (intern (format "entry.feature.%s" category)))
        text)
       text)))
 
+(defun tessera-gnus-summary--set-feature-context-color
+    (start end author-position)
+  "Make features from START to END follow AUTHOR-POSITION."
+  (when (null tessera-gnus-glyph-color-style)
+    (let ((foreground
+           (tessera-gnus-summary--foreground-at author-position))
+          (position start))
+      (while-let
+          ((feature-position
+            (text-property-not-all
+             position end 'tessera-feature nil)))
+        (let* ((next
+                (next-single-property-change
+                 feature-position 'tessera-feature nil end))
+               (faces
+                (get-text-property feature-position 'face))
+               (glyph-face (car faces))
+               (article-face (cadr faces)))
+          (put-text-property
+           feature-position next 'face
+           (list
+            (tessera-gnus-summary--glyph-face-color
+             glyph-face foreground)
+            article-face))
+          (put-text-property
+           feature-position next
+           'tessera-glyph-context-color foreground)
+          (setq position next))))))
+
 (defun tessera-gnus-summary--features (header)
   "Return the feature sequence known from Gnus HEADER."
   (pcase-let* ((`(,selected . ,hidden)
                 (tessera-gnus-summary--select-features
-                 (tessera-gnus-summary--feature-facts header)))
-               (uniform-face
-                (and tessera-gnus-use-uniform-glyph-color
-                     (tessera-gnus-summary--author-color-face
-                      (mail-header-number header)))))
+                 (tessera-gnus-summary--feature-facts header))))
     (if (not selected)
         ""
       (let* ((gap (tessera-ui-entry-space 'entry.separator))
@@ -975,7 +1022,7 @@ the adjacent author face."
               (mapcar
                (lambda (feature)
                  (tessera-gnus-summary--feature-token
-                  feature hidden uniform-face))
+                  feature hidden))
                selected))
              (text
               (concat gap
@@ -1685,7 +1732,9 @@ to the caller."
                      'tessera-entry-author-unread
                    'tessera-entry-author))))
           (put-text-property
-           (car author) (cdr author) 'face author-face)))
+           (car author) (cdr author) 'face author-face)
+          (tessera-gnus-summary--set-feature-context-color
+           start end (car author))))
       (when-let* ((timestamp
                    (tessera-gnus-summary--element-bounds
                     start end
@@ -2433,6 +2482,31 @@ Return the string displayed in WINDOW."
                      variable (symbol-value variable)))))))
     width))
 
+(defun tessera-gnus-summary--entry-element-foreground
+    (article elements)
+  "Return the foreground of one of ELEMENTS in native ARTICLE."
+  (when-let* ((data (gnus-data-find article))
+              (anchor (gnus-data-pos data))
+              (bounds (tessera-gnus-summary--entry-bounds anchor))
+              (element
+               (tessera-gnus-summary--element-bounds
+                (car bounds) (cdr bounds) elements)))
+    (tessera-gnus-summary--foreground-at (car element))))
+
+(defun tessera-gnus-summary--mark-context-color (article)
+  "Return the adjacent text foreground for marks in ARTICLE."
+  (if gnus-show-threads
+      (or
+       (tessera-gnus-summary--entry-element-foreground
+        article '(entry.author entry.author.placeholder))
+       (face-foreground
+        (tessera-gnus-summary--author-color-face article) nil t))
+    (or
+     (tessera-gnus-summary--entry-element-foreground
+      article '(entry.subject entry.subject.placeholder))
+     (face-foreground
+      (tessera-gnus-summary--subject-color-face article) nil t))))
+
 (defun tessera-gnus-summary--mark-rail-width ()
   "Return the fixed pixel width of the native mark rail."
   (or tessera-gnus-summary--mark-rail-width-cache
@@ -2457,26 +2531,26 @@ Return the string displayed in WINDOW."
          (variable
           (or (get-text-property position 'tessera-native-mark)
               (tessera-gnus-summary--mark-variable slot character)))
-         (uniform-face
-          (and tessera-gnus-use-uniform-glyph-color
-               (tessera-gnus-summary--subject-color-face
-                (get-text-property position 'gnus-number))))
-         (color-face
-          (tessera-gnus-summary--glyph-color-face
+         (context-color
+          (and
+           (null tessera-gnus-glyph-color-style)
+           (tessera-gnus-summary--mark-context-color
+            (get-text-property position 'gnus-number))))
+         (color
+          (tessera-gnus-summary--glyph-color
            variable tessera-gnus-summary--mark-faces
-           uniform-face))
+           context-color))
          (symbol
           (tessera-gnus-summary--mark-symbol variable character))
          (text (copy-sequence symbol))
-         (glyph-face (tessera-gnus-summary--glyph-face text))
-         (native-face (get-text-property position 'face)))
+         (glyph-face (tessera-gnus-summary--glyph-face text)))
     (add-text-properties
      0 (length text) (text-properties-at position) text)
-    (unless native-face
-      (remove-text-properties 0 (length text) '(face nil) text))
+    (remove-text-properties
+     0 (length text) '(face nil font-lock-face nil) text)
     (add-face-text-property
      0 (length text)
-     (tessera-gnus-summary--glyph-color-spec color-face)
+     (tessera-gnus-summary--glyph-color-spec color)
      nil text)
     (when glyph-face
       (add-face-text-property
@@ -2589,10 +2663,11 @@ Prepend LEADING to the displayed rail when it is non-nil."
              (separator
               (tessera-gnus-summary--glyph-gap
                'entry.features.inline-gap))
-             (uniform-face
+             (context-color
               (and token-bounds
                    (get-text-property
-                    (caar token-bounds) 'tessera-uniform-glyph-face)))
+                    (caar token-bounds)
+                    'tessera-glyph-context-color)))
              (show-overflow-p
               (memq
                'overflow
@@ -2622,7 +2697,7 @@ Prepend LEADING to the displayed rail when it is non-nil."
                   (and show-overflow-p
                        hidden-if-shown
                        (tessera-gnus-summary--feature-token
-                        'overflow hidden-if-shown uniform-face)))
+                        'overflow hidden-if-shown context-color)))
                  (candidate
                   (concat gap
                           (mapconcat
@@ -2643,7 +2718,7 @@ Prepend LEADING to the displayed rail when it is non-nil."
                 (and show-overflow-p
                      hidden
                      (tessera-gnus-summary--feature-token
-                      'overflow hidden uniform-face)))
+                      'overflow hidden context-color)))
                (display
                 (concat (and (or shown overflow) gap)
                         (mapconcat #'cdr shown separator)

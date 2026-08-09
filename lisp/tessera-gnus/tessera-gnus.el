@@ -131,16 +131,21 @@ Individual Gnus buffers may override the global default."
 
 (make-variable-buffer-local 'tessera-gnus-symbol-style)
 
-(defcustom tessera-gnus-use-uniform-glyph-color nil
-  "Whether Gnus glyphs follow the color of adjacent text.
+(defcustom tessera-gnus-glyph-color-style nil
+  "Control the color style of Gnus marks and features.
 
-When nil, each glyph uses a face chosen for its semantic role."
-  :type 'boolean
+When t, preserve the color chosen for each semantic role.  When nil,
+glyphs follow adjacent text.  A color string applies that foreground
+to every Gnus mark and feature glyph."
+  :type '(choice
+          (const :tag "Semantic colors" t)
+          (const :tag "Follow adjacent text" nil)
+          (color :tag "One color"))
   :set #'tessera-gnus--set-glyph-option
   :group 'tessera-gnus)
 
 (make-variable-buffer-local
- 'tessera-gnus-use-uniform-glyph-color)
+ 'tessera-gnus-glyph-color-style)
 
 (defun tessera-gnus--nerd-icon (spec fallback)
   "Return the Nerd Icon described by SPEC, or FALLBACK."

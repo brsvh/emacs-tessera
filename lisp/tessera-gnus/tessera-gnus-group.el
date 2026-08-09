@@ -381,10 +381,15 @@ specification of the form \(FAMILY . ICON-NAME)."
   "Return a marked Group token for FACT represented by NATIVE."
   (let* ((text (tessera-gnus-group--mark-glyph fact native))
          (face
-          (if tessera-gnus-use-uniform-glyph-color
-              'tessera-gnus-group-mark
+          (cond
+           ((stringp tessera-gnus-glyph-color-style)
+            (list :foreground
+                  tessera-gnus-glyph-color-style))
+           ((null tessera-gnus-glyph-color-style)
+            'tessera-gnus-group-mark)
+           (t
             (or (alist-get fact tessera-gnus-group--mark-faces)
-                'tessera-gnus-group-mark))))
+                'tessera-gnus-group-mark)))))
     (remove-text-properties
      0 (length text) '(font-lock-face nil) text)
     (add-face-text-property 0 (length text) face nil text)
