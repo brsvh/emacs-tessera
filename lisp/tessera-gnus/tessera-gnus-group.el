@@ -103,7 +103,7 @@
   :group 'tessera-gnus)
 
 (defface tessera-gnus-group-heading
-  '((t :height 1.4 :weight bold))
+  '((t :inherit default :weight bold))
   "Face for the main heading in a Gnus Group buffer."
   :group 'tessera-gnus)
 
@@ -191,12 +191,15 @@ specification of the form \(FAMILY . ICON-NAME)."
   :group 'tessera-gnus)
 
 (defconst tessera-gnus-group--line-format
-  (concat " %p%P"
+  (concat " %p"
           "%u&tessera-gnus-group-node-prefix;"
           "%u&tessera-gnus-group-mark;"
           "%(%u&tessera-gnus-group-name;%)"
           "%u&tessera-gnus-group-node-suffix;\n")
   "Gnus Group line format installed by Tessera.")
+
+(defconst tessera-gnus-group--disclosure-glyph "▸"
+  "Disclosure glyph used by Group and Topic headings.")
 
 (defconst tessera-gnus-group--node-top-padding 4
   "Group node padding above its content, in pixels.")
@@ -204,16 +207,22 @@ specification of the form \(FAMILY . ICON-NAME)."
 (defconst tessera-gnus-group--node-bottom-padding 4
   "Group node padding below its content, in pixels.")
 
-(defconst tessera-gnus-group--main-top-padding 8
+(defconst tessera-gnus-group--heading-top-padding 6
+  "Group heading padding above its content, in pixels.")
+
+(defconst tessera-gnus-group--heading-bottom-padding 6
+  "Group heading padding below its content, in pixels.")
+
+(defconst tessera-gnus-group--main-top-padding 2
   "Group interface padding above its main content, in pixels.")
 
-(defconst tessera-gnus-group--main-bottom-padding 8
+(defconst tessera-gnus-group--main-bottom-padding 2
   "Group interface padding below its main content, in pixels.")
 
-(defconst tessera-gnus-group--nodes-top-padding 8
+(defconst tessera-gnus-group--nodes-top-padding 2
   "Group node-list padding above its content, in pixels.")
 
-(defconst tessera-gnus-group--nodes-bottom-padding 8
+(defconst tessera-gnus-group--nodes-bottom-padding 2
   "Group node-list padding below its content, in pixels.")
 
 (defconst tessera-gnus-group--latest-time-timeout 1
@@ -941,14 +950,6 @@ Delete all presentation overlays when WINDOW is nil."
            gnus-group-listing-limit)))
     (apply function args)))
 
-(defun tessera-gnus-group--topic-mode-changed ()
-  "Restore or install the flat Group presentation after Topic mode."
-  (if (bound-and-true-p gnus-topic-mode)
-      (tessera-gnus-group--restore)
-    (when tessera-gnus-group--enabled-p
-      (tessera-gnus-group--install)
-      (tessera-gnus-group-refresh))))
-
 (defun tessera-gnus-group--invalidate-statistics ()
   "Invalidate the cached all-group statistics."
   (setq tessera-gnus-group--statistics-cache nil))
@@ -1110,31 +1111,51 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
 
 (defun tessera-gnus-group--heading ()
   "Return the main heading for a Gnus Group buffer."
-  (let ((heading
-         (concat
-          (tessera-gnus-group--element
-           (tessera-ui-entry-top-padding)
-           'heading.top-padding)
-          (tessera-gnus-group--element
-           (tessera-ui-entry-padding 'entry.left-padding)
-           'heading.left-padding)
-          (tessera-gnus-group--element
-           "Gnus" 'heading.text 'tessera-gnus-group-heading)
-          (tessera-gnus-group--element
-           (tessera-ui-entry-padding 'entry.right-padding)
-           'heading.right-padding)
-          (tessera-gnus-group--element
-           (tessera-ui-entry-bottom-padding)
-           'heading.bottom-padding))))
+  (let* ((leading-width
+          (+ (string-pixel-width
+              tessera-gnus-group--disclosure-glyph)
+             (string-pixel-width " ")))
+         (heading
+          (concat
+           (tessera-gnus-group--element
+            (tessera-ui-vertical-padding
+             'default 'heading.top-padding
+             tessera-gnus-group--heading-top-padding 0)
+            'heading.top-padding)
+           (tessera-gnus-group--element
+            (tessera-ui-entry-leading-safety-gap)
+            'heading.safety-gap)
+           (tessera-gnus-group--element
+            (tessera-ui-entry-padding 'entry.left-padding)
+            'heading.left-padding)
+           (tessera-gnus-group--element
+            (propertize
+             " " 'display
+             `(space :width (,leading-width)))
+            'heading.leading-gap)
+           (tessera-gnus-group--element
+            "Gnus" 'heading.text
+            '((:height 1.4) tessera-gnus-group-heading))
+           (tessera-gnus-group--element
+            (tessera-ui-entry-padding 'entry.right-padding)
+            'heading.right-padding)
+           (tessera-gnus-group--element
+            (tessera-ui-vertical-padding
+             'default 'heading.bottom-padding 0
+             tessera-gnus-group--heading-bottom-padding)
+            'heading.bottom-padding))))
     (put-text-property
      0 (length heading) 'tessera-parent-element 'heading heading)
     heading))
 
 (defun tessera-gnus-group--empty-p ()
-  "Return non-nil when the Group buffer has no displayed groups."
+  "Return non-nil when the Group buffer has no displayed nodes."
   (not
-   (text-property-not-all
-    (point-min) (point-max) 'gnus-group nil)))
+   (or
+    (text-property-not-all
+     (point-min) (point-max) 'gnus-group nil)
+    (text-property-not-all
+     (point-min) (point-max) 'gnus-topic nil))))
 
 (defun tessera-gnus-group--empty ()
   "Return the empty presentation for a Gnus Group buffer."
@@ -1168,11 +1189,12 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
              (tessera-ui-vertical-spacer
               'main.top-padding
               tessera-gnus-group--main-top-padding)
-             (and tessera-gnus-group-show-heading
-                  (concat (tessera-gnus-group--heading) "\n"))
              (tessera-ui-vertical-spacer
               'nodes.top-padding
               tessera-gnus-group--nodes-top-padding)
+             (and tessera-gnus-group-show-heading
+                  (not (bound-and-true-p gnus-topic-mode))
+                  (concat (tessera-gnus-group--heading) "\n"))
              empty))
            (bottom
             (concat
@@ -1206,8 +1228,7 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
 
 (defun tessera-gnus-group--install ()
   "Install Tessera in the current Gnus Group buffer."
-  (unless (or tessera-gnus-group--installed-p
-              (bound-and-true-p gnus-topic-mode))
+  (unless tessera-gnus-group--installed-p
     (setq
      tessera-gnus-group--original-header-line-local-p
      (local-variable-p 'header-line-format)
@@ -1347,8 +1368,6 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
     (advice-add 'gnus-group-prepare-flat-list-dead :around
                 #'tessera-gnus-group--format-dead-groups)
     (add-hook 'gnus-group-mode-hook #'tessera-gnus-group--install)
-    (add-hook 'gnus-topic-mode-hook
-              #'tessera-gnus-group--topic-mode-changed)
     (dolist (buffer
              (match-buffers '(derived-mode . gnus-group-mode)))
       (with-current-buffer buffer
@@ -1373,8 +1392,6 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
                    #'tessera-gnus-group--format-dead-groups)
     (remove-hook 'gnus-group-mode-hook
                  #'tessera-gnus-group--install)
-    (remove-hook 'gnus-topic-mode-hook
-                 #'tessera-gnus-group--topic-mode-changed)
     (dolist (buffer
              (match-buffers '(derived-mode . gnus-group-mode)))
       (with-current-buffer buffer

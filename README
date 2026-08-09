@@ -16,11 +16,14 @@ in the section entitled "GNU Free Documentation License".
 
 ** Tessera Gnus
 
-Tessera Gnus currently provides a two-row, pixel-aligned interface for
-~gnus-summary-mode~.  It changes presentation and interaction only; Gnus continues
-to own groups, articles, marks, scores, and persistent state.
+Tessera Gnus currently provides pixel-aligned interfaces for ~gnus-group-mode~ and
+~gnus-summary-mode~, including native Gnus topics.  It changes presentation and
+interaction only; Gnus continues to own groups, topics, articles, marks, scores,
+and persistent state.
 
-#+HTML: <p align="center"><img width="80%" src="https://github.com/user-attachments/assets/97728c71-4861-4a02-9126-1d207fd25b80"><br><sub>Tessera Gnus displaying a threaded gmane.emacs.devel Summary.</sub></p>
+#+HTML: <p align="center"><img width="80%" src="https://github.com/user-attachments/assets/868540b4-6eb4-4ff7-925c-15a9dc5c3ac5" alt="Tessera Gnus Group and Summary"><br><sub>Tessera Gnus displaying a Topic Group and threaded Summary.</sub></p>
+
+The screenshot uses [[https://protesilaos.com/emacs/modus-themes][Modus Themes]] and [[https://mbtype.com/fonts/triplicate/][Triplicate Code]].
 
 *** Install and Configure
 
@@ -41,15 +44,15 @@ separate packages in this repository, so install both:
 #+end_src
 
 ~tessera-gnus-mode~ is global, but enabling it does not start Gnus.  It installs
-the interface when Gnus becomes available and updates active Summary buffers.
-Disabling it restores the native Summary presentation.
+the interface when Gnus becomes available and updates active Group and Summary
+buffers.  Disabling it restores their native presentation.
 
 *** Customize
 
 Use ~M-x customize-group RET tessera-gnus RET~ to inspect the available options.
-They cover glyphs, feature categories, semantic dates, and the presentation
-refresh delay.  Changing an option through Customize redraws active Tessera
-Summary buffers.
+They cover topics, glyphs, feature categories, semantic dates, and the
+presentation refresh delay.  Changing an option through Customize redraws the
+affected Tessera buffers.
 
 **** Threaded Summaries
 
@@ -65,7 +68,25 @@ Threading changes only the Summary organization.  Tessera derives the tree,
 thread counts, and marks from Gnus rather than maintaining a second thread
 model.
 
-#+HTML: <p align="center"><img width="49%" src="https://github.com/user-attachments/assets/e7a31a6d-ceba-4818-8b8a-20c5e0a6059d" alt="Threaded Gnus Summary"><img width="49%" src="https://github.com/user-attachments/assets/3530c048-ddf8-4259-991a-49e2003a2358" alt="Flat Gnus Summary"><br><sub>Threaded Summary (left) and Flat Summary (right).</sub></p>
+#+HTML: <p align="center"><img width="49%" src="https://github.com/user-attachments/assets/4baf66ac-b5d8-4e0e-91c9-d8148ddd37cb" alt="Threaded Gnus Summary"><img width="49%" src="https://github.com/user-attachments/assets/93d2df69-f7eb-4eaf-abc8-52e052ca5297" alt="Flat Gnus Summary"><br><sub>Threaded Summary (left) and Flat Summary (right).</sub></p>
+
+**** Topics
+
+Tessera follows the native ~gnus-topic-mode~, topic topology, and folding state.
+Topic levels are shown with progressively smaller text instead of horizontal
+indentation; the root topic serves as the main Group heading.
+
+Collapsed topics show a disclosure indicator and right-aligned unread and group
+counts.  Expanded topics omit the indicator and statistics.  Clicking a topic
+uses the native Gnus folding command.
+
+By default, TAB retains its native ~gnus-topic-indent~ behavior.  Set
+~tessera-gnus-topic-tab-fold~ to non-nil to make TAB fold or expand a topic when
+point is on its row:
+
+#+begin_src emacs-lisp
+(setq tessera-gnus-topic-tab-fold t)
+#+end_src
 
 **** Symbols and Icons
 
@@ -80,7 +101,7 @@ The accepted values are ~native~, ~unicode~, and ~nerd-icons~.  The ~nerd-icons~
 is optional and requires the ~nerd-icons~ package and its fonts; unavailable icons
 fall back to ordinary symbols.
 
-#+HTML: <p align="center"><img width="32%" src="https://github.com/user-attachments/assets/6689eff2-5f44-4a4d-a485-98acf4829144" alt="Native Gnus Summary symbols"><img width="32%" src="https://github.com/user-attachments/assets/f7094d90-aa3b-48f4-924b-81498d96a83b" alt="Unicode Gnus Summary symbols"><img width="32%" src="https://github.com/user-attachments/assets/e7a31a6d-ceba-4818-8b8a-20c5e0a6059d" alt="Nerd Icons Gnus Summary symbols"><br><sub>Native (left), Unicode (center), and Nerd Icons (right).</sub></p>
+#+HTML: <p align="center"><img width="32%" src="https://github.com/user-attachments/assets/cbf0617f-cd31-44aa-b05b-14a3956d9906" alt="Native Gnus Summary symbols"><img width="32%" src="https://github.com/user-attachments/assets/0797cd6b-4768-4d88-93dc-8ae376bf867a" alt="Unicode Gnus Summary symbols"><img width="32%" src="https://github.com/user-attachments/assets/4baf66ac-b5d8-4e0e-91c9-d8148ddd37cb" alt="Nerd Icons Gnus Summary symbols"><br><sub>Native (left), Unicode (center), and Nerd Icons (right).</sub></p>
 
 Use ~tessera-gnus-summary-mark-symbol-alist~ and
 ~tessera-gnus-summary-feature-symbol-alist~ to override individual glyphs:

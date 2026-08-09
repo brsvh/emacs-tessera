@@ -27,6 +27,7 @@
 (require 'cl-lib)
 (require 'gnus-group)
 (require 'gnus-sum)
+(require 'gnus-topic)
 (require 'nnml)
 (require 'nnspool)
 (require 'rfc2047)
@@ -109,6 +110,44 @@
 
 Each entry contains its backend kind, native group name, level,
 article state, and expected unread count.")
+
+(defconst tessera-gnus-fixture--topic-topology
+  '(("Gnus" visible)
+    (("Development" visible)
+     (("Emacs" visible)
+      (("Core" invisible)))
+     (("Guile" invisible)))
+    (("Reading" invisible))
+    (("Archive" invisible))
+    (("Empty" visible)))
+  "Native topology used to inspect Tessera Topic presentation.")
+
+(defconst tessera-gnus-fixture--topic-members
+  '(("Gnus" (summary))
+    ("Development")
+    ("Emacs"
+     (mail "tessera.mail.level1.unread")
+     (mail "tessera.mail.level2.read"))
+    ("Core"
+     (mail "tessera.mail.level4.unread")
+     (mail
+      "tessera.mail.level5.long-group-name-for-truncation"))
+    ("Guile"
+     (news "tessera.news.level1.unread")
+     (news "tessera.news.level2.read")
+     (news "tessera.news.level4.unread"))
+    ("Reading"
+     (news "tessera.news.level2.read")
+     (news "tessera.news.level5.read"))
+    ("Archive"
+     (mail "tessera.mail.level3.empty")
+     (news "tessera.news.level3.empty")
+     (news "tessera.news.unsubscribed")
+     (news "tessera.news.zombie")
+     (news "tessera.news.killed")
+     (news "tessera.news.missing-latest-article"))
+    ("Empty"))
+  "Native group memberships for the Topic fixture.")
 
 (defconst tessera-gnus-fixture-group-regexp
   (concat
@@ -698,8 +737,30 @@ article state, and expected unread count.")
     (add-hook 'gnus-summary-generate-hook
               #'tessera-gnus-fixture--apply-marks 50 t)))
 
+(defun tessera-gnus-fixture--topic-group (spec)
+  "Return the full fixture group represented by topic SPEC."
+  (pcase spec
+    (`(summary) tessera-gnus-fixture-group)
+    (`(,kind ,name)
+     (tessera-gnus-fixture--group-name kind name))))
+
+(defun tessera-gnus-fixture--register-topic-fixtures ()
+  "Register the native Gnus Topic fixture."
+  (setq gnus-topic-topology
+        (copy-tree tessera-gnus-fixture--topic-topology)
+        gnus-topic-alist
+        (mapcar
+         (lambda (topic)
+           (cons
+            (car topic)
+            (mapcar #'tessera-gnus-fixture--topic-group
+                    (cdr topic))))
+         tessera-gnus-fixture--topic-members)
+        gnus-topic-unreads nil
+        gnus-topology-checked-p t))
+
 (defun tessera-gnus-fixture--register-group-fixtures ()
-  "Register and reset the non-topic Group fixtures."
+  "Register and reset the Group and Topic fixtures."
   (dolist (spec tessera-gnus-fixture--group-specs)
     (pcase-let* ((`(,kind ,name ,level ,_article-state ,unread)
                   spec)
@@ -714,6 +775,7 @@ article state, and expected unread count.")
       (let ((old-level (gnus-group-level group)))
         (unless (= old-level level)
           (gnus-group-change-level group level old-level)))))
+  (tessera-gnus-fixture--register-topic-fixtures)
   (gnus-group-list-groups nil t)
   (let ((process-group
          (tessera-gnus-fixture--group-name

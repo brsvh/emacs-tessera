@@ -42,6 +42,8 @@
 (declare-function tessera-gnus-group-disable "tessera-gnus-group")
 (declare-function tessera-gnus-group-enable "tessera-gnus-group")
 (declare-function tessera-gnus-group-refresh "tessera-gnus-group")
+(declare-function tessera-gnus-topic-disable "tessera-gnus-topic")
+(declare-function tessera-gnus-topic-enable "tessera-gnus-topic")
 (declare-function tessera-gnus-notify-install
                   "tessera-gnus-notify")
 (declare-function tessera-gnus-notify-uninstall
@@ -199,6 +201,9 @@ enables Gnus notifications independently, while nil disables them."
 (defvar tessera-gnus--group-load-pending-p nil
   "Non-nil when Group activation is waiting for Gnus to load.")
 
+(defvar tessera-gnus--topic-load-pending-p nil
+  "Non-nil when Topic activation is waiting for Gnus to load.")
+
 (defvar tessera-gnus--notify-load-pending-p nil
   "Non-nil when notification activation waits for Gnus to load.")
 
@@ -238,6 +243,24 @@ enables Gnus notifications independently, while nil disables them."
   (when (featurep 'tessera-gnus-group)
     (tessera-gnus-group-disable)))
 
+(defun tessera-gnus--enable-topic ()
+  "Enable Tessera when Gnus Topic is available."
+  (if (featurep 'gnus-topic)
+      (progn
+        (require 'tessera-gnus-topic)
+        (tessera-gnus-topic-enable))
+    (unless tessera-gnus--topic-load-pending-p
+      (setq tessera-gnus--topic-load-pending-p t)
+      (with-eval-after-load 'gnus-topic
+        (setq tessera-gnus--topic-load-pending-p nil)
+        (when tessera-gnus-mode
+          (tessera-gnus--enable-topic))))))
+
+(defun tessera-gnus--disable-topic ()
+  "Disable the Tessera Topic interface when it has been loaded."
+  (when (featurep 'tessera-gnus-topic)
+    (tessera-gnus-topic-disable)))
+
 (defun tessera-gnus--enable-notify ()
   "Enable notifications when the Gnus Group feature is available."
   (when tessera-gnus-notify-enable
@@ -272,8 +295,10 @@ available."
       (progn
         (tessera-gnus--install-presentation-hooks)
         (tessera-gnus--enable-group)
+        (tessera-gnus--enable-topic)
         (tessera-gnus--enable-summary)
         (tessera-gnus--enable-notify))
+    (tessera-gnus--disable-topic)
     (tessera-gnus--disable-group)
     (tessera-gnus--disable-summary)
     (tessera-gnus--disable-notify)

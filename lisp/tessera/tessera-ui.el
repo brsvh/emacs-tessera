@@ -259,7 +259,10 @@ PIXELS is the exact height of the spacer."
     'display
     `(space :width (0) :height (,pixels) :ascent (,pixels))
     'tessera-element element)
-   "\n"))
+   (propertize
+    "\n"
+    'line-height t
+    'tessera-element element)))
 
 (defun tessera-ui--header-vertical-padding
     (element window)
