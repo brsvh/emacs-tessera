@@ -80,6 +80,16 @@
   "Face for Gnus Summary security glyphs."
   :group 'tessera-gnus)
 
+(defface tessera-gnus-summary-thread-subject-unread
+  '((t :inherit gnus-summary-normal-unread :weight bold))
+  "Face for the subject of a thread containing unread articles."
+  :group 'tessera-gnus)
+
+(defface tessera-gnus-summary-thread-subject-read
+  '((t :inherit gnus-summary-normal-read :weight bold))
+  "Face for the subject of a fully read thread."
+  :group 'tessera-gnus)
+
 (defun tessera-gnus-summary--set-option (symbol value)
   "Set SYMBOL to VALUE and redraw active Summary buffers."
   (set-default symbol value)
@@ -1571,6 +1581,21 @@ Only normalize point when Tessera's two-row format is active."
            (prop-match-end match)
            'face 'tessera-thread-connector))))))
 
+(defun tessera-gnus-summary--article-face (anchor)
+  "Return the Gnus Summary face for the article at ANCHOR."
+  (save-excursion
+    (goto-char anchor)
+    (let* ((position (line-beginning-position))
+           (face
+            (gnus-get-text-property-excluding-characters-with-faces
+             position 'face)))
+      (when (memq face '(nil default))
+        (gnus-summary-highlight-line)
+        (setq face
+              (gnus-get-text-property-excluding-characters-with-faces
+               position 'face)))
+      face)))
+
 (defun tessera-gnus-summary--update-entry
     (&optional defer-presentation)
   "Update presentation properties on the current entry.
@@ -1583,10 +1608,15 @@ to the caller."
               (bounds (tessera-gnus-summary--entry-bounds anchor))
               (start (car bounds))
               (end (cdr bounds)))
-    (let ((face (get-text-property anchor 'face))
-          (unread (gnus-data-unread-p data))
-          (inhibit-read-only t)
-          mark-start mark-end)
+    (let* ((face (get-text-property anchor 'face))
+           (article-face
+            (tessera-gnus-summary--article-face anchor))
+           (unread (gnus-data-unread-p data))
+           (threaded
+            (eq gnus-summary-line-format
+                tessera-gnus-summary--thread-line-format))
+           (inhibit-read-only t)
+           mark-start mark-end)
       (gnus-put-text-property-excluding-characters-with-faces
        start end 'face face)
       (add-text-properties
@@ -1631,31 +1661,31 @@ to the caller."
          mark-start mark-end
          'tessera-parent-element 'entry.state-rail))
       (when-let* ((subject
-                   (tessera-gnus-summary--element-bounds
-                    start end
-                    '(entry.subject entry.subject.placeholder))))
+                   (and
+                    (not threaded)
+                    (tessera-gnus-summary--element-bounds
+                     start end
+                     '(entry.subject
+                       entry.subject.placeholder)))))
         (put-text-property
          (car subject) (cdr subject) 'face
-         (if unread
-             (if face
-                 (list 'tessera-entry-unread face)
-               'tessera-entry-unread)
-           (if face
-               (list 'tessera-entry-subject face)
-             'tessera-entry-subject))))
+         (list :inherit article-face :weight 'bold)))
       (when-let* ((author
                    (tessera-gnus-summary--element-bounds
                     start end
                     '(entry.author entry.author.placeholder))))
         (let ((author-face
-               (if unread
-                   'tessera-entry-author-unread
-                 'tessera-entry-author)))
+               (if threaded
+                   (if unread
+                       (list :inherit article-face
+                             :weight 'bold
+                             :slant 'italic)
+                     (list :inherit article-face :slant 'italic))
+                 (if unread
+                     'tessera-entry-author-unread
+                   'tessera-entry-author))))
           (put-text-property
-           (car author) (cdr author) 'face
-           (if face
-               (list author-face face)
-             author-face))))
+           (car author) (cdr author) 'face author-face)))
       (when-let* ((timestamp
                    (tessera-gnus-summary--element-bounds
                     start end
@@ -1667,8 +1697,7 @@ to the caller."
           (put-text-property
            (car timestamp) (cdr timestamp) 'face
            (list timestamp-face face))))
-      (when (eq gnus-summary-line-format
-                tessera-gnus-summary--thread-line-format)
+      (when threaded
         (tessera-gnus-summary--set-thread-tree-face start end))
       (unless defer-presentation
         (tessera-gnus-summary--refresh-presentations-at
@@ -1731,12 +1760,12 @@ to the caller."
        unread members (> known members)))))
 
 (defun tessera-gnus-summary--thread-subject-face (metric)
-  "Return the flat subject face represented by thread METRIC."
+  "Return the subject face represented by thread METRIC."
   (if (text-property-any
        0 (length metric) 'tessera-element
        'thread.metric.unread-count metric)
-      'tessera-entry-unread
-    'tessera-entry-subject))
+      'tessera-gnus-summary-thread-subject-unread
+    'tessera-gnus-summary-thread-subject-read))
 
 (defun tessera-gnus-summary--set-thread-member-metric
     (data-list rest metric)
