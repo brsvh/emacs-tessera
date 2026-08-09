@@ -191,7 +191,7 @@ $(TESSERA_ELC_FILES) &: \
 	$(BUILD_FILE)
 	$(EMACS_BATCH) \
 		-L $(TESSERA_DIR) \
-		--eval '(setq byte-compile-error-on-warn t)' \
+		--eval '(setq byte-compile-error-on-warn t load-prefer-newer t)' \
 		-f batch-byte-compile $(TESSERA_LISP_FILES)
 
 $(TESSERA_GNUS_ELC_FILES) &: \
@@ -201,7 +201,7 @@ $(TESSERA_GNUS_ELC_FILES) &: \
 	$(EMACS_BATCH) \
 		-L $(TESSERA_DIR) \
 		-L $(TESSERA_GNUS_DIR) \
-		--eval '(setq byte-compile-error-on-warn t)' \
+		--eval '(setq byte-compile-error-on-warn t load-prefer-newer t)' \
 		-f batch-byte-compile $(TESSERA_GNUS_LISP_FILES)
 
 $(TESSERA_ARCHIVE_STAMP): \
@@ -215,11 +215,14 @@ $(TESSERA_GNUS_ARCHIVE_STAMP): \
 	COPYING \
 	$(BUILD_FILE)
 
+$(TESSERA_ARCHIVE_STAMP): PACKAGE_SOURCE := $(TESSERA_MAIN)
+$(TESSERA_GNUS_ARCHIVE_STAMP): PACKAGE_SOURCE := $(TESSERA_GNUS_MAIN)
+
 $(ARCHIVE_STAMPS):
 	@set -eu
 	package_name="$(patsubst .%-archive,%,$(notdir $@))"
 	version=$$(env \
-		PACKAGE_SOURCE="$<" \
+		PACKAGE_SOURCE="$(PACKAGE_SOURCE)" \
 		$(EMACS_BATCH) \
 		--eval '$(PACKAGE_VERSION_ELISP)')
 	package_dir="$${package_name}-$${version}"

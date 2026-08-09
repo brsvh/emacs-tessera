@@ -45,6 +45,9 @@
    "fixtures/gnus/" user-emacs-directory)
   "Directory containing the local fixture server.")
 
+(defconst tessera-gnus-fixture-data-version 1
+  "Version of the generated fixture data format.")
+
 (defconst tessera-gnus-fixture-address
   (if (string-empty-p (or user-mail-address ""))
       "tessera@fixture.invalid"
@@ -619,41 +622,101 @@ article state, and expected unread count.")
          :message-id
          (tessera-gnus-fixture--message-id name number)))))))
 
+(defun tessera-gnus-fixture--data-signature ()
+  "Return the signature of the current fixture data."
+  (secure-hash
+   'sha256
+   (prin1-to-string
+    (list tessera-gnus-fixture-data-version
+          tessera-gnus-fixture-address
+          tessera-gnus-fixture--group-specs
+          tessera-gnus-fixture--topic-topology
+          tessera-gnus-fixture--topic-members
+          tessera-gnus-fixture--authors
+          tessera-gnus-fixture--thread-subjects
+          tessera-gnus-fixture--single-subjects
+          tessera-gnus-fixture--monthly-articles
+          tessera-gnus-fixture--thread-parents
+          tessera-gnus-fixture--thread-date-settings
+          tessera-gnus-fixture--feature-profiles
+          (tessera-gnus-fixture--specs)))))
+
+(defun tessera-gnus-fixture--signature-file ()
+  "Return the file recording the installed fixture signature."
+  (expand-file-name ".fixture-signature"
+                    tessera-gnus-fixture-directory))
+
+(defun tessera-gnus-fixture--installed-signature ()
+  "Return the installed fixture signature, or nil when absent."
+  (let ((file (tessera-gnus-fixture--signature-file)))
+    (when (file-readable-p file)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (string-trim (buffer-string))))))
+
+(defun tessera-gnus-fixture--reset-data ()
+  "Remove generated fixture data while preserving Gnus state."
+  (nnml-close-server tessera-gnus-fixture-server)
+  (nnspool-close-server tessera-gnus-fixture-news-server)
+  (dolist (directory
+           (list
+            (expand-file-name "tessera/"
+                              tessera-gnus-fixture-directory)
+            tessera-gnus-fixture-news-directory))
+    (when (file-directory-p directory)
+      (delete-directory directory t)))
+  (dolist (file
+           (list
+            (expand-file-name "active"
+                              tessera-gnus-fixture-directory)
+            (expand-file-name "newsgroups"
+                              tessera-gnus-fixture-directory)
+            (tessera-gnus-fixture--signature-file)))
+    (when (file-exists-p file)
+      (delete-file file))))
+
 (defun tessera-gnus-fixture--install-articles ()
   "Install the fixture articles in the local nnml server."
-  (make-directory tessera-gnus-fixture-directory t)
-  (nnml-open-server tessera-gnus-fixture-server
-                    (tessera-gnus-fixture--server-definitions))
-  (nnml-request-create-group "tessera.summary"
-                             tessera-gnus-fixture-server)
-  (tessera-gnus-fixture--install-mail-groups)
-  (with-temp-file
-      (expand-file-name "newsgroups"
-                        tessera-gnus-fixture-directory)
-    (insert "tessera.summary Tessera Summary visual fixture\n")
-    (dolist (spec tessera-gnus-fixture--group-specs)
-      (when (eq (car spec) 'mail)
-        (insert (format "%s Tessera Group visual fixture\n"
-                        (nth 1 spec))))))
-  (let* ((group-directory
-          (expand-file-name "tessera/summary/"
-                            tessera-gnus-fixture-directory))
-         (articles
-          (and (file-directory-p group-directory)
-               (directory-files group-directory nil "\\`[0-9]+\\'")))
-         (installed (length articles))
-         (all-specs (tessera-gnus-fixture--specs))
-         (last-number (length all-specs))
-         (specs (nthcdr installed all-specs)))
-    (dolist (spec specs)
-      (with-temp-buffer
-        (tessera-gnus-fixture--insert-article spec)
-        (nnml-request-accept-article
-         "tessera.summary"
-         tessera-gnus-fixture-server
-         (= (plist-get spec :number) last-number)))))
-  (nnml-close-server tessera-gnus-fixture-server)
-  (tessera-gnus-fixture--install-news-groups))
+  (let ((signature (tessera-gnus-fixture--data-signature)))
+    (unless (equal signature
+                   (tessera-gnus-fixture--installed-signature))
+      (tessera-gnus-fixture--reset-data))
+    (make-directory tessera-gnus-fixture-directory t)
+    (nnml-open-server tessera-gnus-fixture-server
+                      (tessera-gnus-fixture--server-definitions))
+    (nnml-request-create-group "tessera.summary"
+                               tessera-gnus-fixture-server)
+    (tessera-gnus-fixture--install-mail-groups)
+    (with-temp-file
+        (expand-file-name "newsgroups"
+                          tessera-gnus-fixture-directory)
+      (insert "tessera.summary Tessera Summary visual fixture\n")
+      (dolist (spec tessera-gnus-fixture--group-specs)
+        (when (eq (car spec) 'mail)
+          (insert (format "%s Tessera Group visual fixture\n"
+                          (nth 1 spec))))))
+    (let* ((group-directory
+            (expand-file-name "tessera/summary/"
+                              tessera-gnus-fixture-directory))
+           (articles
+            (and (file-directory-p group-directory)
+                 (directory-files
+                  group-directory nil "\\`[0-9]+\\'")))
+           (installed (length articles))
+           (all-specs (tessera-gnus-fixture--specs))
+           (last-number (length all-specs))
+           (specs (nthcdr installed all-specs)))
+      (dolist (spec specs)
+        (with-temp-buffer
+          (tessera-gnus-fixture--insert-article spec)
+          (nnml-request-accept-article
+           "tessera.summary"
+           tessera-gnus-fixture-server
+           (= (plist-get spec :number) last-number)))))
+    (nnml-close-server tessera-gnus-fixture-server)
+    (tessera-gnus-fixture--install-news-groups)
+    (with-temp-file (tessera-gnus-fixture--signature-file)
+      (insert signature "\n"))))
 
 (defun tessera-gnus-fixture--primary-mark (article)
   "Return the primary mark variable assigned to ARTICLE."

@@ -1282,6 +1282,8 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
               #'tessera-gnus-group--window-state-change nil t)
     (add-hook 'text-scale-mode-hook
               #'tessera-gnus-group--refresh-presentation nil t)
+    (add-hook 'kill-buffer-hook
+              #'tessera-gnus-group--cancel-latest-time nil t)
     (tessera-gnus-group--update-layout)
     (tessera-gnus-group--present-visible-windows)
     (tessera-gnus-group--queue-latest-times)
@@ -1314,6 +1316,8 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
                  #'tessera-gnus-group--window-state-change t)
     (remove-hook 'text-scale-mode-hook
                  #'tessera-gnus-group--refresh-presentation t)
+    (remove-hook 'kill-buffer-hook
+                 #'tessera-gnus-group--cancel-latest-time t)
     (when (eq tessera-gnus--face-remap-function
               #'tessera-gnus-group--refresh-presentation)
       (kill-local-variable 'tessera-gnus--face-remap-function))
