@@ -38,14 +38,133 @@
 
 (declare-function tessera-gnus-summary-disable "tessera-gnus-summary")
 (declare-function tessera-gnus-summary-enable "tessera-gnus-summary")
+(declare-function tessera-gnus-summary-refresh "tessera-gnus-summary")
 (declare-function tessera-gnus-group-disable "tessera-gnus-group")
 (declare-function tessera-gnus-group-enable "tessera-gnus-group")
+(declare-function tessera-gnus-group-refresh "tessera-gnus-group")
 (declare-function tessera-gnus-notify-install
                   "tessera-gnus-notify")
 (declare-function tessera-gnus-notify-uninstall
                   "tessera-gnus-notify")
 
 (defvar tessera-gnus-mode)
+
+(defconst tessera-gnus--face-remap-functions
+  '(face-remap-add-relative
+    face-remap-remove-relative
+    face-remap-set-base
+    face-remap-reset-base)
+  "Face-remapping functions that invalidate Gnus measurements.")
+
+(defvar-local tessera-gnus--face-remap-function nil
+  "Function that refreshes face measurements in this Gnus buffer.")
+
+(defvar tessera-gnus--presentation-hooks-installed-p nil
+  "Non-nil when Gnus presentation hooks are installed.")
+
+(defun tessera-gnus--refresh-buffer ()
+  "Refresh the Tessera presentation in the current Gnus buffer."
+  (cond
+   ((and (derived-mode-p 'gnus-summary-mode)
+         (fboundp 'tessera-gnus-summary-refresh))
+    (tessera-gnus-summary-refresh))
+   ((and (derived-mode-p 'gnus-group-mode)
+         (fboundp 'tessera-gnus-group-refresh))
+    (tessera-gnus-group-refresh))))
+
+(defun tessera-gnus--refresh-buffers (&rest _args)
+  "Refresh Tessera presentations in all Gnus buffers."
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (tessera-gnus--refresh-buffer))))
+
+(defun tessera-gnus--face-remap-changed (&rest _args)
+  "Refresh measurements after a face remapping change."
+  (when (functionp tessera-gnus--face-remap-function)
+    (funcall tessera-gnus--face-remap-function)))
+
+(defun tessera-gnus--install-presentation-hooks ()
+  "Install hooks that refresh Gnus presentations."
+  (unless tessera-gnus--presentation-hooks-installed-p
+    (setq tessera-gnus--presentation-hooks-installed-p t)
+    (require 'face-remap)
+    (dolist (function tessera-gnus--face-remap-functions)
+      (advice-add function :after
+                  #'tessera-gnus--face-remap-changed))
+    (add-hook 'after-setting-font-hook
+              #'tessera-gnus--refresh-buffers)
+    (add-hook 'enable-theme-functions
+              #'tessera-gnus--refresh-buffers)
+    (add-hook 'disable-theme-functions
+              #'tessera-gnus--refresh-buffers)))
+
+(defun tessera-gnus--remove-presentation-hooks ()
+  "Remove hooks that refresh Gnus presentations."
+  (when tessera-gnus--presentation-hooks-installed-p
+    (setq tessera-gnus--presentation-hooks-installed-p nil)
+    (dolist (function tessera-gnus--face-remap-functions)
+      (advice-remove function #'tessera-gnus--face-remap-changed))
+    (remove-hook 'after-setting-font-hook
+                 #'tessera-gnus--refresh-buffers)
+    (remove-hook 'enable-theme-functions
+                 #'tessera-gnus--refresh-buffers)
+    (remove-hook 'disable-theme-functions
+                 #'tessera-gnus--refresh-buffers)))
+
+(defun tessera-gnus--set-glyph-option (symbol value)
+  "Set glyph option SYMBOL to VALUE and refresh Gnus buffers."
+  (set-default symbol value)
+  (tessera-gnus--refresh-buffers))
+
+(defcustom tessera-gnus-symbol-style 'unicode
+  "Glyph style used for Gnus marks and features.
+
+Individual Gnus buffers may override the global default."
+  :type '(choice
+          (const :tag "Native Gnus marks" native)
+          (const :tag "Unicode symbols" unicode)
+          (const :tag "Nerd Icons" nerd-icons))
+  :set #'tessera-gnus--set-glyph-option
+  :group 'tessera-gnus)
+
+(make-variable-buffer-local 'tessera-gnus-symbol-style)
+
+(defcustom tessera-gnus-use-uniform-glyph-color nil
+  "Whether Gnus glyphs follow the color of adjacent text.
+
+When nil, each glyph uses a face chosen for its semantic role."
+  :type 'boolean
+  :set #'tessera-gnus--set-glyph-option
+  :group 'tessera-gnus)
+
+(make-variable-buffer-local
+ 'tessera-gnus-use-uniform-glyph-color)
+
+(defun tessera-gnus--nerd-icon (spec fallback)
+  "Return the Nerd Icon described by SPEC, or FALLBACK."
+  (let ((height 0.8)
+        (function
+         (and (consp spec)
+              (symbolp (car spec))
+              (intern (format "nerd-icons-%s" (car spec))))))
+    (if (and function
+             (stringp (cdr spec))
+             (display-graphic-p)
+             (require 'nerd-icons nil t)
+             (fboundp function))
+        (condition-case nil
+            (funcall function (cdr spec)
+                     :height height
+                     :v-adjust (/ (- 1.0 height) 2))
+          (error fallback))
+      fallback)))
+
+(defun tessera-gnus--render-glyph (value fallback)
+  "Render glyph VALUE, using FALLBACK when it is unavailable."
+  (cond
+   ((stringp value) (copy-sequence value))
+   ((consp value) (tessera-gnus--nerd-icon value fallback))
+   (t fallback)))
 
 (defun tessera-gnus--set-notify-enable (symbol value)
   "Set notification option SYMBOL to VALUE."
@@ -151,12 +270,14 @@ available."
   :lighter nil
   (if tessera-gnus-mode
       (progn
+        (tessera-gnus--install-presentation-hooks)
         (tessera-gnus--enable-group)
         (tessera-gnus--enable-summary)
         (tessera-gnus--enable-notify))
     (tessera-gnus--disable-group)
     (tessera-gnus--disable-summary)
-    (tessera-gnus--disable-notify)))
+    (tessera-gnus--disable-notify)
+    (tessera-gnus--remove-presentation-hooks)))
 
 (provide 'tessera-gnus)
 ;;; tessera-gnus.el ends here

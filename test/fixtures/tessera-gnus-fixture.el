@@ -28,6 +28,7 @@
 (require 'gnus-group)
 (require 'gnus-sum)
 (require 'nnml)
+(require 'nnspool)
 (require 'rfc2047)
 (require 'subr-x)
 
@@ -59,6 +60,66 @@
             "newsgroups" tessera-gnus-fixture-directory))
          (nnml-get-new-mail nil))
   "Gnus select method for the local fixture server.")
+
+(defconst tessera-gnus-fixture-news-server "tessera-news"
+  "Name of the local news fixture server.")
+
+(defconst tessera-gnus-fixture-news-directory
+  (expand-file-name "news/" tessera-gnus-fixture-directory)
+  "Directory containing the local news fixture server.")
+
+(defconst tessera-gnus-fixture-news-method
+  `(nnspool
+    ,tessera-gnus-fixture-news-server
+    (nnspool-spool-directory
+     ,(expand-file-name
+       "spool/" tessera-gnus-fixture-news-directory))
+    (nnspool-lib-dir ,tessera-gnus-fixture-news-directory)
+    (nnspool-active-file
+     ,(expand-file-name
+       "active" tessera-gnus-fixture-news-directory))
+    (nnspool-newsgroups-file
+     ,(expand-file-name
+       "newsgroups" tessera-gnus-fixture-news-directory))
+    (nnspool-history-file
+     ,(expand-file-name
+       "history" tessera-gnus-fixture-news-directory))
+    (nnspool-active-times-file
+     ,(expand-file-name
+       "active.times" tessera-gnus-fixture-news-directory)))
+  "Gnus select method for local news fixture groups.")
+
+(defconst tessera-gnus-fixture--group-specs
+  '((mail "tessera.mail.level1.unread" 1 1 1)
+    (mail "tessera.mail.level2.read" 2 1 0)
+    (mail "tessera.mail.level3.empty" 3 0 0)
+    (mail "tessera.mail.level4.unread" 4 1 1)
+    (mail
+     "tessera.mail.level5.long-group-name-for-truncation" 5 1 0)
+    (news "tessera.news.level1.unread" 1 1 1)
+    (news "tessera.news.level2.read" 2 1 0)
+    (news "tessera.news.level3.empty" 3 0 0)
+    (news "tessera.news.level4.unread" 4 1 1)
+    (news "tessera.news.level5.read" 5 1 0)
+    (news "tessera.news.unsubscribed" 6 1 0)
+    (news "tessera.news.zombie" 8 1 0)
+    (news "tessera.news.killed" 9 1 0)
+    (news "tessera.news.missing-latest-article" 3 missing 0))
+  "Non-topic Group fixtures.
+
+Each entry contains its backend kind, native group name, level,
+article state, and expected unread count.")
+
+(defconst tessera-gnus-fixture-group-regexp
+  (concat
+   "\\`"
+   (regexp-opt
+    (list
+     (concat "nnml+" tessera-gnus-fixture-server)
+     (concat "nnspool+" tessera-gnus-fixture-news-server))
+    t)
+   ":tessera\\.")
+  "Regexp matching every local Tessera Gnus fixture group.")
 
 (defconst tessera-gnus-fixture--extra-headers
   '(Content-Type Content-Disposition List-Id List-Post Mailing-List)
@@ -235,6 +296,19 @@
 (defun tessera-gnus-fixture--server-definitions ()
   "Return the server variables in `tessera-gnus-fixture-method'."
   (cddr tessera-gnus-fixture-method))
+
+(defun tessera-gnus-fixture--group-method (kind)
+  "Return the fixture select method for backend KIND."
+  (if (eq kind 'mail)
+      tessera-gnus-fixture-method
+    tessera-gnus-fixture-news-method))
+
+(defun tessera-gnus-fixture--group-name (kind name)
+  "Return the full fixture group NAME for backend KIND."
+  (format "%s+%s:%s"
+          (car (tessera-gnus-fixture--group-method kind))
+          (cadr (tessera-gnus-fixture--group-method kind))
+          name))
 
 (defun tessera-gnus-fixture--profile (number)
   "Return the feature profile assigned to article NUMBER."
@@ -425,6 +499,87 @@
             (number-to-string number) "\n\n")
     (insert (tessera-gnus-fixture--body profile number))))
 
+(defun tessera-gnus-fixture--install-mail-groups ()
+  "Install the non-topic mail Group fixtures."
+  (cl-loop
+   for (kind name _level article-state _unread)
+   in tessera-gnus-fixture--group-specs
+   for number from 101
+   when (eq kind 'mail)
+   do
+   (nnml-request-create-group name tessera-gnus-fixture-server)
+   (when (eq article-state 1)
+     (let* ((directory
+             (expand-file-name
+              (concat (subst-char-in-string ?. ?/ name) "/")
+              tessera-gnus-fixture-directory))
+            (articles
+             (and (file-directory-p directory)
+                  (directory-files directory nil "\\`[0-9]+\\'"))))
+       (unless articles
+         (with-temp-buffer
+           (tessera-gnus-fixture--insert-article
+            (list
+             :number number
+             :subject (format "Group fixture for %s" name)
+             :message-id
+             (tessera-gnus-fixture--message-id name number)))
+           (nnml-request-accept-article
+            name tessera-gnus-fixture-server t)))))))
+
+(defun tessera-gnus-fixture--news-article-file (name)
+  "Return the article file for news fixture NAME."
+  (expand-file-name
+   "1"
+   (expand-file-name
+    (concat (subst-char-in-string ?. ?/ name) "/")
+    (expand-file-name
+     "spool/" tessera-gnus-fixture-news-directory))))
+
+(defun tessera-gnus-fixture--install-news-groups ()
+  "Install the non-topic news Group fixtures."
+  (make-directory tessera-gnus-fixture-news-directory t)
+  (make-directory
+   (expand-file-name
+    "spool/" tessera-gnus-fixture-news-directory)
+   t)
+  (with-temp-file
+      (expand-file-name "active" tessera-gnus-fixture-news-directory)
+    (dolist (spec tessera-gnus-fixture--group-specs)
+      (pcase-let ((`(,kind ,name ,_level ,article-state ,_unread)
+                   spec))
+        (when (eq kind 'news)
+          (insert
+           (format "%s %010d %010d y\n"
+                   name
+                   (if (eq article-state 0) 0 1)
+                   1))))))
+  (with-temp-file
+      (expand-file-name "newsgroups"
+                        tessera-gnus-fixture-news-directory)
+    (dolist (spec tessera-gnus-fixture--group-specs)
+      (when (eq (car spec) 'news)
+        (insert (format "%s Tessera Group visual fixture\n"
+                        (nth 1 spec))))))
+  (dolist (file '("history" "active.times"))
+    (with-temp-file
+        (expand-file-name file tessera-gnus-fixture-news-directory)))
+  (cl-loop
+   for (kind name _level article-state _unread)
+   in tessera-gnus-fixture--group-specs
+   for number from 201
+   when (and (eq kind 'news) (eq article-state 1))
+   do
+   (let ((article (tessera-gnus-fixture--news-article-file name)))
+     (make-directory (file-name-directory article) t)
+     (with-temp-file article
+       (tessera-gnus-fixture--insert-article
+        (list
+         :number number
+         :subject (format "Group fixture for %s" name)
+         :message-id
+         (tessera-gnus-fixture--message-id name number)))))))
+
 (defun tessera-gnus-fixture--install-articles ()
   "Install the fixture articles in the local nnml server."
   (make-directory tessera-gnus-fixture-directory t)
@@ -432,12 +587,15 @@
                     (tessera-gnus-fixture--server-definitions))
   (nnml-request-create-group "tessera.summary"
                              tessera-gnus-fixture-server)
-  (let ((newsgroups
-         (expand-file-name "newsgroups"
-                           tessera-gnus-fixture-directory)))
-    (unless (file-exists-p newsgroups)
-      (with-temp-file newsgroups
-        (insert "tessera.summary Tessera Summary visual fixture\n"))))
+  (tessera-gnus-fixture--install-mail-groups)
+  (with-temp-file
+      (expand-file-name "newsgroups"
+                        tessera-gnus-fixture-directory)
+    (insert "tessera.summary Tessera Summary visual fixture\n")
+    (dolist (spec tessera-gnus-fixture--group-specs)
+      (when (eq (car spec) 'mail)
+        (insert (format "%s Tessera Group visual fixture\n"
+                        (nth 1 spec))))))
   (let* ((group-directory
           (expand-file-name "tessera/summary/"
                             tessera-gnus-fixture-directory))
@@ -455,7 +613,8 @@
          "tessera.summary"
          tessera-gnus-fixture-server
          (= (plist-get spec :number) last-number)))))
-  (nnml-close-server tessera-gnus-fixture-server))
+  (nnml-close-server tessera-gnus-fixture-server)
+  (tessera-gnus-fixture--install-news-groups))
 
 (defun tessera-gnus-fixture--primary-mark (article)
   "Return the primary mark variable assigned to ARTICLE."
@@ -539,6 +698,29 @@
     (add-hook 'gnus-summary-generate-hook
               #'tessera-gnus-fixture--apply-marks 50 t)))
 
+(defun tessera-gnus-fixture--register-group-fixtures ()
+  "Register and reset the non-topic Group fixtures."
+  (dolist (spec tessera-gnus-fixture--group-specs)
+    (pcase-let* ((`(,kind ,name ,level ,_article-state ,unread)
+                  spec)
+                 (method
+                  (tessera-gnus-fixture--group-method kind))
+                 (group
+                  (tessera-gnus-fixture--group-name kind name)))
+      (unless (gnus-group-entry group)
+        (gnus-subscribe-group group nil method))
+      (when-let* ((entry (gnus-group-entry group)))
+        (setcar entry unread))
+      (let ((old-level (gnus-group-level group)))
+        (unless (= old-level level)
+          (gnus-group-change-level group level old-level)))))
+  (gnus-group-list-groups nil t)
+  (let ((process-group
+         (tessera-gnus-fixture--group-name
+          'news "tessera.news.level4.unread")))
+    (add-to-list 'gnus-group-marked process-group)
+    (gnus-group-update-group process-group t t)))
+
 (defun tessera-gnus-fixture-install ()
   "Install and register the local Tessera Gnus fixture."
   (interactive)
@@ -547,8 +729,12 @@
     (add-to-list 'nnmail-extra-headers header))
   (add-to-list 'gnus-secondary-select-methods
                tessera-gnus-fixture-method t)
+  (add-to-list 'gnus-secondary-select-methods
+               tessera-gnus-fixture-news-method t)
   (add-hook 'gnus-summary-mode-hook
             #'tessera-gnus-fixture--summary-setup)
+  (add-hook 'gnus-started-hook
+            #'tessera-gnus-fixture--register-group-fixtures)
   (tessera-gnus-fixture--install-articles))
 
 (defun tessera-gnus-fixture-open ()

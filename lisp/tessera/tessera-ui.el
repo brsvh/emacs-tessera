@@ -240,6 +240,27 @@ Use WINDOW to resolve font metrics."
      'display display
      'tessera-element element)))
 
+(defun tessera-ui-vertical-padding (face element top bottom)
+  "Return vertical padding using FACE and named ELEMENT.
+
+TOP and BOTTOM are the added pixels above and below the baseline."
+  (tessera-ui--vertical-padding
+   face element top bottom
+   (or (get-buffer-window (current-buffer) t)
+       (selected-window))))
+
+(defun tessera-ui-vertical-spacer (element pixels)
+  "Return a display-only vertical spacer named ELEMENT.
+
+PIXELS is the exact height of the spacer."
+  (concat
+   (propertize
+    " "
+    'display
+    `(space :width (0) :height (,pixels) :ascent (,pixels))
+    'tessera-element element)
+   "\n"))
+
 (defun tessera-ui--header-vertical-padding
     (element window)
   "Return header padding named ELEMENT.
@@ -621,7 +642,8 @@ Append a plus sign when INCOMPLETE is non-nil."
   "Return statistics in SCOPE for UNREAD, MIDDLE, and TOTAL.
 
 MIDDLE-NAME names it and MIDDLE-TEXT is its label.  Append a plus
-sign to an incomplete UNREAD or TOTAL count."
+sign to UNREAD when UNREAD-INCOMPLETE is non-nil, or to TOTAL when
+TOTAL-INCOMPLETE is non-nil."
   (let ((text
          (concat
           (tessera-ui--statistics-unread
@@ -662,7 +684,8 @@ sign to an incomplete UNREAD or TOTAL count."
     (unread groups total &optional unread-incomplete total-incomplete)
   "Return all-group statistics for UNREAD, GROUPS, and TOTAL.
 
-Append a plus sign to an incomplete UNREAD or TOTAL count."
+Append a plus sign to UNREAD when UNREAD-INCOMPLETE is non-nil, or
+to TOTAL when TOTAL-INCOMPLETE is non-nil."
   (tessera-ui--statistics
    'header.all.statistics unread groups 'groups
    "groups" total unread-incomplete total-incomplete))

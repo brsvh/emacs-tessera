@@ -25,6 +25,8 @@
 
 (require 'gnus-sum)
 (require 'subr-x)
+(require 'tessera-gnus)
+(require 'tessera-gnus-status)
 (require 'tessera-ui)
 
 (defvar gnus-tmp-name)
@@ -92,36 +94,13 @@
                    gnus-newsgroup-prepared)
           (tessera-gnus-summary--regenerate))))))
 
-(defcustom tessera-gnus-summary-symbol-style 'unicode
-  "Glyph style used for Gnus Summary marks and features.
-
-Individual Summary buffers may override the global default."
-  :type '(choice
-          (const :tag "Native Gnus marks" native)
-          (const :tag "Unicode symbols" unicode)
-          (const :tag "Nerd Icons" nerd-icons))
-  :set #'tessera-gnus-summary--set-option
-  :group 'tessera-gnus)
-
-(make-variable-buffer-local 'tessera-gnus-summary-symbol-style)
-
-(defcustom tessera-gnus-summary-use-uniform-glyph-color nil
-  "Whether Gnus Summary glyphs follow their adjacent text color.
-
-When non-nil, marks use the subject color and features use the
-author color.  When nil, each glyph uses a face chosen for its
-semantic role."
-  :type 'boolean
-  :set #'tessera-gnus-summary--set-option
-  :group 'tessera-gnus)
-
 (defcustom tessera-gnus-summary-mark-symbol-alist nil
   "Overrides for individual Gnus Summary mark glyphs.
 
 Each key is the name of a Gnus mark variable, such as
 `gnus-ticked-mark'.  A value is either a literal string or a Nerd
 Icons specification of the form (FAMILY . ICON-NAME).  Overrides
-take precedence over `tessera-gnus-summary-symbol-style'."
+take precedence over `tessera-gnus-symbol-style'."
   :type '(alist
           :key-type symbol
           :value-type
@@ -151,7 +130,7 @@ take precedence over `tessera-gnus-summary-symbol-style'."
 Each key is a feature name such as `encrypted' or `overflow'.  A value
 is either a literal string or a Nerd Icons specification of the form
 \(FAMILY . ICON-NAME).  Overrides take precedence over
-`tessera-gnus-summary-symbol-style'."
+`tessera-gnus-symbol-style'."
   :type '(alist
           :key-type symbol
           :value-type
@@ -432,13 +411,6 @@ is either a literal string or a Nerd Icons specification of the form
     (mailing-list . tessera-gnus-summary-glyph)
     (overflow . tessera-gnus-summary-glyph-attention))
   "Faces used for features when semantic glyph colors are enabled.")
-
-(defconst tessera-gnus-summary--face-remap-functions
-  '(face-remap-add-relative
-    face-remap-remove-relative
-    face-remap-set-base
-    face-remap-reset-base)
-  "Face-remapping functions that invalidate entry measurements.")
 
 (defvar-keymap tessera-gnus-summary--status-map
   :doc "Keymap for the status in a Tessera Gnus Summary header."
@@ -792,33 +764,6 @@ Use PLACEHOLDER and PLACEHOLDER-ELEMENT when VALUE is empty."
          (alist-get
           feature tessera-gnus-summary--nerd-overflow-icons)))))
 
-(defun tessera-gnus-summary--nerd-icon (spec fallback)
-  "Return the Nerd Icon described by SPEC, or FALLBACK."
-  (let ((height 0.8)
-        (function
-         (and (consp spec)
-              (symbolp (car spec))
-              (intern (format "nerd-icons-%s" (car spec))))))
-    (if (and function
-             (stringp (cdr spec))
-             (display-graphic-p)
-             (require 'nerd-icons nil t)
-             (fboundp function))
-        (condition-case nil
-            (funcall function (cdr spec)
-                     :height height
-                     :v-adjust (/ (- 1.0 height) 2))
-          (error fallback))
-      fallback)))
-
-(defun tessera-gnus-summary--render-glyph (value fallback)
-  "Render glyph VALUE, using FALLBACK when it is unavailable."
-  (cond
-   ((stringp value) (copy-sequence value))
-   ((consp value)
-    (tessera-gnus-summary--nerd-icon value fallback))
-   (t fallback)))
-
 (defun tessera-gnus-summary--glyph-face (glyph)
   "Return the first non-nil face found in GLYPH."
   (when-let* ((position
@@ -831,7 +776,7 @@ Use PLACEHOLDER and PLACEHOLDER-ELEMENT when VALUE is empty."
   "Return the color face for KEY from FACES.
 
 Use UNIFORM-FACE when uniform glyph colors are enabled."
-  (if tessera-gnus-summary-use-uniform-glyph-color
+  (if tessera-gnus-use-uniform-glyph-color
       (or uniform-face 'tessera-gnus-summary-glyph)
     (or (alist-get key faces)
         'tessera-gnus-summary-glyph)))
@@ -843,7 +788,7 @@ Use UNIFORM-FACE when uniform glyph colors are enabled."
 
 (defun tessera-gnus-summary--glyph-color-spec (face)
   "Return the display color specification for FACE."
-  (if tessera-gnus-summary-use-uniform-glyph-color
+  (if tessera-gnus-use-uniform-glyph-color
       (if-let* ((foreground
                  (tessera-gnus-summary--face-foreground face)))
           (list :foreground foreground)
@@ -878,8 +823,8 @@ Use UNIFORM-FACE when uniform glyph colors are enabled."
           (or (alist-get
                feature tessera-gnus-summary-feature-symbol-alist)
               (tessera-gnus-summary--feature-glyph
-               feature tessera-gnus-summary-symbol-style))))
-    (tessera-gnus-summary--render-glyph value fallback)))
+               feature tessera-gnus-symbol-style))))
+    (tessera-gnus--render-glyph value fallback)))
 
 (defun tessera-gnus-summary--feature-symbol (feature)
   "Return the displayed symbol cell for FEATURE."
@@ -1007,7 +952,7 @@ the adjacent author face."
                 (tessera-gnus-summary--select-features
                  (tessera-gnus-summary--feature-facts header)))
                (uniform-face
-                (and tessera-gnus-summary-use-uniform-glyph-color
+                (and tessera-gnus-use-uniform-glyph-color
                      (tessera-gnus-summary--author-color-face
                       (mail-header-number header)))))
     (if (not selected)
@@ -1051,11 +996,11 @@ the adjacent author face."
           (or (alist-get
                variable tessera-gnus-summary-mark-symbol-alist)
               (and
-               (not (eq tessera-gnus-summary-symbol-style 'native))
+               (not (eq tessera-gnus-symbol-style 'native))
                (tessera-gnus-summary--mark-glyph
-                variable tessera-gnus-summary-symbol-style))
+                variable tessera-gnus-symbol-style))
               native)))
-    (tessera-gnus-summary--render-glyph value unicode)))
+    (tessera-gnus--render-glyph value unicode)))
 
 (defun tessera-gnus-summary--glyph-cell-width ()
   "Return the common pixel width of configured non-native glyphs."
@@ -1106,7 +1051,7 @@ the adjacent author face."
 
 (defun tessera-gnus-summary--glyph-cell (glyph)
   "Return GLYPH centered in the common visual glyph cell."
-  (if (eq tessera-gnus-summary-symbol-style 'native)
+  (if (eq tessera-gnus-symbol-style 'native)
       glyph
     (let* ((extra
             (max 0
@@ -1417,37 +1362,19 @@ The return value is (MONTH DATA-REST THREAD-REST UNREAD TOTAL)."
 
 (defun tessera-gnus-summary--format-status ()
   "Return the presentation of the current Summary operation status."
-  (let (face help-echo text)
-    (pcase tessera-gnus-summary--status-state
-      ('processing
-       (setq face 'tessera-header-status-processing
-             help-echo "Gnus is fetching article headers"
-             text
-             (if tessera-gnus-summary--fetch-total
-                 (format "FETCHING %d/%d"
-                         tessera-gnus-summary--fetch-current
-                         tessera-gnus-summary--fetch-total)
-               "FETCHING")))
-      ('fail
-       (setq face 'tessera-header-status-fail
-             help-echo
-             (concat "The last fetch failed; "
-                     "mouse-1: Get new articles")
-             text
-             (if tessera-gnus-summary--fetch-failed
-                 (format "FETCH FAILED %d"
-                         tessera-gnus-summary--fetch-failed)
-               "FETCH FAILED")))
-      (_
-       (setq face 'tessera-header-status-success
-             help-echo "mouse-1: Get new articles"
-             text "IDLE")))
-    (propertize
-     text
-     'face face
-     'help-echo help-echo
-     'keymap tessera-gnus-summary--status-map
-     'mouse-face 'header-line-highlight)))
+  (tessera-gnus-status
+   tessera-gnus-summary--status-state
+   (and tessera-gnus-summary--fetch-total
+        (cons tessera-gnus-summary--fetch-current
+              tessera-gnus-summary--fetch-total))
+   tessera-gnus-summary--fetch-failed
+   (pcase tessera-gnus-summary--status-state
+     ('processing "Gnus is fetching article headers")
+     ('fail
+      (concat "The last fetch failed; "
+              "mouse-1: Get new articles"))
+     (_ "mouse-1: Get new articles"))
+   tessera-gnus-summary--status-map))
 
 (defun tessera-gnus-summary--insert-new-articles (event)
   "Insert new articles in the Summary window from mouse EVENT."
@@ -2325,6 +2252,13 @@ Return the member buffer positions."
     (when article
       (gnus-summary-goto-subject article nil t))))
 
+(defun tessera-gnus-summary-refresh ()
+  "Refresh the Tessera presentation in the current Summary buffer."
+  (when (and tessera-gnus-summary--installed-p
+             tessera-gnus-summary--line-format-installed-p
+             gnus-newsgroup-prepared)
+    (tessera-gnus-summary--regenerate)))
+
 (defun tessera-gnus-summary--element-bounds (start end elements)
   "Return bounds of the first named element between START and END.
 
@@ -2495,7 +2429,7 @@ Return the string displayed in WINDOW."
           (or (get-text-property position 'tessera-native-mark)
               (tessera-gnus-summary--mark-variable slot character)))
          (uniform-face
-          (and tessera-gnus-summary-use-uniform-glyph-color
+          (and tessera-gnus-use-uniform-glyph-color
                (tessera-gnus-summary--subject-color-face
                 (get-text-property position 'gnus-number))))
          (color-face
@@ -3101,33 +3035,6 @@ Stop at LIMIT when it is non-nil."
   (when (derived-mode-p 'gnus-summary-mode)
     (tessera-gnus-summary--schedule-window-presentations)))
 
-(defun tessera-gnus-summary--refresh-presentation (&rest _args)
-  "Regenerate the current Summary presentation."
-  (when (and tessera-gnus-summary--installed-p
-             tessera-gnus-summary--line-format-installed-p
-             gnus-newsgroup-prepared)
-    (tessera-gnus-summary--cancel-presentation-update)
-    (tessera-gnus-summary--regenerate)))
-
-(defun tessera-gnus-summary--refresh-presentations (&rest _args)
-  "Regenerate all active Gnus Summary presentations."
-  (dolist (buffer (match-buffers '(derived-mode . gnus-summary-mode)))
-    (with-current-buffer buffer
-      (tessera-gnus-summary--refresh-presentation))))
-
-(defun tessera-gnus-summary--add-face-remap-advice ()
-  "Add advice that invalidates Summary entry measurements."
-  (require 'face-remap)
-  (dolist (function tessera-gnus-summary--face-remap-functions)
-    (advice-add function :after
-                #'tessera-gnus-summary--face-remap-changed)))
-
-(defun tessera-gnus-summary--remove-face-remap-advice ()
-  "Remove advice that invalidates Summary entry measurements."
-  (dolist (function tessera-gnus-summary--face-remap-functions)
-    (advice-remove function
-                   #'tessera-gnus-summary--face-remap-changed)))
-
 (defun tessera-gnus-summary--install ()
   "Install Tessera in the current Gnus Summary buffer."
   (unless tessera-gnus-summary--installed-p
@@ -3146,6 +3053,8 @@ Stop at LIMIT when it is non-nil."
     (setq-local
      header-line-format
      tessera-gnus-summary--installed-header-line-format)
+    (setq-local tessera-gnus--face-remap-function
+                #'tessera-gnus-summary--face-remap-changed)
     (add-to-invisibility-spec 'tessera-gnus-summary-month)
     (add-hook 'gnus-summary-generate-hook
               #'tessera-gnus-summary--update-line-format nil t)
@@ -3171,7 +3080,7 @@ Stop at LIMIT when it is non-nil."
     (add-hook 'window-scroll-functions
               #'tessera-gnus-summary--window-scrolled nil t)
     (add-hook 'text-scale-mode-hook
-              #'tessera-gnus-summary--refresh-presentation nil t)
+              #'tessera-gnus-summary-refresh nil t)
     (add-hook 'post-command-hook
               #'tessera-gnus-summary--reveal-current-month nil t)
     (add-hook
@@ -3206,7 +3115,7 @@ Stop at LIMIT when it is non-nil."
     (remove-hook 'window-scroll-functions
                  #'tessera-gnus-summary--window-scrolled t)
     (remove-hook 'text-scale-mode-hook
-                 #'tessera-gnus-summary--refresh-presentation t)
+                 #'tessera-gnus-summary-refresh t)
     (remove-hook 'post-command-hook
                  #'tessera-gnus-summary--reveal-current-month t)
     (remove-hook 'kill-buffer-hook
@@ -3227,6 +3136,9 @@ Stop at LIMIT when it is non-nil."
           tessera-gnus-summary--original-header-line-format nil
           tessera-gnus-summary--original-header-line-local-p nil
           tessera-gnus-summary--selected-entry-anchor nil)
+    (when (eq tessera-gnus--face-remap-function
+              #'tessera-gnus-summary--face-remap-changed)
+      (kill-local-variable 'tessera-gnus--face-remap-function))
     (tessera-gnus-summary--restore-thread-tree-settings)
     (let ((line-format-restored-p
            (tessera-gnus-summary--restore-line-format))
@@ -3246,19 +3158,12 @@ Stop at LIMIT when it is non-nil."
   (unless tessera-gnus-summary--enabled-p
     (setq tessera-gnus-summary--enabled-p t)
     (tessera-gnus-summary--add-fetch-advice)
-    (tessera-gnus-summary--add-face-remap-advice)
     (advice-add 'gnus-summary-update-mark :around
                 #'tessera-gnus-summary--update-mark)
     (advice-add 'gnus-summary-set-article-display-arrow :around
                 #'tessera-gnus-summary--set-article-display-arrow)
     (advice-add 'gnus-highlight-selected-summary :after
                 #'tessera-gnus-summary--highlight-selected-entry)
-    (add-hook 'after-setting-font-hook
-              #'tessera-gnus-summary--refresh-presentations)
-    (add-hook 'enable-theme-functions
-              #'tessera-gnus-summary--refresh-presentations)
-    (add-hook 'disable-theme-functions
-              #'tessera-gnus-summary--refresh-presentations)
     (add-hook 'gnus-summary-mode-hook #'tessera-gnus-summary--install)
     (dolist (buffer
              (match-buffers '(derived-mode . gnus-summary-mode)))
@@ -3270,15 +3175,8 @@ Stop at LIMIT when it is non-nil."
   (when tessera-gnus-summary--enabled-p
     (setq tessera-gnus-summary--enabled-p nil)
     (tessera-gnus-summary--remove-fetch-advice)
-    (tessera-gnus-summary--remove-face-remap-advice)
     (advice-remove 'gnus-summary-update-mark
                    #'tessera-gnus-summary--update-mark)
-    (remove-hook 'after-setting-font-hook
-                 #'tessera-gnus-summary--refresh-presentations)
-    (remove-hook 'enable-theme-functions
-                 #'tessera-gnus-summary--refresh-presentations)
-    (remove-hook 'disable-theme-functions
-                 #'tessera-gnus-summary--refresh-presentations)
     (remove-hook
      'gnus-summary-mode-hook #'tessera-gnus-summary--install)
     (dolist (buffer

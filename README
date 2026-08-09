@@ -69,11 +69,11 @@ model.
 
 **** Symbols and Icons
 
-The default glyph style is ~unicode~.  Set the global default with ~setq-default~,
-because individual Summary buffers may override it:
+The default glyph style is ~unicode~.  Set the Gnus default with ~setq-default~,
+because individual Gnus buffers may override it:
 
 #+begin_src emacs-lisp
-(setq-default tessera-gnus-summary-symbol-style 'unicode)
+(setq-default tessera-gnus-symbol-style 'unicode)
 #+end_src
 
 The accepted values are ~native~, ~unicode~, and ~nerd-icons~.  The ~nerd-icons~ style
@@ -92,8 +92,12 @@ Use ~tessera-gnus-summary-mark-symbol-alist~ and
       '((attachment . "▣")))
 #+end_src
 
-Set ~tessera-gnus-summary-use-uniform-glyph-color~ to non-nil to make marks follow
-the subject color and features follow the author color.  Otherwise, glyphs use
+Use ~tessera-gnus-group-mark-symbol-alist~ to override the Group process and
+subscription marks.
+
+Set ~tessera-gnus-use-uniform-glyph-color~ to non-nil to make marks follow their
+adjacent text color in Summary buffers.  Summary features follow the author
+color, while Group marks use one neutral mark face.  Otherwise, glyphs use
 colors associated with their semantic roles.
 
 **** Notifications
@@ -147,8 +151,8 @@ future backends.
 **** Backend Symbols and Icons
 
 The core package does not impose a glyph style.  Configure symbols and icons
-through the backend option; for Gnus, use ~tessera-gnus-summary-symbol-style~ and
-the override alists described above.
+through the backend option; for Gnus, use ~tessera-gnus-symbol-style~ and the
+override alists described above.
 
 **** Notifications
 

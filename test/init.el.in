@@ -44,9 +44,9 @@
 		gnus-dribble-directory gnus-state-directory
 		gnus-home-directory gnus-state-directory
 		gnus-init-file nil
-		gnus-options-subscribe
-		(concat
-			"\\`" (regexp-quote tessera-gnus-fixture-group) "\\'")
+		gnus-options-subscribe tessera-gnus-fixture-group-regexp
+		gnus-permanently-visible-groups
+		tessera-gnus-fixture-group-regexp
 		gnus-select-method '(nnnil "")
 		gnus-show-threads t
 		gnus-site-init-file nil
@@ -61,7 +61,7 @@
 
 ;; Add any other feeds you follow to `elfeed-feeds'.
 
-(setq-default tessera-gnus-summary-symbol-style 'nerd-icons)
+(setq-default tessera-gnus-symbol-style 'nerd-icons)
 
 (tessera-gnus-mode +1)
 
