@@ -16,6 +16,7 @@
 	'load-path
 	(expand-file-name "../test/fixtures/" user-emacs-directory))
 (require 'tessera-gnus-fixture)
+(require 'tessera-mu4e-fixture)
 
 (setq modus-themes-to-toggle '(modus-operandi modus-vivendi))
 (load-theme 'modus-operandi t)
@@ -54,8 +55,6 @@
 		(expand-file-name ".newsrc" gnus-state-directory)
 		message-directory
 		(expand-file-name "mail/" gnus-state-directory)))
-
-;; Set `mu4e-maildir' to your own Maildir and add your mu4e accounts.
 
 ;; Add any other Gnus servers or account settings you need.
 
