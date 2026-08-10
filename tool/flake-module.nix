@@ -24,25 +24,33 @@ in
       inherit (lib)
         getExe
         ;
+
+      mkEmacsApp =
+        emacs: description:
+        let
+          launcher = pkgs.callPackage (projectRoot + /tool/apps/emacs.nix) {
+            inherit
+              emacs
+              projectRoot
+              ;
+          };
+        in
+        {
+          meta = {
+            inherit
+              description
+              ;
+          };
+
+          program = getExe launcher;
+          type = "app";
+        };
     in
     {
       apps = {
-        emacs =
-          let
-            launcher = pkgs.callPackage (projectRoot + /tool/apps/emacs.nix) {
-              inherit
-                projectRoot
-                ;
-            };
-          in
-          {
-            meta = {
-              description = "Launch Emacs with the local project configuration";
-            };
+        emacs = mkEmacsApp pkgs.emacs "Launch Emacs with the local project configuration";
 
-            program = getExe launcher;
-            type = "app";
-          };
+        emacs31 = mkEmacsApp pkgs.emacs31 "Launch Emacs 31 with the local project configuration";
       };
 
       devshells = {
