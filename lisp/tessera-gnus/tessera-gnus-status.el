@@ -25,39 +25,23 @@
 
 (require 'tessera-ui)
 
-(defun tessera-gnus-status
-    (state progress failed help-echo keymap)
-  "Return a Gnus status display for STATE.
+(defun tessera-gnus-status (state progress failed help-echo action)
+  "Return a Gnus header activity for STATE.
 
 PROGRESS is a current count or a current and total count cons.
-FAILED is an optional failure count.  HELP-ECHO and KEYMAP define
-header-line interaction."
-  (let ((face
-         (pcase state
-           ('processing 'tessera-header-status-processing)
-           ('fail 'tessera-header-status-fail)
-           (_ 'tessera-header-status-success)))
-        (text
-         (pcase state
-           ('processing
-            (cond
-             ((consp progress)
-              (format "FETCHING %d/%d"
-                      (car progress) (cdr progress)))
-             ((numberp progress)
-              (format "FETCHING %d" progress))
-             (t "FETCHING")))
-           ('fail
-            (if failed
-                (format "FETCH FAILED %d" failed)
-              "FETCH FAILED"))
-           (_ "IDLE"))))
-    (propertize
-     text
-     'face face
-     'help-echo help-echo
-     'keymap keymap
-     'mouse-face 'header-line-highlight)))
+FAILED is an optional failure count.  HELP-ECHO describes ACTION."
+  (tessera-ui-header-activity-create
+   :state
+   (pcase state
+     ('processing 'working)
+     ('fail 'error)
+     (_ 'idle))
+   :operation 'fetch
+   :current (if (consp progress) (car progress) progress)
+   :total (and (consp progress) (cdr progress))
+   :failed failed
+   :action action
+   :help-echo help-echo))
 
 (provide 'tessera-gnus-status)
 ;;; tessera-gnus-status.el ends here

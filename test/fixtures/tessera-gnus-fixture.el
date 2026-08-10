@@ -41,8 +41,7 @@
   "Full name of the local fixture group.")
 
 (defconst tessera-gnus-fixture-directory
-  (expand-file-name
-   "fixtures/gnus/" user-emacs-directory)
+  (expand-file-name "fixtures/gnus/" user-emacs-directory)
   "Directory containing the local fixture server.")
 
 (defconst tessera-gnus-fixture-data-version 1
@@ -57,11 +56,9 @@
 (defconst tessera-gnus-fixture-method
   `(nnml ,tessera-gnus-fixture-server
          (nnml-directory ,tessera-gnus-fixture-directory)
-         (nnml-active-file
-          ,(expand-file-name "active" tessera-gnus-fixture-directory))
-         (nnml-newsgroups-file
-          ,(expand-file-name
-            "newsgroups" tessera-gnus-fixture-directory))
+         (nnml-active-file ,(expand-file-name "active" tessera-gnus-fixture-directory))
+         (nnml-newsgroups-file ,(expand-file-name
+                                 "newsgroups" tessera-gnus-fixture-directory))
          (nnml-get-new-mail nil))
   "Gnus select method for the local fixture server.")
 
@@ -155,11 +152,9 @@ article state, and expected unread count.")
 (defconst tessera-gnus-fixture-group-regexp
   (concat
    "\\`"
-   (regexp-opt
-    (list
-     (concat "nnml+" tessera-gnus-fixture-server)
-     (concat "nnspool+" tessera-gnus-fixture-news-server))
-    t)
+   (regexp-opt (list (concat "nnml+" tessera-gnus-fixture-server)
+                     (concat "nnspool+" tessera-gnus-fixture-news-server))
+               t)
    ":tessera\\.")
   "Regexp matching every local Tessera Gnus fixture group.")
 
@@ -219,14 +214,12 @@ article state, and expected unread count.")
   "Root subjects of the fixture threads.")
 
 (defconst tessera-gnus-fixture--single-subjects
-  (list
-   (concat
-    "A standalone announcement with a deliberately long subject "
-    "for truncation")
-   "Calendar invitation: Tessera interface review"
-   "Signed release checklist"
-   "Encrypted note for the maintainers"
-   "Short update")
+  (list (concat "A standalone announcement with a deliberately long subject "
+                "for truncation")
+        "Calendar invitation: Tessera interface review"
+        "Signed release checklist"
+        "Encrypted note for the maintainers"
+        "Short update")
   "Subjects of the standalone fixture articles.")
 
 (defconst tessera-gnus-fixture--monthly-articles
@@ -373,9 +366,8 @@ article state, and expected unread count.")
     (while-let
         ((parent
           (nth index tessera-gnus-fixture--thread-parents)))
-      (push
-       (tessera-gnus-fixture--message-id thread parent)
-       references)
+      (push (tessera-gnus-fixture--message-id thread parent)
+            references)
       (setq index parent))
     references))
 
@@ -384,12 +376,10 @@ article state, and expected unread count.")
   (pcase-let ((`(,root . ,interval)
                (nth (1- thread)
                     tessera-gnus-fixture--thread-date-settings)))
-    (format-time-string
-     "%a, %d %b %Y %T %z"
-     (time-add
-      (date-to-time root)
-      (seconds-to-time (* index interval 3600)))
-     (* 8 3600))))
+    (format-time-string "%a, %d %b %Y %T %z"
+                        (time-add (date-to-time root)
+                                  (seconds-to-time (* index interval 3600)))
+                        (* 8 3600))))
 
 (defun tessera-gnus-fixture--thread-specs ()
   "Return the 45 threaded fixture article specifications."
@@ -403,20 +393,19 @@ article state, and expected unread count.")
        (setq number (1+ number))
        (let ((references
               (tessera-gnus-fixture--thread-references thread index)))
-         (push
-          (list :number number
-                :subject (if (zerop index)
-                             subject
-                           (concat "Re: " subject))
-                :thread thread
-                :index index
-                :date
-                (tessera-gnus-fixture--thread-date thread index)
-                :message-id
-                (tessera-gnus-fixture--message-id thread index)
-                :in-reply-to (car (last references))
-                :references references)
-          specs))))
+         (push (list :number number
+                     :subject (if (zerop index)
+                                  subject
+                                (concat "Re: " subject))
+                     :thread thread
+                     :index index
+                     :date
+                     (tessera-gnus-fixture--thread-date thread index)
+                     :message-id
+                     (tessera-gnus-fixture--message-id thread index)
+                     :in-reply-to (car (last references))
+                     :references references)
+               specs))))
     (nreverse specs)))
 
 (defun tessera-gnus-fixture--single-specs ()
@@ -448,10 +437,9 @@ article state, and expected unread count.")
 
 (defun tessera-gnus-fixture--date (number)
   "Return a recent mail date for article NUMBER."
-  (format-time-string
-   "%a, %d %b %Y %T %z"
-   (time-subtract (current-time)
-                  (seconds-to-time (* (- 50 number) 7200)))))
+  (format-time-string "%a, %d %b %Y %T %z"
+                      (time-subtract (current-time)
+                                     (seconds-to-time (* (- 50 number) 7200)))))
 
 (defun tessera-gnus-fixture--body (profile number)
   "Return a MIME body for PROFILE and article NUMBER."
@@ -467,37 +455,33 @@ article state, and expected unread count.")
         "-----BEGIN PGP SIGNATURE-----\nfixture\n"
         "-----END PGP SIGNATURE-----\n--" boundary "--\n")))
     ((or 'encrypted 'encrypted-list)
-     (concat
-      "--fixture-encrypted\n"
-      "Content-Type: application/pgp-encrypted\n\nVersion: 1\n"
-      "--fixture-encrypted\n"
-      "Content-Type: application/octet-stream\n\n"
-      "-----BEGIN PGP MESSAGE-----\nfixture\n"
-      "-----END PGP MESSAGE-----\n--fixture-encrypted--\n"))
+     (concat "--fixture-encrypted\n"
+             "Content-Type: application/pgp-encrypted\n\nVersion: 1\n"
+             "--fixture-encrypted\n"
+             "Content-Type: application/octet-stream\n\n"
+             "-----BEGIN PGP MESSAGE-----\nfixture\n"
+             "-----END PGP MESSAGE-----\n--fixture-encrypted--\n"))
     ('attachment
-     (concat
-      "--fixture-attachment\n"
-      "Content-Type: text/plain; charset=utf-8\n\n"
-      (format "Attachment fixture article %d.\n" number)
-      "--fixture-attachment\n"
-      "Content-Type: text/plain; name=\"notes.txt\"\n"
-      "Content-Disposition: attachment; filename=\"notes.txt\"\n\n"
-      "Fixture attachment.\n--fixture-attachment--\n"))
+     (concat "--fixture-attachment\n"
+             "Content-Type: text/plain; charset=utf-8\n\n"
+             (format "Attachment fixture article %d.\n" number)
+             "--fixture-attachment\n"
+             "Content-Type: text/plain; name=\"notes.txt\"\n"
+             "Content-Disposition: attachment; filename=\"notes.txt\"\n\n"
+             "Fixture attachment.\n--fixture-attachment--\n"))
     ((or 'calendar 'calendar-list)
-     (format
-      (concat "BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\n"
-              "UID:tessera-%d@fixture.invalid\n"
-              "SUMMARY:Tessera fixture review\n"
-              "DTSTART:20260808T090000Z\nDTEND:20260808T100000Z\n"
-              "END:VEVENT\nEND:VCALENDAR\n")
-      number))
+     (format (concat "BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\n"
+                     "UID:tessera-%d@fixture.invalid\n"
+                     "SUMMARY:Tessera fixture review\n"
+                     "DTSTART:20260808T090000Z\nDTEND:20260808T100000Z\n"
+                     "END:VEVENT\nEND:VCALENDAR\n")
+             number))
     (_
-     (format
-      (concat "This is Tessera fixture article %d.\n\n"
-              "It contains enough body text to open as an "
-              "ordinary article while the Summary buffer "
-              "exercises presentation state.\n")
-      number))))
+     (format (concat "This is Tessera fixture article %d.\n\n"
+                     "It contains enough body text to open as an "
+                     "ordinary article while the Summary buffer "
+                     "exercises presentation state.\n")
+             number))))
 
 (defun tessera-gnus-fixture--insert-article (spec)
   "Insert the RFC message described by SPEC into the current buffer."
@@ -552,50 +536,40 @@ article state, and expected unread count.")
    (nnml-request-create-group name tessera-gnus-fixture-server)
    (when (eq article-state 1)
      (let* ((directory
-             (expand-file-name
-              (concat (subst-char-in-string ?. ?/ name) "/")
-              tessera-gnus-fixture-directory))
+             (expand-file-name (concat (subst-char-in-string ?. ?/ name) "/")
+                               tessera-gnus-fixture-directory))
             (articles
              (and (file-directory-p directory)
                   (directory-files directory nil "\\`[0-9]+\\'"))))
        (unless articles
          (with-temp-buffer
-           (tessera-gnus-fixture--insert-article
-            (list
-             :number number
-             :subject (format "Group fixture for %s" name)
-             :message-id
-             (tessera-gnus-fixture--message-id name number)))
-           (nnml-request-accept-article
-            name tessera-gnus-fixture-server t)))))))
+           (tessera-gnus-fixture--insert-article (list :number number
+                                                       :subject (format "Group fixture for %s" name)
+                                                       :message-id
+                                                       (tessera-gnus-fixture--message-id name number)))
+           (nnml-request-accept-article name tessera-gnus-fixture-server t)))))))
 
 (defun tessera-gnus-fixture--news-article-file (name)
   "Return the article file for news fixture NAME."
-  (expand-file-name
-   "1"
-   (expand-file-name
-    (concat (subst-char-in-string ?. ?/ name) "/")
-    (expand-file-name
-     "spool/" tessera-gnus-fixture-news-directory))))
+  (expand-file-name "1"
+                    (expand-file-name (concat (subst-char-in-string ?. ?/ name) "/")
+                                      (expand-file-name "spool/" tessera-gnus-fixture-news-directory))))
 
 (defun tessera-gnus-fixture--install-news-groups ()
   "Install the non-topic news Group fixtures."
   (make-directory tessera-gnus-fixture-news-directory t)
-  (make-directory
-   (expand-file-name
-    "spool/" tessera-gnus-fixture-news-directory)
-   t)
+  (make-directory (expand-file-name "spool/" tessera-gnus-fixture-news-directory)
+                  t)
   (with-temp-file
       (expand-file-name "active" tessera-gnus-fixture-news-directory)
     (dolist (spec tessera-gnus-fixture--group-specs)
       (pcase-let ((`(,kind ,name ,_level ,article-state ,_unread)
                    spec))
         (when (eq kind 'news)
-          (insert
-           (format "%s %010d %010d y\n"
-                   name
-                   (if (eq article-state 0) 0 1)
-                   1))))))
+          (insert (format "%s %010d %010d y\n"
+                          name
+                          (if (eq article-state 0) 0 1)
+                          1))))))
   (with-temp-file
       (expand-file-name "newsgroups"
                         tessera-gnus-fixture-news-directory)
@@ -615,31 +589,27 @@ article state, and expected unread count.")
    (let ((article (tessera-gnus-fixture--news-article-file name)))
      (make-directory (file-name-directory article) t)
      (with-temp-file article
-       (tessera-gnus-fixture--insert-article
-        (list
-         :number number
-         :subject (format "Group fixture for %s" name)
-         :message-id
-         (tessera-gnus-fixture--message-id name number)))))))
+       (tessera-gnus-fixture--insert-article (list :number number
+                                                   :subject (format "Group fixture for %s" name)
+                                                   :message-id
+                                                   (tessera-gnus-fixture--message-id name number)))))))
 
 (defun tessera-gnus-fixture--data-signature ()
   "Return the signature of the current fixture data."
-  (secure-hash
-   'sha256
-   (prin1-to-string
-    (list tessera-gnus-fixture-data-version
-          tessera-gnus-fixture-address
-          tessera-gnus-fixture--group-specs
-          tessera-gnus-fixture--topic-topology
-          tessera-gnus-fixture--topic-members
-          tessera-gnus-fixture--authors
-          tessera-gnus-fixture--thread-subjects
-          tessera-gnus-fixture--single-subjects
-          tessera-gnus-fixture--monthly-articles
-          tessera-gnus-fixture--thread-parents
-          tessera-gnus-fixture--thread-date-settings
-          tessera-gnus-fixture--feature-profiles
-          (tessera-gnus-fixture--specs)))))
+  (secure-hash 'sha256
+               (prin1-to-string (list tessera-gnus-fixture-data-version
+                                      tessera-gnus-fixture-address
+                                      tessera-gnus-fixture--group-specs
+                                      tessera-gnus-fixture--topic-topology
+                                      tessera-gnus-fixture--topic-members
+                                      tessera-gnus-fixture--authors
+                                      tessera-gnus-fixture--thread-subjects
+                                      tessera-gnus-fixture--single-subjects
+                                      tessera-gnus-fixture--monthly-articles
+                                      tessera-gnus-fixture--thread-parents
+                                      tessera-gnus-fixture--thread-date-settings
+                                      tessera-gnus-fixture--feature-profiles
+                                      (tessera-gnus-fixture--specs)))))
 
 (defun tessera-gnus-fixture--signature-file ()
   "Return the file recording the installed fixture signature."
@@ -659,19 +629,17 @@ article state, and expected unread count.")
   (nnml-close-server tessera-gnus-fixture-server)
   (nnspool-close-server tessera-gnus-fixture-news-server)
   (dolist (directory
-           (list
-            (expand-file-name "tessera/"
-                              tessera-gnus-fixture-directory)
-            tessera-gnus-fixture-news-directory))
+           (list (expand-file-name "tessera/"
+                                   tessera-gnus-fixture-directory)
+                 tessera-gnus-fixture-news-directory))
     (when (file-directory-p directory)
       (delete-directory directory t)))
   (dolist (file
-           (list
-            (expand-file-name "active"
-                              tessera-gnus-fixture-directory)
-            (expand-file-name "newsgroups"
-                              tessera-gnus-fixture-directory)
-            (tessera-gnus-fixture--signature-file)))
+           (list (expand-file-name "active"
+                                   tessera-gnus-fixture-directory)
+                 (expand-file-name "newsgroups"
+                                   tessera-gnus-fixture-directory)
+                 (tessera-gnus-fixture--signature-file)))
     (when (file-exists-p file)
       (delete-file file))))
 
@@ -700,8 +668,7 @@ article state, and expected unread count.")
                               tessera-gnus-fixture-directory))
            (articles
             (and (file-directory-p group-directory)
-                 (directory-files
-                  group-directory nil "\\`[0-9]+\\'")))
+                 (directory-files group-directory nil "\\`[0-9]+\\'")))
            (installed (length articles))
            (all-specs (tessera-gnus-fixture--specs))
            (last-number (length all-specs))
@@ -709,10 +676,9 @@ article state, and expected unread count.")
       (dolist (spec specs)
         (with-temp-buffer
           (tessera-gnus-fixture--insert-article spec)
-          (nnml-request-accept-article
-           "tessera.summary"
-           tessera-gnus-fixture-server
-           (= (plist-get spec :number) last-number)))))
+          (nnml-request-accept-article "tessera.summary"
+                                       tessera-gnus-fixture-server
+                                       (= (plist-get spec :number) last-number)))))
     (nnml-close-server tessera-gnus-fixture-server)
     (tessera-gnus-fixture--install-news-groups)
     (with-temp-file (tessera-gnus-fixture--signature-file)
@@ -787,18 +753,14 @@ article state, and expected unread count.")
     (setq-local gnus-summary-zcore-fuzz 0)
     (dolist (header gnus-newsgroup-headers)
       (let ((article (mail-header-number header)))
-        (tessera-gnus-fixture--mark-primary
-         article (tessera-gnus-fixture--primary-mark article))
-        (tessera-gnus-fixture--mark-secondary
-         article (tessera-gnus-fixture--secondary-mark article))
-        (tessera-gnus-fixture--mark-score
-         article (tessera-gnus-fixture--score article))))))
+        (tessera-gnus-fixture--mark-primary article (tessera-gnus-fixture--primary-mark article))
+        (tessera-gnus-fixture--mark-secondary article (tessera-gnus-fixture--secondary-mark article))
+        (tessera-gnus-fixture--mark-score article (tessera-gnus-fixture--score article))))))
 
 (defun tessera-gnus-fixture--summary-setup ()
   "Install fixture behavior in its Summary buffer."
   (when (equal gnus-newsgroup-name tessera-gnus-fixture-group)
-    (add-hook 'gnus-summary-generate-hook
-              #'tessera-gnus-fixture--apply-marks 50 t)))
+    (add-hook 'gnus-summary-generate-hook #'tessera-gnus-fixture--apply-marks 50 t)))
 
 (defun tessera-gnus-fixture--topic-group (spec)
   "Return the full fixture group represented by topic SPEC."
@@ -812,13 +774,11 @@ article state, and expected unread count.")
   (setq gnus-topic-topology
         (copy-tree tessera-gnus-fixture--topic-topology)
         gnus-topic-alist
-        (mapcar
-         (lambda (topic)
-           (cons
-            (car topic)
-            (mapcar #'tessera-gnus-fixture--topic-group
-                    (cdr topic))))
-         tessera-gnus-fixture--topic-members)
+        (mapcar (lambda (topic)
+                  (cons (car topic)
+                        (mapcar #'tessera-gnus-fixture--topic-group
+                                (cdr topic))))
+                tessera-gnus-fixture--topic-members)
         gnus-topic-unreads nil
         gnus-topology-checked-p t))
 
@@ -841,8 +801,7 @@ article state, and expected unread count.")
   (tessera-gnus-fixture--register-topic-fixtures)
   (gnus-group-list-groups nil t)
   (let ((process-group
-         (tessera-gnus-fixture--group-name
-          'news "tessera.news.level4.unread")))
+         (tessera-gnus-fixture--group-name 'news "tessera.news.level4.unread")))
     (add-to-list 'gnus-group-marked process-group)
     (gnus-group-update-group process-group t t)))
 
@@ -856,10 +815,8 @@ article state, and expected unread count.")
                tessera-gnus-fixture-method t)
   (add-to-list 'gnus-secondary-select-methods
                tessera-gnus-fixture-news-method t)
-  (add-hook 'gnus-summary-mode-hook
-            #'tessera-gnus-fixture--summary-setup)
-  (add-hook 'gnus-started-hook
-            #'tessera-gnus-fixture--register-group-fixtures)
+  (add-hook 'gnus-summary-mode-hook #'tessera-gnus-fixture--summary-setup)
+  (add-hook 'gnus-started-hook #'tessera-gnus-fixture--register-group-fixtures)
   (tessera-gnus-fixture--install-articles))
 
 (defun tessera-gnus-fixture-open ()
@@ -873,9 +830,8 @@ article state, and expected unread count.")
       (gnus-group-make-group "tessera.summary"
                              tessera-gnus-fixture-method))
     (gnus-activate-group tessera-gnus-fixture-group)
-    (gnus-group-read-group
-     (length (tessera-gnus-fixture--specs))
-     t tessera-gnus-fixture-group)))
+    (gnus-group-read-group (length (tessera-gnus-fixture--specs))
+                           t tessera-gnus-fixture-group)))
 
 (tessera-gnus-fixture-install)
 

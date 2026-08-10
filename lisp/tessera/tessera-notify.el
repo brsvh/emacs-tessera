@@ -70,23 +70,20 @@ The value `inherit' follows `tessera-notify-enable'."
              (stringp mail-address)
              (not (string-empty-p mail-address)))
     (let ((file
-           (expand-file-name
-            (gravatar-hash mail-address)
-            tessera-notify-avatar-cache-directory)))
+           (expand-file-name (gravatar-hash mail-address)
+                             tessera-notify-avatar-cache-directory)))
       (if (file-exists-p file)
           file
         (condition-case nil
             (let ((gravatar-default-image "404")
                   (gravatar-force-default nil)
                   (image
-                   (gravatar-retrieve-synchronously
-                    mail-address)))
+                   (gravatar-retrieve-synchronously mail-address)))
               (unless (eq image 'error)
                 (let ((data (image-property image :data))
                       (coding-system-for-write 'binary))
                   (when data
-                    (make-directory
-                     tessera-notify-avatar-cache-directory t)
+                    (make-directory tessera-notify-avatar-cache-directory t)
                     (write-region data nil file nil 'silent)
                     file))))
           (error nil))))))
@@ -94,10 +91,9 @@ The value `inherit' follows `tessera-notify-enable'."
 (defun tessera-notify--action-list (actions)
   "Return the desktop action list described by ACTIONS."
   (apply #'append
-         (mapcar
-          (lambda (action)
-            (list (nth 0 action) (nth 1 action)))
-          actions)))
+         (mapcar (lambda (action)
+                   (list (nth 0 action) (nth 1 action)))
+                 actions)))
 
 (defun tessera-notify--run-action (actions _id key)
   "Run the action named KEY from ACTIONS."
@@ -110,30 +106,28 @@ The value `inherit' follows `tessera-notify-enable'."
   (let* ((data (plist-get info :data))
          (actions (plist-get data :actions))
          (category (plist-get info :category)))
-    (notifications-notify
-     :title (plist-get info :title)
-     :body (plist-get info :message)
-     :app-name "Tessera"
-     :app-icon (and tessera-notify-use-icons
-                    (plist-get info :icon))
-     :category
-     (if (symbolp category) (symbol-name category) category)
-     :timeout (if (plist-get info :persistent) 0 -1)
-     :urgency
-     (or (cdr (assq (plist-get info :severity)
-                    alert-notifications-priorities))
-         'normal)
-     :actions (and actions
-                   (tessera-notify--action-list actions))
-     :on-action
-     (and actions
-          (apply-partially #'tessera-notify--run-action
-                           actions)))))
+    (notifications-notify :title (plist-get info :title)
+                          :body (plist-get info :message)
+                          :app-name "Tessera"
+                          :app-icon (and tessera-notify-use-icons
+                                         (plist-get info :icon))
+                          :category
+                          (if (symbolp category) (symbol-name category) category)
+                          :timeout (if (plist-get info :persistent) 0 -1)
+                          :urgency
+                          (or (cdr (assq (plist-get info :severity)
+                                         alert-notifications-priorities))
+                              'normal)
+                          :actions (and actions
+                                        (tessera-notify--action-list actions))
+                          :on-action
+                          (and actions
+                               (apply-partially #'tessera-notify--run-action
+                                                actions)))))
 
-(alert-define-style
- 'tessera
- :title "Tessera desktop notification"
- :notifier #'tessera-notify--notify)
+(alert-define-style 'tessera
+                    :title "Tessera desktop notification"
+                    :notifier #'tessera-notify--notify)
 
 (defun tessera-notify (notification)
   "Send NOTIFICATION through the Tessera alert style.

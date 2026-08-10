@@ -98,35 +98,28 @@ option affects TAB only on a topic line."
 (defvar-local tessera-gnus-topic--window-overlays nil
   "Window-local overlays used to truncate Topic names.")
 
-(defvar-local
-    tessera-gnus-topic--original-overriding-map-alist nil
+(defvar-local tessera-gnus-topic--original-overriding-map-alist nil
   "Overriding minor-mode maps saved before Tessera installation.")
 
-(defvar-local
-    tessera-gnus-topic--original-overriding-map-alist-local-p nil
+(defvar-local tessera-gnus-topic--original-overriding-map-alist-local-p nil
   "Non-nil when the saved overriding maps were buffer-local.")
 
 (defvar tessera-gnus-topic--enabled-p nil
   "Non-nil when Tessera Topic integration is enabled.")
 
-(defvar tessera-gnus-topic--mouse-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [mouse-1] #'tessera-gnus-topic--mouse-fold)
-    map)
-  "Keymap used on a Tessera topic row.")
+(defvar-keymap tessera-gnus-topic--mouse-map
+  :doc "Keymap used on a Tessera topic row."
+  "<mouse-1>" #'tessera-gnus-topic--mouse-fold)
 
-(defvar tessera-gnus-topic--tab-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "TAB") #'tessera-gnus-topic--tab)
-    (define-key map (kbd "<tab>") #'tessera-gnus-topic--tab)
-    map)
-  "Keymap overriding TAB on a Tessera topic row.")
+(defvar-keymap tessera-gnus-topic--tab-map
+  :doc "Keymap overriding TAB on a Tessera topic row."
+  "TAB" #'tessera-gnus-topic--tab
+  "<tab>" #'tessera-gnus-topic--tab)
 
 (defun tessera-gnus-topic--element (text element &optional face)
   "Return a copy of TEXT named ELEMENT and optionally using FACE."
   (let ((text (copy-sequence text)))
-    (put-text-property
-     0 (length text) 'tessera-element element text)
+    (put-text-property 0 (length text) 'tessera-ui--element element text)
     (when face
       (add-face-text-property 0 (length text) face nil text))
     text))
@@ -140,85 +133,67 @@ option affects TAB only on a topic line."
 (defun tessera-gnus-topic--name (topic-name topic-level)
   "Return TOPIC-NAME presented at native TOPIC-LEVEL."
   (let ((text
-         (tessera-gnus-topic--element
-          topic-name 'topic.name)))
-    (add-text-properties
-     0 (length text)
-     (list 'face
-           (list
-            (list :height
-                  (tessera-gnus-topic--height topic-level))
-            'tessera-gnus-topic-name)
-           'help-echo topic-name)
-     text)
+         (tessera-gnus-topic--element topic-name 'topic.name)))
+    (add-text-properties 0 (length text)
+                         (list 'face
+                               (list (list :height
+                                           (tessera-gnus-topic--height topic-level))
+                                     'tessera-gnus-topic-name)
+                               'help-echo topic-name)
+                         text)
     text))
 
 (defun tessera-gnus-topic--statistics (unread groups)
   "Return collapsed Topic statistics for UNREAD and GROUPS."
   (let* ((unread-count
-          (tessera-gnus-topic--element
-           (number-to-string unread)
-           'topic.statistics.unread-count
-           (if (> unread 0)
-               'tessera-gnus-topic-unread
-             'tessera-gnus-topic-statistics)))
+          (tessera-gnus-topic--element (number-to-string unread)
+                                       'topic.statistics.unread-count
+                                       (if (> unread 0)
+                                           'tessera-gnus-topic-unread
+                                         'tessera-gnus-topic-statistics)))
          (unread-text
-          (tessera-gnus-topic--element
-           "unread" 'topic.statistics.unread-text))
+          (tessera-gnus-topic--element "unread" 'topic.statistics.unread-text))
          (separator
-          (tessera-gnus-topic--element
-           " " 'topic.statistics.separator))
+          (tessera-gnus-topic--element " " 'topic.statistics.separator))
          (special-separator
-          (tessera-gnus-topic--element
-           " · " 'topic.statistics.special-separator))
+          (tessera-gnus-topic--element " · " 'topic.statistics.special-separator))
          (groups-count
-          (tessera-gnus-topic--element
-           (number-to-string groups)
-           'topic.statistics.groups-count))
+          (tessera-gnus-topic--element (number-to-string groups)
+                                       'topic.statistics.groups-count))
          (groups-text
-          (tessera-gnus-topic--element
-           (if (= groups 1) "group" "groups")
-           'topic.statistics.groups-text))
+          (tessera-gnus-topic--element (if (= groups 1) "group" "groups")
+                                       'topic.statistics.groups-text))
          (text
           (concat unread-count separator unread-text
                   special-separator groups-count separator
                   groups-text)))
-    (add-face-text-property
-     0 (length text) 'tessera-gnus-topic-statistics t text)
-    (put-text-property
-     0 (length text) 'tessera-parent-element
-     'topic.statistics text)
+    (add-face-text-property 0 (length text) 'tessera-gnus-topic-statistics t text)
+    (put-text-property 0 (length text) 'tessera-ui--parent-element 'topic.statistics text)
     text))
 
-(defun tessera-gnus-topic--row
-    (topic-name topic-level expanded unread groups)
+(defun tessera-gnus-topic--row (topic-name topic-level expanded unread groups)
   "Return a Topic row from native presentation values.
 
 TOPIC-NAME and TOPIC-LEVEL identify the topic.  EXPANDED is non-nil
 when its children are visible.  UNREAD and GROUPS include subtopics."
   (let* ((top-padding
-          (tessera-ui-vertical-padding
-           'tessera-gnus-topic-name 'topic.top-padding
-           tessera-gnus-topic--top-padding 0))
+          (tessera-ui-vertical-padding 'tessera-gnus-topic-name 'topic.top-padding
+                                       tessera-gnus-topic--top-padding 0))
          (safety-gap
-          (tessera-gnus-topic--element
-           (tessera-ui-entry-leading-safety-gap)
-           'topic.safety-gap))
+          (tessera-gnus-topic--element (tessera-ui-entry-leading-safety-gap)
+                                       'topic.safety-gap))
          (left-padding
-          (tessera-gnus-topic--element
-           (tessera-ui-entry-padding 'entry.left-padding)
-           'topic.left-padding))
+          (tessera-gnus-topic--element (tessera-ui-entry-padding 'entry.left-padding)
+                                       'topic.left-padding))
          (disclosure
-          (tessera-gnus-topic--element
-           (if expanded
-               (propertize
-                " " 'display
-                `(space :width
-                        (,(string-pixel-width
-                           tessera-gnus-group--disclosure-glyph))))
-             tessera-gnus-group--disclosure-glyph)
-           'topic.disclosure
-           'tessera-gnus-topic-disclosure))
+          (tessera-gnus-topic--element (if expanded
+                                           (propertize " " 'display
+                                                       `(space :width
+                                                               (,(string-pixel-width
+                                                                  tessera-gnus-group--disclosure-glyph))))
+                                         tessera-gnus-group--disclosure-glyph)
+                                       'topic.disclosure
+                                       'tessera-gnus-topic-disclosure))
          (separator
           (tessera-gnus-topic--element " " 'topic.separator))
          (display-name
@@ -227,44 +202,38 @@ when its children are visible.  UNREAD and GROUPS include subtopics."
           (and (not expanded)
                (tessera-gnus-topic--statistics unread groups)))
          (right-padding
-          (tessera-gnus-topic--element
-           (tessera-ui-entry-padding 'entry.right-padding)
-           'topic.right-padding))
+          (tessera-gnus-topic--element (tessera-ui-entry-padding 'entry.right-padding)
+                                       'topic.right-padding))
          (trailing-gap
-          (tessera-gnus-topic--element
-           (tessera-ui-entry-trailing-safety-gap)
-           'topic.safety-gap))
+          (tessera-gnus-topic--element (tessera-ui-entry-trailing-safety-gap)
+                                       'topic.safety-gap))
          (right (concat statistics right-padding trailing-gap))
          (flex-gap
           (let ((gap (tessera-ui-entry-flex-gap right)))
-            (put-text-property
-             0 (length gap) 'tessera-element 'topic.flex-gap gap)
+            (put-text-property 0 (length gap) 'tessera-ui--element 'topic.flex-gap gap)
             gap))
          (bottom-padding
-          (tessera-ui-vertical-padding
-           'tessera-gnus-topic-name 'topic.bottom-padding
-           0 tessera-gnus-topic--bottom-padding))
+          (tessera-ui-vertical-padding 'tessera-gnus-topic-name 'topic.bottom-padding
+                                       0 tessera-gnus-topic--bottom-padding))
          (row
           (concat top-padding safety-gap left-padding disclosure
                   separator display-name flex-gap right
                   bottom-padding)))
-    (add-text-properties
-     0 (length row)
-     (list 'tessera-parent-element 'topic
-           'tessera-context topic-name
-           'mouse-face 'highlight
-           'keymap tessera-gnus-topic--mouse-map)
-     row)
+    (add-text-properties 0 (length row)
+                         (list 'tessera-ui--parent-element 'topic
+                               'tessera-ui--context topic-name
+                               'mouse-face 'highlight
+                               'keymap tessera-gnus-topic--mouse-map)
+                         row)
     row))
 
 (defun gnus-user-format-function-tessera-gnus-topic (_header)
   "Return the Tessera row for the current native Gnus topic."
-  (tessera-gnus-topic--row
-   (symbol-value 'name)
-   (symbol-value 'level)
-   (string-empty-p (symbol-value 'visible))
-   (symbol-value 'total-number-of-articles)
-   (symbol-value 'total-number-of-groups)))
+  (tessera-gnus-topic--row (symbol-value 'name)
+                           (symbol-value 'level)
+                           (string-empty-p (symbol-value 'visible))
+                           (symbol-value 'total-number-of-articles)
+                           (symbol-value 'total-number-of-groups)))
 
 (defun tessera-gnus-topic--mouse-fold (event)
   "Fold the native Gnus topic selected by mouse EVENT."
@@ -285,39 +254,31 @@ when its children are visible.  UNREAD and GROUPS include subtopics."
   (if (not tessera-gnus-topic-tab-fold)
       (tessera-gnus-topic--restore-tab-map)
     (let* ((maps
-            (copy-sequence
-             tessera-gnus-topic--original-overriding-map-alist))
+            (copy-sequence tessera-gnus-topic--original-overriding-map-alist))
            (original-map
             (cdr (assq 'gnus-topic-mode maps))))
       (setq maps (assq-delete-all 'gnus-topic-mode maps))
-      (push
-       (cons
-        'gnus-topic-mode
-        (make-composed-keymap
-         tessera-gnus-topic--tab-map
-         (or original-map gnus-topic-mode-map)))
-       maps)
+      (push (cons 'gnus-topic-mode
+                  (make-composed-keymap tessera-gnus-topic--tab-map
+                                        (or original-map gnus-topic-mode-map)))
+            maps)
       (setq-local minor-mode-overriding-map-alist maps))))
 
 (defun tessera-gnus-topic--restore-tab-map ()
   "Restore the overriding maps saved before Tessera installation."
   (if tessera-gnus-topic--original-overriding-map-alist-local-p
-      (setq-local
-       minor-mode-overriding-map-alist
-       (copy-sequence
-        tessera-gnus-topic--original-overriding-map-alist))
+      (setq-local minor-mode-overriding-map-alist
+                  (copy-sequence tessera-gnus-topic--original-overriding-map-alist))
     (kill-local-variable 'minor-mode-overriding-map-alist)))
 
-(defun tessera-gnus-topic--delete-window-overlays
-    (&optional window)
+(defun tessera-gnus-topic--delete-window-overlays (&optional window)
   "Delete Topic presentation overlays for WINDOW.
 
 Delete every presentation overlay when WINDOW is nil."
   (let (remaining)
     (dolist (overlay tessera-gnus-topic--window-overlays)
       (if (or (not (overlay-buffer overlay))
-              (not (window-live-p
-                    (overlay-get overlay 'window)))
+              (not (window-live-p (overlay-get overlay 'window)))
               (not window)
               (eq (overlay-get overlay 'window) window))
           (delete-overlay overlay)
@@ -330,27 +291,21 @@ Delete every presentation overlay when WINDOW is nil."
   (let* ((start (line-beginning-position))
          (end (line-end-position))
          (name-start
-          (text-property-any start end 'tessera-element 'topic.name))
+          (text-property-any start end 'tessera-ui--element 'topic.name))
          (flex-start
-          (text-property-any
-           start end 'tessera-element 'topic.flex-gap)))
+          (text-property-any start end 'tessera-ui--element 'topic.flex-gap)))
     (when (and name-start flex-start)
       (let* ((name-end
-              (next-single-property-change
-               name-start 'tessera-element nil end))
+              (next-single-property-change name-start 'tessera-ui--element nil end))
              (flex-end
-              (next-single-property-change
-               flex-start 'tessera-element nil end))
+              (next-single-property-change flex-start 'tessera-ui--element nil end))
              (name
               (buffer-substring name-start name-end))
              (available
-              (max
-               0
-               (- (window-body-width window t)
-                  (string-pixel-width
-                   (buffer-substring start name-start))
-                  (string-pixel-width
-                   (buffer-substring flex-end end)))))
+              (max 0
+                   (- (window-body-width window t)
+                      (string-pixel-width (buffer-substring start name-start))
+                      (string-pixel-width (buffer-substring flex-end end)))))
              (display
               (tessera-ui-truncate-pixels name available)))
         (unless (string= name display)
@@ -358,9 +313,8 @@ Delete every presentation overlay when WINDOW is nil."
             (overlay-put overlay 'window window)
             (overlay-put overlay 'display display)
             (overlay-put overlay 'evaporate t)
-            (overlay-put
-             overlay 'help-echo
-             (substring-no-properties name))
+            (overlay-put overlay 'help-echo
+                         (substring-no-properties name))
             (push overlay tessera-gnus-topic--window-overlays)))))))
 
 (defun tessera-gnus-topic--present-rows (&optional window)
@@ -400,39 +354,33 @@ Delete every presentation overlay when WINDOW is nil."
   (when (and (not tessera-gnus-topic--installed-p)
              (derived-mode-p 'gnus-group-mode)
              (bound-and-true-p gnus-topic-mode))
-    (setq
-     tessera-gnus-topic--original-line-format-local-p
-     (local-variable-p 'gnus-topic-line-format)
-     tessera-gnus-topic--original-line-format
-     gnus-topic-line-format
-     tessera-gnus-topic--original-overriding-map-alist-local-p
-     (local-variable-p 'minor-mode-overriding-map-alist)
-     tessera-gnus-topic--original-overriding-map-alist
-     (copy-sequence minor-mode-overriding-map-alist)
-     tessera-gnus-topic--installed-p t)
+    (setq tessera-gnus-topic--original-line-format-local-p
+          (local-variable-p 'gnus-topic-line-format)
+          tessera-gnus-topic--original-line-format
+          gnus-topic-line-format
+          tessera-gnus-topic--original-overriding-map-alist-local-p
+          (local-variable-p 'minor-mode-overriding-map-alist)
+          tessera-gnus-topic--original-overriding-map-alist
+          (copy-sequence minor-mode-overriding-map-alist)
+          tessera-gnus-topic--installed-p t)
     (setq-local gnus-topic-line-format
                 tessera-gnus-topic--line-format)
     (gnus-update-format-specifications nil 'topic)
     (tessera-gnus-topic--update-tab-map)
-    (add-hook 'gnus-group-prepare-hook
-              #'tessera-gnus-topic--present-visible-windows t t)
-    (add-hook 'window-state-change-functions
-              #'tessera-gnus-topic--window-state-change t t)
+    (add-hook 'gnus-group-prepare-hook #'tessera-gnus-topic--present-visible-windows t t)
+    (add-hook 'window-state-change-functions #'tessera-gnus-topic--window-state-change t t)
     (tessera-gnus-topic-refresh)))
 
 (defun tessera-gnus-topic--restore ()
   "Restore the native Topic presentation in the current buffer."
   (when tessera-gnus-topic--installed-p
-    (remove-hook 'gnus-group-prepare-hook
-                 #'tessera-gnus-topic--present-visible-windows t)
-    (remove-hook 'window-state-change-functions
-                 #'tessera-gnus-topic--window-state-change t)
+    (remove-hook 'gnus-group-prepare-hook #'tessera-gnus-topic--present-visible-windows t)
+    (remove-hook 'window-state-change-functions #'tessera-gnus-topic--window-state-change t)
     (tessera-gnus-topic--delete-window-overlays)
     (tessera-gnus-topic--restore-tab-map)
     (if tessera-gnus-topic--original-line-format-local-p
-        (setq-local
-         gnus-topic-line-format
-         tessera-gnus-topic--original-line-format)
+        (setq-local gnus-topic-line-format
+                    tessera-gnus-topic--original-line-format)
       (kill-local-variable 'gnus-topic-line-format))
     (gnus-update-format-specifications nil 'topic)
     (setq tessera-gnus-topic--installed-p nil
@@ -454,8 +402,7 @@ Delete every presentation overlay when WINDOW is nil."
   "Enable Tessera in existing and future Gnus Topic buffers."
   (unless tessera-gnus-topic--enabled-p
     (setq tessera-gnus-topic--enabled-p t)
-    (add-hook 'gnus-topic-mode-hook
-              #'tessera-gnus-topic--mode-changed)
+    (add-hook 'gnus-topic-mode-hook #'tessera-gnus-topic--mode-changed)
     (dolist (buffer
              (match-buffers '(derived-mode . gnus-group-mode)))
       (with-current-buffer buffer
@@ -466,8 +413,7 @@ Delete every presentation overlay when WINDOW is nil."
   "Disable Tessera in existing Gnus Topic buffers."
   (when tessera-gnus-topic--enabled-p
     (setq tessera-gnus-topic--enabled-p nil)
-    (remove-hook 'gnus-topic-mode-hook
-                 #'tessera-gnus-topic--mode-changed)
+    (remove-hook 'gnus-topic-mode-hook #'tessera-gnus-topic--mode-changed)
     (dolist (buffer
              (match-buffers '(derived-mode . gnus-group-mode)))
       (with-current-buffer buffer

@@ -12,8 +12,7 @@
 (require 'mood-line)
 (require 'server)
 
-(add-to-list
-	'load-path
+(add-to-list 'load-path
 	(expand-file-name "../test/fixtures/" user-emacs-directory))
 (require 'tessera-gnus-fixture)
 (require 'tessera-mu4e-fixture)
@@ -22,14 +21,17 @@
 (load-theme 'modus-operandi t)
 (mood-line-mode 1)
 
+(add-to-list 'initial-frame-alist '(width . 120))
+(add-to-list 'initial-frame-alist '(height . 40))
+(when (display-graphic-p)
+	(set-frame-size (selected-frame) 120 40))
+
 (setq server-socket-dir (locate-user-emacs-file "server/"))
 (unless (server-running-p) (server-start))
 
 (let ((feeds-directory
 	      (expand-file-name "feeds/" user-emacs-directory))
-	     (gnus-state-directory
-		     (expand-file-name
-			     "state/" tessera-gnus-fixture-directory)))
+	     (gnus-state-directory (expand-file-name "state/" tessera-gnus-fixture-directory)))
 	(make-directory feeds-directory t)
 	(make-directory gnus-state-directory t)
 	(setq elfeed-db-directory feeds-directory
@@ -45,6 +47,7 @@
 		gnus-dribble-directory gnus-state-directory
 		gnus-home-directory gnus-state-directory
 		gnus-init-file nil
+		gnus-always-read-dribble-file t
 		gnus-options-subscribe tessera-gnus-fixture-group-regexp
 		gnus-permanently-visible-groups
 		tessera-gnus-fixture-group-regexp
@@ -61,8 +64,10 @@
 ;; Add any other feeds you follow to `elfeed-feeds'.
 
 (setq-default tessera-gnus-symbol-style 'nerd-icons)
+(setq-default tessera-mu4e-symbol-style 'nerd-icons)
 
 (tessera-gnus-mode +1)
+(tessera-mu4e-mode +1)
 
 ;;; init.el ends here
 ;; Local Variables:

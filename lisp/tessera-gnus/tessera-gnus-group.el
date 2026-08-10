@@ -34,7 +34,6 @@
 (defvar gnus-tmp-group)
 (defvar gnus-tmp-number-of-unread)
 (defvar gnus-tmp-number-total)
-(defvar gnus-tmp-process-marked)
 (defvar gnus-tmp-qualified-group)
 (defvar gnus-tmp-subscribed)
 (defvar gnus-group-mark-positions)
@@ -138,11 +137,8 @@
       (with-current-buffer buffer
         (when (and
                (boundp 'tessera-gnus-group--latest-times)
-               (hash-table-p
-                (symbol-value
-                 'tessera-gnus-group--latest-times)))
-          (clrhash
-           (symbol-value 'tessera-gnus-group--latest-times)))
+               (hash-table-p (symbol-value 'tessera-gnus-group--latest-times)))
+          (clrhash (symbol-value 'tessera-gnus-group--latest-times)))
         (when (boundp 'tessera-gnus-group--latest-time-queue)
           (set 'tessera-gnus-group--latest-time-queue nil))
         (tessera-gnus-group-refresh)))))
@@ -255,24 +251,11 @@ specification of the form \(FAMILY . ICON-NAME)."
     (killed . tessera-gnus-group-mark-error))
   "Faces used for semantic Gnus Group mark colors.")
 
-(defconst tessera-gnus-group--header-line-format
-  '(:eval (tessera-gnus-group--header-line))
-  "Header-line format installed in Gnus Group buffers.")
-
 (defvar tessera-gnus-group--enabled-p nil
   "Non-nil when the Tessera Gnus Group interface is enabled.")
 
 (defvar-local tessera-gnus-group--installed-p nil
   "Non-nil when Tessera is installed in this Group buffer.")
-
-(defvar-local tessera-gnus-group--installed-header-line-format nil
-  "Exact header-line format object installed by Tessera.")
-
-(defvar-local tessera-gnus-group--original-header-line-format nil
-  "Header-line format replaced by Tessera in this buffer.")
-
-(defvar-local tessera-gnus-group--original-header-line-local-p nil
-  "Non-nil when the original header-line format was buffer-local.")
 
 (defvar-local tessera-gnus-group--installed-line-format nil
   "Exact group line format installed by Tessera.")
@@ -322,20 +305,11 @@ specification of the form \(FAMILY . ICON-NAME)."
 (defvar-local tessera-gnus-group--relative-time-timer nil
   "Timer refreshing visible relative article times.")
 
-(defvar tessera-gnus-group--status-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [header-line mouse-1]
-                #'tessera-gnus-group--get-new-news)
-    map)
-  "Keymap used by the Gnus Group header status.")
-
-(defvar tessera-gnus-group--layout-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [mouse-1] #'ignore)
-    (define-key map [mouse-2] #'ignore)
-    (define-key map [mouse-3] #'ignore)
-    map)
-  "Keymap preventing structural Group layout from opening a group.")
+(defvar-keymap tessera-gnus-group--layout-map
+  :doc "Prevent structural Group layout from opening a group."
+  "<mouse-1>" #'ignore
+  "<mouse-2>" #'ignore
+  "<mouse-3>" #'ignore)
 
 (defun tessera-gnus-group--subscription-fact (mark)
   "Return the subscription fact represented by native MARK."
@@ -348,33 +322,30 @@ specification of the form \(FAMILY . ICON-NAME)."
 (defun tessera-gnus-group--mark-fact (process subscription)
   "Return one native mark fact for PROCESS and SUBSCRIPTION."
   (if (eq process ?\s)
-      (cons
-       subscription
-       (pcase subscription
-         ('unsubscribed ?U)
-         ('zombie ?Z)
-         ('killed ?K)
-         (_ ?\s)))
+      (cons subscription
+            (pcase subscription
+              ('unsubscribed ?U)
+              ('zombie ?Z)
+              ('killed ?K)
+              (_ ?\s)))
     (cons 'process process)))
 
 (defun tessera-gnus-group--mark-glyph (fact native)
   "Return the displayed glyph for FACT with NATIVE fallback."
   (let* ((fallback
-          (or (alist-get
-               fact tessera-gnus-group--unicode-mark-symbols)
+          (or (alist-get fact tessera-gnus-group--unicode-mark-symbols)
               (char-to-string native)))
          (value
           (or (alist-get fact
                          tessera-gnus-group-mark-symbol-alist)
               (pcase tessera-gnus-symbol-style
-                ('native
+                ('ascii
                  (if (eq fact 'subscribed)
                      "S"
                    (char-to-string native)))
                 ('unicode fallback)
                 ('nerd-icons
-                 (alist-get
-                  fact tessera-gnus-group--nerd-mark-icons))))))
+                 (alist-get fact tessera-gnus-group--nerd-mark-icons))))))
     (tessera-gnus--render-glyph value fallback)))
 
 (defun tessera-gnus-group--mark-token (fact native)
@@ -390,31 +361,27 @@ specification of the form \(FAMILY . ICON-NAME)."
            (t
             (or (alist-get fact tessera-gnus-group--mark-faces)
                 'tessera-gnus-group-mark)))))
-    (remove-text-properties
-     0 (length text) '(font-lock-face nil) text)
+    (remove-text-properties 0 (length text) '(font-lock-face nil) text)
     (add-face-text-property 0 (length text) face nil text)
-    (add-text-properties
-     0 (length text)
-     (list 'gnus-face t
-           'help-echo (symbol-name fact)
-           'tessera-element 'node.mark
-           'tessera-gnus-group-mark fact)
-     text)
+    (add-text-properties 0 (length text)
+                         (list 'gnus-face t
+                               'help-echo (symbol-name fact)
+                               'tessera-ui--element 'node.mark
+                               'tessera-gnus-group-mark fact)
+                         text)
     text))
 
 (defun tessera-gnus-group--mark-display (fact)
   "Return the visual mark field for native FACT."
   (when fact
-    (concat
-     (tessera-gnus-group--mark-token
-      (car fact) (cdr fact))
-     (propertize " " 'tessera-element 'node.separator))))
+    (concat (tessera-gnus-group--mark-token
+             (car fact) (cdr fact))
+            (propertize " " 'tessera-ui--element 'node.separator))))
 
 (defun tessera-gnus-group--element (text element &optional face)
   "Return a copy of TEXT named ELEMENT and optionally using FACE."
   (let ((text (copy-sequence text)))
-    (put-text-property
-     0 (length text) 'tessera-element element text)
+    (put-text-property 0 (length text) 'tessera-ui--element element text)
     (when face
       (add-face-text-property 0 (length text) face nil text))
     text))
@@ -424,18 +391,16 @@ specification of the form \(FAMILY . ICON-NAME)."
 
 When UNREADP is non-nil, highlight a positive numeric count."
   (let ((text (copy-sequence text)))
-    (add-text-properties
-     0 (length text)
-     (list
-      'face
-      (if (and unreadp
-               (string-match-p "\\`[1-9][0-9]*\\+?\\'" text))
-          'tessera-gnus-group-node-unread
-        (if unreadp
-            'tessera-gnus-group-node-count
-          'tessera-gnus-group-node-total))
-      'tessera-element element)
-     text)
+    (add-text-properties 0 (length text)
+                         (list 'face
+                               (if (and unreadp
+                                        (string-match-p "\\`[1-9][0-9]*\\+?\\'" text))
+                                   'tessera-gnus-group-node-unread
+                                 (if unreadp
+                                     'tessera-gnus-group-node-count
+                                   'tessera-gnus-group-node-total))
+                               'tessera-ui--element element)
+                         text)
     text))
 
 (defun tessera-gnus-group--display-count (text)
@@ -450,59 +415,45 @@ When UNREADP is non-nil, highlight a positive numeric count."
 (defun tessera-gnus-group--count-pair (unread total)
   "Return right-aligned UNREAD and TOTAL counts."
   (let* ((separator
-          (tessera-gnus-group--element
-           "/" 'node.special-separator
-           'tessera-gnus-group-node-count-separator))
+          (tessera-gnus-group--element "/" 'node.special-separator 'tessera-gnus-group-node-count-separator))
          (counts (concat unread separator total))
          (rail
-          (concat
-           (make-string tessera-gnus-group-count-digits ?9)
-           "+/"
-           (make-string tessera-gnus-group-count-digits ?9)
-           "+"))
+          (concat (make-string tessera-gnus-group-count-digits ?9)
+                  "+/"
+                  (make-string tessera-gnus-group-count-digits ?9)
+                  "+"))
          (gap-width
           (max 0
                (- (string-pixel-width rail)
                   (string-pixel-width counts))))
          (gap
-          (propertize
-           " "
-           'display `(space :width (,gap-width))
-           'tessera-element 'node.leading-gap)))
+          (propertize " "
+                      'display `(space :width (,gap-width))
+                      'tessera-ui--element 'node.leading-gap)))
     (concat gap counts)))
 
-(defun gnus-user-format-function-tessera-gnus-group-node-prefix
-    (_header)
+(defun gnus-user-format-function-tessera-gnus-group-node-prefix (_header)
   "Return layout fields before the mark on a Gnus Group node."
   (let ((unread
-         (tessera-gnus-group--count-field
-          (tessera-gnus-group--display-count
-           gnus-tmp-number-of-unread)
-          'node.unread-count t))
+         (tessera-gnus-group--count-field (tessera-gnus-group--display-count gnus-tmp-number-of-unread)
+                                          'node.unread-count t))
         (total
-         (tessera-gnus-group--count-field
-          (tessera-gnus-group--display-count
-           (number-to-string gnus-tmp-number-total))
-          'node.total-count nil)))
+         (tessera-gnus-group--count-field (tessera-gnus-group--display-count
+                                           (number-to-string gnus-tmp-number-total))
+                                          'node.total-count nil)))
     (concat
-     (tessera-gnus-group--element
-      (tessera-ui-vertical-padding
-       'default 'node.top-padding
-       tessera-gnus-group--node-top-padding 0)
-      'node.top-padding)
-     (tessera-gnus-group--element
-      (tessera-ui-entry-leading-safety-gap) 'node.safety-gap)
-     (tessera-gnus-group--element
-      (tessera-ui-entry-padding 'entry.left-padding)
-      'node.left-padding)
+     (tessera-gnus-group--element (tessera-ui-vertical-padding 'default 'node.top-padding tessera-gnus-group--node-top-padding 0)
+                                  'node.top-padding)
+     (tessera-gnus-group--element (tessera-ui-entry-leading-safety-gap) 'node.safety-gap)
+     (tessera-gnus-group--element (tessera-ui-entry-padding 'entry.left-padding)
+                                  'node.left-padding)
      (tessera-gnus-group--count-pair unread total)
      (tessera-gnus-group--element " " 'node.leading-gap)
      (tessera-gnus-group--element " " 'node.separator))))
 
 (defun gnus-user-format-function-tessera-gnus-group-name (_header)
   "Return the native name of the current Gnus Group node."
-  (tessera-gnus-group--element
-   gnus-tmp-qualified-group 'node.group-name))
+  (tessera-gnus-group--element gnus-tmp-qualified-group 'node.group-name))
 
 (defun tessera-gnus-group--relative-time (time)
   "Return a compact relative description of TIME."
@@ -539,18 +490,15 @@ When UNREADP is non-nil, highlight a positive numeric count."
           (if time
               (tessera-gnus-group--relative-time time)
             " ")))
-    (tessera-gnus-group--element
-     text 'node.latest-timestamp
-     'tessera-gnus-group-node-timestamp)))
+    (tessera-gnus-group--element text 'node.latest-timestamp 'tessera-gnus-group-node-timestamp)))
 
 (defun tessera-gnus-group--latest-overview-time (group article)
   "Return the greatest overview date near ARTICLE in GROUP."
   (when-let* ((active (gnus-active group))
               (first
-               (max
-                (car active)
-                (1+ (- article
-                       tessera-gnus-group-latest-time-limit))))
+               (max (car active)
+                    (1+ (- article
+                           tessera-gnus-group-latest-time-limit))))
               (articles (number-sequence first article))
               ((eq (gnus-retrieve-headers articles group) 'nov))
               ((buffer-live-p nntp-server-buffer)))
@@ -562,8 +510,7 @@ When UNREADP is non-nil, highlight a positive numeric count."
           (while (not (eobp))
             (when (looking-at "[0-9]+\t")
               (when-let* ((header
-                           (ignore-errors
-                             (nnheader-parse-nov)))
+                           (ignore-errors (nnheader-parse-nov)))
                           (date (mail-header-date header))
                           (time (ignore-errors (date-to-time date))))
                 (when (or (not latest)
@@ -588,10 +535,8 @@ When UNREADP is non-nil, highlight a positive numeric count."
   (condition-case nil
       (with-timeout (tessera-gnus-group--latest-time-timeout nil)
         (or (save-current-buffer
-              (tessera-gnus-group--latest-overview-time
-               group article))
-            (tessera-gnus-group--high-article-time
-             group article)))
+              (tessera-gnus-group--latest-overview-time group article))
+            (tessera-gnus-group--high-article-time group article)))
     (error nil)))
 
 (defun tessera-gnus-group--schedule-latest-time ()
@@ -599,9 +544,8 @@ When UNREADP is non-nil, highlight a positive numeric count."
   (unless (or tessera-gnus-group--latest-time-timer
               (not tessera-gnus-group--latest-time-queue))
     (setq tessera-gnus-group--latest-time-timer
-          (run-with-idle-timer
-           0.05 nil #'tessera-gnus-group--fetch-latest-time
-           (current-buffer)))))
+          (run-with-idle-timer 0.05 nil #'tessera-gnus-group--fetch-latest-time
+                               (current-buffer)))))
 
 (defun tessera-gnus-group--fetch-latest-time (buffer)
   "Retrieve one latest article time for Group BUFFER."
@@ -609,15 +553,12 @@ When UNREADP is non-nil, highlight a positive numeric count."
     (with-current-buffer buffer
       (setq tessera-gnus-group--latest-time-timer nil)
       (when tessera-gnus-group--installed-p
-        (if-let* ((item (pop
-                         tessera-gnus-group--latest-time-queue)))
+        (if-let* ((item (pop tessera-gnus-group--latest-time-queue)))
             (let ((time
-                   (tessera-gnus-group--request-latest-time
-                    (car item) (cdr item))))
-              (puthash
-               (car item)
-               (list (cdr item) time (and (not time) (current-time)))
-               tessera-gnus-group--latest-times)
+                   (tessera-gnus-group--request-latest-time (car item) (cdr item))))
+              (puthash (car item)
+                       (list (cdr item) time (and (not time) (current-time)))
+                       tessera-gnus-group--latest-times)
               (gnus-group-update-group (car item) t t)
               (tessera-gnus-group--present-visible-windows)
               (if tessera-gnus-group--latest-time-queue
@@ -655,8 +596,7 @@ When UNREADP is non-nil, highlight a positive numeric count."
          (not (nth 1 entry))
          (or
           (not (nth 2 entry))
-          (>= (float-time
-               (time-subtract nil (nth 2 entry)))
+          (>= (float-time (time-subtract nil (nth 2 entry)))
               tessera-gnus-group--latest-time-retry-delay))))))
 
 (defun tessera-gnus-group--queue-latest-time (group)
@@ -667,8 +607,7 @@ When UNREADP is non-nil, highlight a positive numeric count."
   (when-let* ((active (gnus-active group))
               (article (cdr active)))
     (when (and
-           (tessera-gnus-group--latest-time-stale-p
-            group article)
+           (tessera-gnus-group--latest-time-stale-p group article)
            (not (assoc group
                        tessera-gnus-group--latest-time-queue)))
       (setq tessera-gnus-group--latest-time-queue
@@ -712,42 +651,35 @@ When UNREADP is non-nil, highlight a positive numeric count."
         tessera-gnus-group--relative-time-timer nil
         tessera-gnus-group--latest-time-queue nil))
 
-(defun gnus-user-format-function-tessera-gnus-group-node-suffix
-    (_header)
+(defun gnus-user-format-function-tessera-gnus-group-node-suffix (_header)
   "Return layout fields after the name of a Gnus Group node."
   (let* ((timestamp
           (tessera-gnus-group--timestamp gnus-tmp-group))
          (right-padding
-          (tessera-gnus-group--element
-           (tessera-ui-entry-padding 'entry.right-padding)
-           'node.right-padding))
+          (tessera-gnus-group--element (tessera-ui-entry-padding 'entry.right-padding)
+                                       'node.right-padding))
          (safety-gap
-          (tessera-gnus-group--element
-           (tessera-ui-entry-trailing-safety-gap)
-           'node.safety-gap))
+          (tessera-gnus-group--element (tessera-ui-entry-trailing-safety-gap)
+                                       'node.safety-gap))
          (bottom-padding
-          (tessera-gnus-group--element
-           (tessera-ui-vertical-padding
-            'default 'node.bottom-padding 0
-            tessera-gnus-group--node-bottom-padding)
-           'node.bottom-padding))
+          (tessera-gnus-group--element (tessera-ui-vertical-padding
+                                        'default 'node.bottom-padding 0
+                                        tessera-gnus-group--node-bottom-padding)
+                                       'node.bottom-padding))
          (right
           (concat timestamp right-padding
                   safety-gap bottom-padding))
          (flex-gap
-          (tessera-gnus-group--element
-           (tessera-ui-entry-flex-gap right) 'node.flex-gap)))
+          (tessera-gnus-group--element (tessera-ui-entry-flex-gap right) 'node.flex-gap)))
     (concat flex-gap right)))
 
 (defun gnus-user-format-function-tessera-gnus-group-mark (_header)
   "Return the visual anchor for native Gnus Group marks."
-  (propertize
-   " "
-   'tessera-element 'node.mark
-   'tessera-gnus-group-mark-anchor t
-   'tessera-gnus-group-subscription
-   (tessera-gnus-group--subscription-fact
-    gnus-tmp-subscribed)))
+  (propertize " "
+              'tessera-ui--element 'node.mark
+              'tessera-gnus-group-mark-anchor t
+              'tessera-gnus-group-subscription
+              (tessera-gnus-group--subscription-fact gnus-tmp-subscribed)))
 
 (defun tessera-gnus-group--decorate-marks ()
   "Present native marks on the current Gnus Group line."
@@ -762,28 +694,18 @@ When UNREADP is non-nil, highlight a positive numeric count."
                (end (line-end-position))
                (process-position (+ start process-offset))
                (anchor
-                (text-property-any
-                 start end 'tessera-gnus-group-mark-anchor t)))
+                (text-property-any start end 'tessera-gnus-group-mark-anchor t)))
           (when (and anchor (< process-position end))
             (let* ((process (char-after process-position))
                    (subscription
-                    (get-text-property
-                     anchor 'tessera-gnus-group-subscription))
+                    (get-text-property anchor 'tessera-gnus-group-subscription))
                    (display
-                    (tessera-gnus-group--mark-display
-                     (tessera-gnus-group--mark-fact
-                      process subscription))))
-              (put-text-property
-               start (1+ start) 'display "")
-              (put-text-property
-               process-position (1+ process-position)
-               'display "")
-              (put-text-property
-               anchor (1+ anchor) 'face 'default)
-              (put-text-property
-               anchor (1+ anchor) 'display (or display ""))
-              (put-text-property
-               anchor (1+ anchor) 'tessera-context group))))))))
+                    (tessera-gnus-group--mark-display (tessera-gnus-group--mark-fact process subscription))))
+              (put-text-property start (1+ start) 'display "")
+              (put-text-property process-position (1+ process-position) 'display "")
+              (put-text-property anchor (1+ anchor) 'face 'default)
+              (put-text-property anchor (1+ anchor) 'display (or display ""))
+              (put-text-property anchor (1+ anchor) 'tessera-ui--context group))))))))
 
 (defun tessera-gnus-group--decorate-node-faces ()
   "Apply Tessera faces to the current Gnus Group node."
@@ -807,11 +729,9 @@ When UNREADP is non-nil, highlight a positive numeric count."
                (node.latest-timestamp
                 tessera-gnus-group-node-timestamp)))
       (when-let* ((field-start
-                   (text-property-any
-                    start end 'tessera-element (car field)))
+                   (text-property-any start end 'tessera-ui--element (car field)))
                   (field-end
-                   (next-single-property-change
-                    field-start 'tessera-element nil end)))
+                   (next-single-property-change field-start 'tessera-ui--element nil end)))
         (let ((face (cadr field))
               (append (caddr field))
               (faces
@@ -820,13 +740,10 @@ When UNREADP is non-nil, highlight a positive numeric count."
               (unless
                   (or (eq face faces)
                       (and (listp faces) (memq face faces)))
-                (add-face-text-property
-                 field-start field-end face t))
-            (put-text-property
-             field-start field-end 'face face)))))))
+                (add-face-text-property field-start field-end face t))
+            (put-text-property field-start field-end 'face face)))))))
 
-(defun tessera-gnus-group--make-window-overlay
-    (start end display window)
+(defun tessera-gnus-group--make-window-overlay (start end display window)
   "Display text from START to END as DISPLAY in WINDOW."
   (let ((overlay (make-overlay start end)))
     (overlay-put overlay 'window window)
@@ -835,16 +752,14 @@ When UNREADP is non-nil, highlight a positive numeric count."
     (push overlay tessera-gnus-group--window-overlays)
     overlay))
 
-(defun tessera-gnus-group--delete-window-overlays
-    (&optional window)
+(defun tessera-gnus-group--delete-window-overlays (&optional window)
   "Delete Group presentation overlays for WINDOW.
 
 Delete all presentation overlays when WINDOW is nil."
   (let (remaining)
     (dolist (overlay tessera-gnus-group--window-overlays)
       (if (or (not (overlay-buffer overlay))
-              (not (window-live-p
-                    (overlay-get overlay 'window)))
+              (not (window-live-p (overlay-get overlay 'window)))
               (not window)
               (eq (overlay-get overlay 'window) window))
           (delete-overlay overlay)
@@ -857,27 +772,21 @@ Delete all presentation overlays when WINDOW is nil."
   (let* ((start (line-beginning-position))
          (end (line-end-position))
          (name-start
-          (text-property-any
-           start end 'tessera-element 'node.group-name))
+          (text-property-any start end 'tessera-ui--element 'node.group-name))
          (timestamp-start
-          (text-property-any
-           start end 'tessera-element
-           'node.latest-timestamp)))
+          (text-property-any start end 'tessera-ui--element
+                             'node.latest-timestamp)))
     (when (and name-start timestamp-start)
       (let* ((name-end
-              (next-single-property-change
-               name-start 'tessera-element nil end))
+              (next-single-property-change name-start 'tessera-ui--element nil end))
              (name
               (buffer-substring name-start name-end))
              (prefix-width
-              (string-pixel-width
-               (buffer-substring start name-start)))
+              (string-pixel-width (buffer-substring start name-start)))
              (right-width
-              (string-pixel-width
-               (buffer-substring timestamp-start end)))
+              (string-pixel-width (buffer-substring timestamp-start end)))
              (safety-width
-              (string-pixel-width
-               (tessera-ui-entry-leading-safety-gap)))
+              (string-pixel-width (tessera-ui-entry-leading-safety-gap)))
              (available
               (max 0
                    (- (window-body-width window t)
@@ -886,11 +795,9 @@ Delete all presentation overlays when WINDOW is nil."
               (tessera-ui-truncate-pixels name available)))
         (unless (string= name display)
           (let ((overlay
-                 (tessera-gnus-group--make-window-overlay
-                  name-start name-end display window)))
-            (overlay-put
-             overlay 'help-echo
-             (substring-no-properties name))))))))
+                 (tessera-gnus-group--make-window-overlay name-start name-end display window)))
+            (overlay-put overlay 'help-echo
+                         (substring-no-properties name))))))))
 
 (defun tessera-gnus-group--present-nodes (&optional window)
   "Present all Gnus Group nodes for WINDOW."
@@ -917,8 +824,7 @@ Delete all presentation overlays when WINDOW is nil."
         visible)
     (while (and windows (not visible))
       (setq visible
-            (pos-visible-in-window-p
-             (point) (pop windows) t)))
+            (pos-visible-in-window-p (point) (pop windows) t)))
     visible))
 
 (defun tessera-gnus-group--after-line-update (&rest _args)
@@ -946,8 +852,7 @@ Delete all presentation overlays when WINDOW is nil."
   "Refresh the visual mark after Gnus updates its native mark."
   (tessera-gnus-group--decorate-marks))
 
-(defun tessera-gnus-group--format-dead-groups
-    (function &rest args)
+(defun tessera-gnus-group--format-dead-groups (function &rest args)
   "Call FUNCTION with ARGS using the configured Group line format."
   (let ((gnus-group-listing-limit
          (if tessera-gnus-group--installed-p
@@ -960,7 +865,7 @@ Delete all presentation overlays when WINDOW is nil."
   (setq tessera-gnus-group--statistics-cache nil))
 
 (defun tessera-gnus-group--statistics ()
-  "Return statistics for all groups known to Gnus."
+  "Return semantic metrics for all groups known to Gnus."
   (or tessera-gnus-group--statistics-cache
       (let ((groups (length gnus-group-list))
             (total 0)
@@ -978,33 +883,43 @@ Delete all presentation overlays when WINDOW is nil."
                       (+ total (range-length (list active))))
               (setq total-incomplete t))))
         (setq tessera-gnus-group--statistics-cache
-              (tessera-ui-all-statistics
-               unread groups total
-               unread-incomplete total-incomplete)))))
+              (tessera-ui-header-line-standard-metrics unread groups 'groups "groups" total
+                                                       (if unread-incomplete 'lower-bound 'exact)
+                                                       'exact
+                                                       (if total-incomplete 'lower-bound 'exact))))))
 
 (defun tessera-gnus-group--format-status ()
   "Return the presentation of the current Group update status."
-  (tessera-gnus-status
-   tessera-gnus-group--status-state
-   (if tessera-gnus-group--fetch-total
-       (cons tessera-gnus-group--fetch-current
-             tessera-gnus-group--fetch-total)
-     tessera-gnus-group--fetch-current)
-   nil
-   (if (eq tessera-gnus-group--status-state 'fail)
-       (concat "The last fetch failed; "
-               "mouse-1: Get new articles")
-     (if (eq tessera-gnus-group--status-state 'processing)
-         "Gnus is fetching new articles"
-       "mouse-1: Get new articles"))
-   tessera-gnus-group--status-map))
+  (tessera-gnus-status tessera-gnus-group--status-state
+                       (if tessera-gnus-group--fetch-total
+                           (cons tessera-gnus-group--fetch-current
+                                 tessera-gnus-group--fetch-total)
+                         tessera-gnus-group--fetch-current)
+                       nil
+                       (if (eq tessera-gnus-group--status-state 'fail)
+                           (concat "The last fetch failed; "
+                                   "mouse-1: Get new articles")
+                         (if (eq tessera-gnus-group--status-state 'processing)
+                             "Gnus is fetching new articles"
+                           "mouse-1: Get new articles"))
+                       #'tessera-gnus-group--get-new-news))
 
-(defun tessera-gnus-group--header-line ()
-  "Return the Tessera header for the current Group buffer."
-  (tessera-ui-header-line
-   (tessera-gnus-group--format-status)
-   nil
-   (tessera-gnus-group--statistics)))
+(defun tessera-gnus-group--header-status-segment (buffer)
+  "Derive the registered status segment from Group BUFFER."
+  (with-current-buffer buffer
+    (tessera-ui-header-line-status-segment (tessera-gnus-group--format-status))))
+
+(defun tessera-gnus-group--header-statistics-segment (buffer)
+  "Derive the registered statistics segment from Group BUFFER."
+  (with-current-buffer buffer
+    (tessera-ui-header-line-statistics-segment (tessera-gnus-group--statistics))))
+
+(tessera-ui-header-line-register 'gnus-group
+                                 :left
+                                 '((status . tessera-gnus-group--header-status-segment))
+                                 :right
+                                 '((statistics .
+                                               tessera-gnus-group--header-statistics-segment)))
 
 (defun tessera-gnus-group--redraw-status ()
   "Redisplay the current Group status immediately."
@@ -1037,16 +952,14 @@ Delete all presentation overlays when WINDOW is nil."
   (tessera-gnus-group--invalidate-statistics)
   (tessera-gnus-group--redraw-status))
 
-(defun tessera-gnus-group--track-fetch
-    (orig-fun &optional level dont-connect one-level)
+(defun tessera-gnus-group--track-fetch (orig-fun &optional level dont-connect one-level)
   "Call ORIG-FUN while tracking the native Group update.
 
 LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
 `gnus-get-unread-articles'."
   (let ((buffer gnus-group-buffer))
     (if (and (buffer-live-p buffer)
-             (buffer-local-value
-              'tessera-gnus-group--installed-p buffer))
+             (buffer-local-value 'tessera-gnus-group--installed-p buffer))
         (let ((tessera-gnus-group--fetch-buffer buffer))
           (with-current-buffer buffer
             (tessera-gnus-group--begin-fetch))
@@ -1102,9 +1015,8 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
 
 (defun tessera-gnus-group--update-groups (function &rest args)
   "Call the selected-group Gnus update FUNCTION with ARGS."
-  (tessera-gnus-group--run-update
-   function args
-   (length (gnus-group-process-prefix (car args)))))
+  (tessera-gnus-group--run-update function args
+                                  (length (gnus-group-process-prefix (car args)))))
 
 (defun tessera-gnus-group--get-new-news (event)
   "Get new Gnus articles after mouse EVENT."
@@ -1117,64 +1029,45 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
 (defun tessera-gnus-group--heading ()
   "Return the main heading for a Gnus Group buffer."
   (let* ((leading-width
-          (+ (string-pixel-width
-              tessera-gnus-group--disclosure-glyph)
+          (+ (string-pixel-width tessera-gnus-group--disclosure-glyph)
              (string-pixel-width " ")))
          (heading
-          (concat
-           (tessera-gnus-group--element
-            (tessera-ui-vertical-padding
-             'default 'heading.top-padding
-             tessera-gnus-group--heading-top-padding 0)
-            'heading.top-padding)
-           (tessera-gnus-group--element
-            (tessera-ui-entry-leading-safety-gap)
-            'heading.safety-gap)
-           (tessera-gnus-group--element
-            (tessera-ui-entry-padding 'entry.left-padding)
-            'heading.left-padding)
-           (tessera-gnus-group--element
-            (propertize
-             " " 'display
-             `(space :width (,leading-width)))
-            'heading.leading-gap)
-           (tessera-gnus-group--element
-            "Gnus" 'heading.text
-            '((:height 1.4) tessera-gnus-group-heading))
-           (tessera-gnus-group--element
-            (tessera-ui-entry-padding 'entry.right-padding)
-            'heading.right-padding)
-           (tessera-gnus-group--element
-            (tessera-ui-vertical-padding
-             'default 'heading.bottom-padding 0
-             tessera-gnus-group--heading-bottom-padding)
-            'heading.bottom-padding))))
-    (put-text-property
-     0 (length heading) 'tessera-parent-element 'heading heading)
+          (concat (tessera-gnus-group--element
+                   (tessera-ui-vertical-padding 'default 'heading.top-padding
+                                                tessera-gnus-group--heading-top-padding 0)
+                   'heading.top-padding)
+                  (tessera-gnus-group--element (tessera-ui-entry-leading-safety-gap)
+                                               'heading.safety-gap)
+                  (tessera-gnus-group--element (tessera-ui-entry-padding 'entry.left-padding)
+                                               'heading.left-padding)
+                  (tessera-gnus-group--element (propertize " " 'display
+                                                           `(space :width (,leading-width)))
+                                               'heading.leading-gap)
+                  (tessera-gnus-group--element "Gnus" 'heading.text '((:height 1.4) tessera-gnus-group-heading))
+                  (tessera-gnus-group--element (tessera-ui-entry-padding 'entry.right-padding)
+                                               'heading.right-padding)
+                  (tessera-gnus-group--element (tessera-ui-vertical-padding
+                                                'default 'heading.bottom-padding 0
+                                                tessera-gnus-group--heading-bottom-padding)
+                                               'heading.bottom-padding))))
+    (put-text-property 0 (length heading) 'tessera-ui--parent-element 'heading heading)
     heading))
 
 (defun tessera-gnus-group--empty-p ()
   "Return non-nil when the Group buffer has no displayed nodes."
-  (not
-   (or
-    (text-property-not-all
-     (point-min) (point-max) 'gnus-group nil)
-    (text-property-not-all
-     (point-min) (point-max) 'gnus-topic nil))))
+  (not (or
+        (text-property-not-all (point-min) (point-max) 'gnus-group nil)
+        (text-property-not-all (point-min) (point-max) 'gnus-topic nil))))
 
 (defun tessera-gnus-group--empty ()
   "Return the empty presentation for a Gnus Group buffer."
   (let ((text
-         (concat
-          (tessera-gnus-group--element
-           (tessera-ui-entry-padding 'entry.left-padding)
-           'view.empty)
-          (tessera-gnus-group--element
-           gnus-no-groups-message 'view.empty.message
-           'tessera-gnus-group-empty)
-          "\n")))
-    (put-text-property
-     0 (length text) 'tessera-parent-element 'view.empty text)
+         (concat (tessera-gnus-group--element
+                  (tessera-ui-entry-padding 'entry.left-padding)
+                  'view.empty)
+                 (tessera-gnus-group--element gnus-no-groups-message 'view.empty.message 'tessera-gnus-group-empty)
+                 "\n")))
+    (put-text-property 0 (length text) 'tessera-ui--parent-element 'view.empty text)
     text))
 
 (defun tessera-gnus-group--update-layout ()
@@ -1190,39 +1083,23 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
             (and (tessera-gnus-group--empty-p)
                  (tessera-gnus-group--empty)))
            (top
-            (concat
-             (tessera-ui-vertical-spacer
-              'main.top-padding
-              tessera-gnus-group--main-top-padding)
-             (tessera-ui-vertical-spacer
-              'nodes.top-padding
-              tessera-gnus-group--nodes-top-padding)
-             (and tessera-gnus-group-show-heading
-                  (not (bound-and-true-p gnus-topic-mode))
-                  (concat (tessera-gnus-group--heading) "\n"))
-             empty))
+            (concat (tessera-ui-vertical-spacer 'main.top-padding tessera-gnus-group--main-top-padding)
+                    (tessera-ui-vertical-spacer 'nodes.top-padding tessera-gnus-group--nodes-top-padding)
+                    (and tessera-gnus-group-show-heading
+                         (not (bound-and-true-p gnus-topic-mode))
+                         (concat (tessera-gnus-group--heading) "\n"))
+                    empty))
            (bottom
-            (concat
-             (tessera-ui-vertical-spacer
-              'nodes.bottom-padding
-              tessera-gnus-group--nodes-bottom-padding)
-             (tessera-ui-vertical-spacer
-              'main.bottom-padding
-              tessera-gnus-group--main-bottom-padding))))
-      (add-text-properties
-       0 (length top)
-       (list 'keymap tessera-gnus-group--layout-map) top)
-      (add-text-properties
-       0 (length bottom)
-       (list 'keymap tessera-gnus-group--layout-map) bottom)
+            (concat (tessera-ui-vertical-spacer 'nodes.bottom-padding tessera-gnus-group--nodes-bottom-padding)
+                    (tessera-ui-vertical-spacer 'main.bottom-padding tessera-gnus-group--main-bottom-padding))))
+      (add-text-properties 0 (length top) (list 'keymap tessera-gnus-group--layout-map) top)
+      (add-text-properties 0 (length bottom) (list 'keymap tessera-gnus-group--layout-map) bottom)
       (setq tessera-gnus-group--heading-overlay
             (make-overlay (point-min) (point-min)))
-      (overlay-put
-       tessera-gnus-group--heading-overlay 'before-string top)
+      (overlay-put tessera-gnus-group--heading-overlay 'before-string top)
       (setq tessera-gnus-group--bottom-overlay
             (make-overlay (point-max) (point-max) nil t t))
-      (overlay-put
-       tessera-gnus-group--bottom-overlay 'after-string bottom))))
+      (overlay-put tessera-gnus-group--bottom-overlay 'after-string bottom))))
 
 (defun tessera-gnus-group-refresh ()
   "Refresh the Tessera presentation in the current Group buffer."
@@ -1234,90 +1111,57 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
 (defun tessera-gnus-group--install ()
   "Install Tessera in the current Gnus Group buffer."
   (unless tessera-gnus-group--installed-p
-    (setq
-     tessera-gnus-group--original-header-line-local-p
-     (local-variable-p 'header-line-format)
-     tessera-gnus-group--original-header-line-format
-     header-line-format
-     tessera-gnus-group--installed-header-line-format
-     tessera-gnus-group--header-line-format
-     tessera-gnus-group--original-line-format-local-p
-     (local-variable-p 'gnus-group-line-format)
-     tessera-gnus-group--original-line-format
-     gnus-group-line-format
-     tessera-gnus-group--installed-line-format
-     tessera-gnus-group--line-format
-     tessera-gnus-group--installed-p t
-     tessera-gnus-group--status-state 'success
-     tessera-gnus-group--statistics-cache nil
-     tessera-gnus-group--latest-times
-     (make-hash-table :test #'equal))
-    (setq-local
-     header-line-format
-     tessera-gnus-group--installed-header-line-format)
-    (setq-local
-     gnus-group-line-format
-     tessera-gnus-group--installed-line-format)
+    (setq tessera-gnus-group--original-line-format-local-p
+          (local-variable-p 'gnus-group-line-format)
+          tessera-gnus-group--original-line-format
+          gnus-group-line-format
+          tessera-gnus-group--installed-line-format
+          tessera-gnus-group--line-format
+          tessera-gnus-group--installed-p t
+          tessera-gnus-group--status-state 'success
+          tessera-gnus-group--statistics-cache nil
+          tessera-gnus-group--latest-times
+          (make-hash-table :test #'equal))
+    (tessera-ui-header-line-install 'gnus-group)
+    (setq-local gnus-group-line-format
+                tessera-gnus-group--installed-line-format)
     (setq-local tessera-gnus--face-remap-function
                 #'tessera-gnus-group--refresh-presentation)
     (gnus-update-format-specifications nil 'group 'group-mode)
     (gnus-update-group-mark-positions)
-    (add-hook 'gnus-group-prepare-hook
-              #'tessera-gnus-group--invalidate-statistics nil t)
-    (add-hook 'gnus-group-prepare-hook
-              #'tessera-gnus-group--update-layout nil t)
-    (add-hook 'gnus-group-prepare-hook
-              #'tessera-gnus-group--present-visible-windows nil t)
-    (add-hook 'gnus-group-prepare-hook
-              #'tessera-gnus-group--queue-latest-times nil t)
-    (add-hook 'gnus-group-update-hook
-              #'tessera-gnus-group--invalidate-statistics nil t)
-    (add-hook 'gnus-group-update-hook
-              #'tessera-gnus-group--after-line-update nil t)
-    (add-hook 'gnus-group-update-group-hook
-              #'tessera-gnus-group--invalidate-statistics nil t)
-    (add-hook 'gnus-group-update-group-hook
-              #'tessera-gnus-group--after-line-update nil t)
-    (add-hook 'window-state-change-functions
-              #'tessera-gnus-group--window-state-change nil t)
-    (add-hook 'text-scale-mode-hook
-              #'tessera-gnus-group--refresh-presentation nil t)
-    (add-hook 'kill-buffer-hook
-              #'tessera-gnus-group--cancel-latest-time nil t)
+    (add-hook 'gnus-group-prepare-hook #'tessera-gnus-group--invalidate-statistics nil t)
+    (add-hook 'gnus-group-prepare-hook #'tessera-gnus-group--update-layout nil t)
+    (add-hook 'gnus-group-prepare-hook #'tessera-gnus-group--present-visible-windows nil t)
+    (add-hook 'gnus-group-prepare-hook #'tessera-gnus-group--queue-latest-times nil t)
+    (add-hook 'gnus-group-update-hook #'tessera-gnus-group--invalidate-statistics nil t)
+    (add-hook 'gnus-group-update-hook #'tessera-gnus-group--after-line-update nil t)
+    (add-hook 'gnus-group-update-group-hook #'tessera-gnus-group--invalidate-statistics nil t)
+    (add-hook 'gnus-group-update-group-hook #'tessera-gnus-group--after-line-update nil t)
+    (add-hook 'window-state-change-functions #'tessera-gnus-group--window-state-change nil t)
+    (add-hook 'text-scale-mode-hook #'tessera-gnus-group--refresh-presentation nil t)
+    (add-hook 'kill-buffer-hook #'tessera-gnus-group--cancel-latest-time nil t)
     (tessera-gnus-group--update-layout)
     (tessera-gnus-group--present-visible-windows)
     (tessera-gnus-group--queue-latest-times)
     (setq tessera-gnus-group--relative-time-timer
-          (run-at-time
-           60 60 #'tessera-gnus-group--refresh-relative-times
-           (current-buffer)))
+          (run-at-time 60 60 #'tessera-gnus-group--refresh-relative-times
+                       (current-buffer)))
     (force-mode-line-update)))
 
 (defun tessera-gnus-group--restore ()
   "Restore the native Group header in the current buffer."
   (when tessera-gnus-group--installed-p
-    (remove-hook 'gnus-group-prepare-hook
-                 #'tessera-gnus-group--invalidate-statistics t)
-    (remove-hook 'gnus-group-prepare-hook
-                 #'tessera-gnus-group--update-layout t)
-    (remove-hook 'gnus-group-prepare-hook
-                 #'tessera-gnus-group--present-visible-windows t)
-    (remove-hook 'gnus-group-prepare-hook
-                 #'tessera-gnus-group--queue-latest-times t)
-    (remove-hook 'gnus-group-update-hook
-                 #'tessera-gnus-group--invalidate-statistics t)
-    (remove-hook 'gnus-group-update-hook
-                 #'tessera-gnus-group--after-line-update t)
-    (remove-hook 'gnus-group-update-group-hook
-                 #'tessera-gnus-group--invalidate-statistics t)
-    (remove-hook 'gnus-group-update-group-hook
-                 #'tessera-gnus-group--after-line-update t)
-    (remove-hook 'window-state-change-functions
-                 #'tessera-gnus-group--window-state-change t)
-    (remove-hook 'text-scale-mode-hook
-                 #'tessera-gnus-group--refresh-presentation t)
-    (remove-hook 'kill-buffer-hook
-                 #'tessera-gnus-group--cancel-latest-time t)
+    (remove-hook 'gnus-group-prepare-hook #'tessera-gnus-group--invalidate-statistics t)
+    (remove-hook 'gnus-group-prepare-hook #'tessera-gnus-group--update-layout t)
+    (remove-hook 'gnus-group-prepare-hook #'tessera-gnus-group--present-visible-windows t)
+    (remove-hook 'gnus-group-prepare-hook #'tessera-gnus-group--queue-latest-times t)
+    (remove-hook 'gnus-group-update-hook #'tessera-gnus-group--invalidate-statistics t)
+    (remove-hook 'gnus-group-update-hook #'tessera-gnus-group--after-line-update t)
+    (remove-hook 'gnus-group-update-group-hook #'tessera-gnus-group--invalidate-statistics t)
+    (remove-hook 'gnus-group-update-group-hook #'tessera-gnus-group--after-line-update t)
+    (remove-hook 'window-state-change-functions #'tessera-gnus-group--window-state-change t)
+    (remove-hook 'text-scale-mode-hook #'tessera-gnus-group--refresh-presentation t)
+    (remove-hook 'kill-buffer-hook #'tessera-gnus-group--cancel-latest-time t)
     (when (eq tessera-gnus--face-remap-function
               #'tessera-gnus-group--refresh-presentation)
       (kill-local-variable 'tessera-gnus--face-remap-function))
@@ -1327,14 +1171,7 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
       (delete-overlay tessera-gnus-group--bottom-overlay))
     (tessera-gnus-group--cancel-latest-time)
     (tessera-gnus-group--delete-window-overlays)
-    (when (eq
-           header-line-format
-           tessera-gnus-group--installed-header-line-format)
-      (if tessera-gnus-group--original-header-line-local-p
-          (setq-local
-           header-line-format
-           tessera-gnus-group--original-header-line-format)
-        (kill-local-variable 'header-line-format)))
+    (tessera-ui-header-line-restore)
     (when (eq gnus-group-line-format
               tessera-gnus-group--installed-line-format)
       (if tessera-gnus-group--original-line-format-local-p
@@ -1343,10 +1180,7 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
         (kill-local-variable 'gnus-group-line-format))
       (gnus-update-format-specifications nil 'group 'group-mode)
       (gnus-update-group-mark-positions))
-    (setq tessera-gnus-group--installed-header-line-format nil
-          tessera-gnus-group--original-header-line-format nil
-          tessera-gnus-group--original-header-line-local-p nil
-          tessera-gnus-group--installed-line-format nil
+    (setq tessera-gnus-group--installed-line-format nil
           tessera-gnus-group--original-line-format nil
           tessera-gnus-group--original-line-format-local-p nil
           tessera-gnus-group--statistics-cache nil
@@ -1364,18 +1198,12 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
   "Enable Tessera in existing and future Gnus Group buffers."
   (unless tessera-gnus-group--enabled-p
     (setq tessera-gnus-group--enabled-p t)
-    (advice-add 'gnus-get-unread-articles :around
-                #'tessera-gnus-group--track-fetch)
-    (advice-add 'gnus-get-unread-articles-in-group :after
-                #'tessera-gnus-group--record-fetch)
-    (advice-add 'gnus-group-mark-update :after
-                #'tessera-gnus-group--after-mark-update)
-    (advice-add 'gnus-group-get-new-news :around
-                #'tessera-gnus-group--update)
-    (advice-add 'gnus-group-get-new-news-this-group :around
-                #'tessera-gnus-group--update-groups)
-    (advice-add 'gnus-group-prepare-flat-list-dead :around
-                #'tessera-gnus-group--format-dead-groups)
+    (advice-add 'gnus-get-unread-articles :around #'tessera-gnus-group--track-fetch)
+    (advice-add 'gnus-get-unread-articles-in-group :after #'tessera-gnus-group--record-fetch)
+    (advice-add 'gnus-group-mark-update :after #'tessera-gnus-group--after-mark-update)
+    (advice-add 'gnus-group-get-new-news :around #'tessera-gnus-group--update)
+    (advice-add 'gnus-group-get-new-news-this-group :around #'tessera-gnus-group--update-groups)
+    (advice-add 'gnus-group-prepare-flat-list-dead :around #'tessera-gnus-group--format-dead-groups)
     (add-hook 'gnus-group-mode-hook #'tessera-gnus-group--install)
     (dolist (buffer
              (match-buffers '(derived-mode . gnus-group-mode)))
@@ -1387,20 +1215,13 @@ LEVEL, DONT-CONNECT, and ONE-LEVEL are passed to
   "Disable Tessera in existing Gnus Group buffers."
   (when tessera-gnus-group--enabled-p
     (setq tessera-gnus-group--enabled-p nil)
-    (advice-remove 'gnus-get-unread-articles
-                   #'tessera-gnus-group--track-fetch)
-    (advice-remove 'gnus-get-unread-articles-in-group
-                   #'tessera-gnus-group--record-fetch)
-    (advice-remove 'gnus-group-mark-update
-                   #'tessera-gnus-group--after-mark-update)
-    (advice-remove 'gnus-group-get-new-news
-                   #'tessera-gnus-group--update)
-    (advice-remove 'gnus-group-get-new-news-this-group
-                   #'tessera-gnus-group--update-groups)
-    (advice-remove 'gnus-group-prepare-flat-list-dead
-                   #'tessera-gnus-group--format-dead-groups)
-    (remove-hook 'gnus-group-mode-hook
-                 #'tessera-gnus-group--install)
+    (advice-remove 'gnus-get-unread-articles #'tessera-gnus-group--track-fetch)
+    (advice-remove 'gnus-get-unread-articles-in-group #'tessera-gnus-group--record-fetch)
+    (advice-remove 'gnus-group-mark-update #'tessera-gnus-group--after-mark-update)
+    (advice-remove 'gnus-group-get-new-news #'tessera-gnus-group--update)
+    (advice-remove 'gnus-group-get-new-news-this-group #'tessera-gnus-group--update-groups)
+    (advice-remove 'gnus-group-prepare-flat-list-dead #'tessera-gnus-group--format-dead-groups)
+    (remove-hook 'gnus-group-mode-hook #'tessera-gnus-group--install)
     (dolist (buffer
              (match-buffers '(derived-mode . gnus-group-mode)))
       (with-current-buffer buffer

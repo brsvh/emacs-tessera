@@ -77,9 +77,8 @@
 (defun elfmt--configure-editorconfig ()
   "Configure EditorConfig integration for noninteractive formatting."
   (unless (assq 'lisp-data-mode editorconfig-indentation-alist)
-    (push
-     '(lisp-data-mode . editorconfig--get-indentation-lisp-mode)
-     editorconfig-indentation-alist))
+    (push '(lisp-data-mode . editorconfig--get-indentation-lisp-mode)
+          editorconfig-indentation-alist))
   (when (boundp 'editorconfig-override-dir-local-variables)
     (setq editorconfig-override-dir-local-variables nil))
   (when (boundp 'editorconfig-override-file-local-variables)
@@ -89,63 +88,32 @@
   "Apply EditorConfig properties to the current buffer."
   (when buffer-file-name
     (let ((properties
-           (editorconfig-call-get-properties-function
-            buffer-file-name)))
+           (editorconfig-call-get-properties-function buffer-file-name)))
       (condition-case err
-          (run-hook-with-args
-           'editorconfig-hack-properties-functions
-           properties)
+          (run-hook-with-args 'editorconfig-hack-properties-functions
+                              properties)
         (error
-         (display-warning
-          'elfmt
-          (format "EditorConfig property hook failed: %S" err)
-          :warning)))
-      (editorconfig-set-coding-system-revert
-       (gethash 'end_of_line properties)
-       (gethash 'charset properties))
+         (display-warning 'elfmt
+                          (format "EditorConfig property hook failed: %S" err)
+                          :warning)))
+      (editorconfig-set-coding-system-revert (gethash 'end_of_line properties)
+                                             (gethash 'charset properties))
       (setq editorconfig-properties-hash properties)
       (editorconfig-set-local-variables properties)
       (condition-case err
-          (run-hook-with-args
-           'editorconfig-after-apply-functions
-           properties)
+          (run-hook-with-args 'editorconfig-after-apply-functions
+                              properties)
         (error
-         (display-warning
-          'elfmt
-          (format "EditorConfig after-apply hook failed: %S" err)
-          :warning))))))
+         (display-warning 'elfmt
+                          (format "EditorConfig after-apply hook failed: %S" err)
+                          :warning))))))
 
 (defun elfmt--check-mode (file)
   "Ensure the current buffer uses a mode supported for FILE."
   (unless (derived-mode-p 'emacs-lisp-mode 'lisp-data-mode)
-    (elfmt--signal
-     "%s is not a supported Lisp file (major mode: %S)"
-     file
-     major-mode)))
-
-(defun elfmt--insert-final-newline ()
-  "Insert a final newline when the current buffer requires one."
-  (when (and require-final-newline
-             (> (point-max) (point-min))
-             (not find-file-literally)
-             (null buffer-read-only)
-             (/= (char-after (1- (point-max))) ?\n)
-             (not (and (eq selective-display t)
-                       (= (char-after (1- (point-max))) ?\r))))
-    (save-excursion
-      (goto-char (point-max))
-      (insert ?\n))))
-
-(defun elfmt--save-buffer ()
-  "Save the current buffer without creating backup files."
-  (elfmt--insert-final-newline)
-  (with-demoted-errors "Before-save hook error: %S"
-    (run-hooks 'before-save-hook))
-  (when (buffer-modified-p)
-    (let ((before-save-hook nil)
-          (inhibit-message t)
-          (message-log-max nil))
-      (basic-save-buffer))))
+    (elfmt--signal "%s is not a supported Lisp file (major mode: %S)"
+                   file
+                   major-mode)))
 
 (defun elfmt--definition-indent-spec (form)
   "Return a safe indentation declaration from definition FORM."
@@ -179,32 +147,26 @@
             (while t
               (let* ((form (read (current-buffer)))
                      (indent-spec
-                      (ignore-errors
-                        (elfmt--definition-indent-spec form))))
+                      (ignore-errors (elfmt--definition-indent-spec form))))
                 (when indent-spec
                   (setq indent-specs
-                        (cons
-                         indent-spec
-                         (assq-delete-all
-                          (car indent-spec)
-                          indent-specs))))))
+                        (cons indent-spec
+                              (assq-delete-all (car indent-spec)
+                                               indent-specs))))))
           (end-of-file nil)
           (error nil))
         indent-specs))))
 
 (defun elfmt--install-indent-specs ()
-  "Install collected indentation declarations and return prior values."
+  "Install indentation declarations and return prior values."
   (let (saved-properties)
     (dolist (indent-spec (elfmt--collect-indent-specs))
       (let ((symbol (car indent-spec)))
-        (push
-         (list
-          symbol
-          (plist-member
-           (symbol-plist symbol)
-           'lisp-indent-function)
-          (get symbol 'lisp-indent-function))
-         saved-properties)
+        (push (list symbol
+                    (plist-member (symbol-plist symbol)
+                                  'lisp-indent-function)
+                    (get symbol 'lisp-indent-function))
+              saved-properties)
         (put symbol 'lisp-indent-function (cdr indent-spec))))
     saved-properties))
 
@@ -262,16 +224,15 @@
                 (elfmt--check-mode file-name)
                 (elfmt--apply-editorconfig)
                 (elfmt--indent-buffer)
-                (elfmt--save-buffer)))
+                (save-buffer)))
           (when (buffer-live-p buffer)
             (kill-buffer buffer)))
       (elfmt-error
        (signal (car err) (cdr err)))
       (error
-       (elfmt--signal
-        "failed to format %s: %s"
-        file-name
-        (error-message-string err))))))
+       (elfmt--signal "failed to format %s: %s"
+                      file-name
+                      (error-message-string err))))))
 
 (defun elfmt--run (files)
   "Format FILES in a process-local, noninteractive environment."

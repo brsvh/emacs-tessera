@@ -22,6 +22,7 @@ let
       mu4e
       nerd-icons
       tessera-gnus
+      tessera-mu4e
     ]
   );
 

@@ -90,18 +90,18 @@ point is on its row:
 
 **** Symbols and Icons
 
-The default glyph style is ~unicode~.  Set the Gnus default with ~setq-default~,
+The default glyph style is ~nerd-icons~.  Set the Gnus default with ~setq-default~,
 because individual Gnus buffers may override it:
 
 #+begin_src emacs-lisp
-(setq-default tessera-gnus-symbol-style 'unicode)
+(setq-default tessera-gnus-symbol-style 'nerd-icons)
 #+end_src
 
-The accepted values are ~native~, ~unicode~, and ~nerd-icons~.  The ~nerd-icons~ style
-is optional and requires the ~nerd-icons~ package and its fonts; unavailable icons
+The accepted values are ~ascii~, ~unicode~, and ~nerd-icons~.  The ~nerd-icons~ style is
+optional and requires the ~nerd-icons~ package and its fonts; unavailable icons
 fall back to ordinary symbols.
 
-#+HTML: <p align="center"><img width="32%" src="https://github.com/user-attachments/assets/cbf0617f-cd31-44aa-b05b-14a3956d9906" alt="Native Gnus Summary symbols"><img width="32%" src="https://github.com/user-attachments/assets/0797cd6b-4768-4d88-93dc-8ae376bf867a" alt="Unicode Gnus Summary symbols"><img width="32%" src="https://github.com/user-attachments/assets/4baf66ac-b5d8-4e0e-91c9-d8148ddd37cb" alt="Nerd Icons Gnus Summary symbols"><br><sub>Native (left), Unicode (center), and Nerd Icons (right).</sub></p>
+#+HTML: <p align="center"><img width="32%" src="https://github.com/user-attachments/assets/cbf0617f-cd31-44aa-b05b-14a3956d9906" alt="ASCII Gnus Summary symbols"><img width="32%" src="https://github.com/user-attachments/assets/0797cd6b-4768-4d88-93dc-8ae376bf867a" alt="Unicode Gnus Summary symbols"><img width="32%" src="https://github.com/user-attachments/assets/4baf66ac-b5d8-4e0e-91c9-d8148ddd37cb" alt="Nerd Icons Gnus Summary symbols"><br><sub>ASCII (left), Unicode (center), and Nerd Icons (right).</sub></p>
 
 Use ~tessera-gnus-summary-mark-symbol-alist~ and
 ~tessera-gnus-summary-feature-symbol-alist~ to override individual glyphs:
@@ -150,7 +150,8 @@ the Gnus icon.
 
 ** Tessera Mu4e
 
-/This work still in progress/.
+Tessera Mu4e provides flat and threaded Headers layouts, month
+grouping, semantic marks and features, and a shared header line.
 
 ** Tessera Elfeed
 
@@ -178,9 +179,9 @@ want Tessera to present, such as ~tessera-gnus-mode~.
 *** Customize
 
 Use ~M-x customize-group RET tessera RET~ for shared faces.  Faces such as
-~tessera-entry-subject~, ~tessera-entry-author~, and ~tessera-thread-connector~
-currently affect Tessera Gnus and are intended to remain consistent across
-future backends.
+~tessera-ui-entry-subject~, ~tessera-ui-entry-author~, and
+~tessera-ui-thread-connector~ currently affect Tessera Gnus and are intended to
+remain consistent across future backends.
 
 **** Backend Symbols and Icons
 

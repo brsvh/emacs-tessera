@@ -49,7 +49,7 @@
 (declare-function tessera-gnus-notify-uninstall
                   "tessera-gnus-notify")
 
-(defvar tessera-gnus-mode)
+(defvar tessera-gnus-mode nil)
 
 (defconst tessera-gnus--face-remap-functions
   '(face-remap-add-relative
@@ -91,14 +91,10 @@
     (setq tessera-gnus--presentation-hooks-installed-p t)
     (require 'face-remap)
     (dolist (function tessera-gnus--face-remap-functions)
-      (advice-add function :after
-                  #'tessera-gnus--face-remap-changed))
-    (add-hook 'after-setting-font-hook
-              #'tessera-gnus--refresh-buffers)
-    (add-hook 'enable-theme-functions
-              #'tessera-gnus--refresh-buffers)
-    (add-hook 'disable-theme-functions
-              #'tessera-gnus--refresh-buffers)))
+      (advice-add function :after #'tessera-gnus--face-remap-changed))
+    (add-hook 'after-setting-font-hook #'tessera-gnus--refresh-buffers)
+    (add-hook 'enable-theme-functions #'tessera-gnus--refresh-buffers)
+    (add-hook 'disable-theme-functions #'tessera-gnus--refresh-buffers)))
 
 (defun tessera-gnus--remove-presentation-hooks ()
   "Remove hooks that refresh Gnus presentations."
@@ -106,24 +102,21 @@
     (setq tessera-gnus--presentation-hooks-installed-p nil)
     (dolist (function tessera-gnus--face-remap-functions)
       (advice-remove function #'tessera-gnus--face-remap-changed))
-    (remove-hook 'after-setting-font-hook
-                 #'tessera-gnus--refresh-buffers)
-    (remove-hook 'enable-theme-functions
-                 #'tessera-gnus--refresh-buffers)
-    (remove-hook 'disable-theme-functions
-                 #'tessera-gnus--refresh-buffers)))
+    (remove-hook 'after-setting-font-hook #'tessera-gnus--refresh-buffers)
+    (remove-hook 'enable-theme-functions #'tessera-gnus--refresh-buffers)
+    (remove-hook 'disable-theme-functions #'tessera-gnus--refresh-buffers)))
 
 (defun tessera-gnus--set-glyph-option (symbol value)
   "Set glyph option SYMBOL to VALUE and refresh Gnus buffers."
   (set-default symbol value)
   (tessera-gnus--refresh-buffers))
 
-(defcustom tessera-gnus-symbol-style 'unicode
+(defcustom tessera-gnus-symbol-style 'nerd-icons
   "Glyph style used for Gnus marks and features.
 
 Individual Gnus buffers may override the global default."
   :type '(choice
-          (const :tag "Native Gnus marks" native)
+          (const :tag "ASCII symbols" ascii)
           (const :tag "Unicode symbols" unicode)
           (const :tag "Nerd Icons" nerd-icons))
   :set #'tessera-gnus--set-glyph-option
@@ -131,7 +124,7 @@ Individual Gnus buffers may override the global default."
 
 (make-variable-buffer-local 'tessera-gnus-symbol-style)
 
-(defcustom tessera-gnus-glyph-color-style nil
+(defcustom tessera-gnus-glyph-color-style t
   "Control the color style of Gnus marks and features.
 
 When t, preserve the color chosen for each semantic role.  When nil,
@@ -144,8 +137,7 @@ to every Gnus mark and feature glyph."
   :set #'tessera-gnus--set-glyph-option
   :group 'tessera-gnus)
 
-(make-variable-buffer-local
- 'tessera-gnus-glyph-color-style)
+(make-variable-buffer-local 'tessera-gnus-glyph-color-style)
 
 (defun tessera-gnus--nerd-icon (spec fallback)
   "Return the Nerd Icon described by SPEC, or FALLBACK."

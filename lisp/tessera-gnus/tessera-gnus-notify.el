@@ -78,8 +78,7 @@
                   (push (list group) articles)
                 (condition-case nil
                     (when-let* ((unread
-                                 (gnus-list-of-unread-articles
-                                  group)))
+                                 (gnus-list-of-unread-articles group)))
                       (push (cons group unread) articles))
                   (error nil))))))))
     articles))
@@ -144,9 +143,8 @@ Return nil when the article header cannot be retrieved."
 
 (defun tessera-gnus-notify--mark-read (group article)
   "Mark ARTICLE in GROUP as read using native Gnus state."
-  (gnus-update-read-articles
-   group
-   (delq article (gnus-list-of-unread-articles group)))
+  (gnus-update-read-articles group
+                             (delq article (gnus-list-of-unread-articles group)))
   (gnus-group-update-group group))
 
 (defun tessera-gnus-notify--gnus-icon ()
@@ -163,49 +161,43 @@ Return nil when the article header cannot be retrieved."
   "Return an individual notification for ARTICLE data."
   (let ((group (plist-get article :group))
         (number (plist-get article :article)))
-    (list
-     :title (plist-get article :author)
-     :message (plist-get article :subject)
-     :category 'gnus
-     :icon
-     (tessera-gnus-notify--icon
-      (plist-get article :address))
-     :actions
-     (list
-      (list "read" "Read"
-            (apply-partially #'tessera-gnus-notify--read
-                             group number))
-      (list "mark-read" "Mark as Read"
-            (apply-partially #'tessera-gnus-notify--mark-read
-                             group number))))))
+    (list :title (plist-get article :author)
+          :message (plist-get article :subject)
+          :category 'gnus
+          :icon
+          (tessera-gnus-notify--icon (plist-get article :address))
+          :actions
+          (list (list "read" "Read"
+                      (apply-partially #'tessera-gnus-notify--read
+                                       group number))
+                (list "mark-read" "Mark as Read"
+                      (apply-partially #'tessera-gnus-notify--mark-read
+                                       group number))))))
 
 (defun tessera-gnus-notify--summary (articles)
   "Return a summary notification for ARTICLES."
   (let ((count (length articles))
         (subjects
-         (mapcar
-          (lambda (article) (plist-get article :subject))
-          (seq-take articles 3))))
-    (list
-     :title "Gnus"
-     :message
-     (format "%d new article%s: %s"
-             count
-             (if (= count 1) "" "s")
-             (string-join subjects "; "))
-     :category 'gnus
-     :icon (tessera-gnus-notify--gnus-icon))))
+         (mapcar (lambda (article) (plist-get article :subject))
+                 (seq-take articles 3))))
+    (list :title "Gnus"
+          :message
+          (format "%d new article%s: %s"
+                  count
+                  (if (= count 1) "" "s")
+                  (string-join subjects "; "))
+          :category 'gnus
+          :icon (tessera-gnus-notify--gnus-icon))))
 
 (defun tessera-gnus-notify--error (message)
   "Notify the user of a Gnus update failure described by MESSAGE."
   (when (tessera-notify-enabled-p
          tessera-gnus-notify-enable)
-    (tessera-notify
-     (list :title "Gnus update failed"
-           :message message
-           :severity 'high
-           :category 'gnus
-           :icon (tessera-gnus-notify--gnus-icon)))))
+    (tessera-notify (list :title "Gnus update failed"
+                          :message message
+                          :severity 'high
+                          :category 'gnus
+                          :icon (tessera-gnus-notify--gnus-icon)))))
 
 (defun tessera-gnus-notify--notify-new-articles ()
   "Notify the user about articles found by the Gnus update."
@@ -219,8 +211,7 @@ Return nil when the article header cannot be retrieved."
         (let ((group (car entry)))
           (unless (tessera-gnus-notify--group-visible-p group)
             (let ((article
-                   (tessera-gnus-notify--article
-                    group (cdr entry))))
+                   (tessera-gnus-notify--article group (cdr entry))))
               (if article
                   (push article articles)
                 (cl-incf failed))))))
@@ -228,14 +219,11 @@ Return nil when the article header cannot be retrieved."
       (when articles
         (if (<= (length articles) tessera-gnus-notify-limit)
             (dolist (article articles)
-              (tessera-notify
-               (tessera-gnus-notify--item article)))
-          (tessera-notify
-           (tessera-gnus-notify--summary articles))))
+              (tessera-notify (tessera-gnus-notify--item article)))
+          (tessera-notify (tessera-gnus-notify--summary articles))))
       (when (> failed 0)
-        (tessera-gnus-notify--error
-         (format "Could not retrieve %d new article header%s."
-                 failed (if (= failed 1) "" "s")))))))
+        (tessera-gnus-notify--error (format "Could not retrieve %d new article header%s."
+                                            failed (if (= failed 1) "" "s")))))))
 
 (defun tessera-gnus-notify--finish-update ()
   "Finish the current Gnus notification update cycle."
@@ -257,8 +245,7 @@ Return nil when the article header cannot be retrieved."
            (when outermost
              (setq tessera-gnus-notify--snapshot nil)
              (condition-case nil
-                 (tessera-gnus-notify--error
-                  (error-message-string error-data))
+                 (tessera-gnus-notify--error (error-message-string error-data))
                (error nil)))
            (signal (car error-data) (cdr error-data))))
       (cl-decf tessera-gnus-notify--update-depth))))
@@ -267,13 +254,10 @@ Return nil when the article header cannot be retrieved."
   "Install Tessera notification support for Gnus updates."
   (unless tessera-gnus-notify--installed-p
     (setq tessera-gnus-notify--installed-p t)
-    (add-hook 'gnus-get-new-news-hook
-              #'tessera-gnus-notify--begin-update)
-    (add-hook 'gnus-after-getting-new-news-hook
-              #'tessera-gnus-notify--finish-update)
+    (add-hook 'gnus-get-new-news-hook #'tessera-gnus-notify--begin-update)
+    (add-hook 'gnus-after-getting-new-news-hook #'tessera-gnus-notify--finish-update)
     (dolist (function tessera-gnus-notify--update-functions)
-      (advice-add function :around
-                  #'tessera-gnus-notify--around-update))))
+      (advice-add function :around #'tessera-gnus-notify--around-update))))
 
 (defun tessera-gnus-notify-uninstall ()
   "Remove Tessera notification support from Gnus updates."
@@ -281,13 +265,10 @@ Return nil when the article header cannot be retrieved."
     (setq tessera-gnus-notify--installed-p nil
           tessera-gnus-notify--snapshot nil
           tessera-gnus-notify--update-depth 0)
-    (remove-hook 'gnus-get-new-news-hook
-                 #'tessera-gnus-notify--begin-update)
-    (remove-hook 'gnus-after-getting-new-news-hook
-                 #'tessera-gnus-notify--finish-update)
+    (remove-hook 'gnus-get-new-news-hook #'tessera-gnus-notify--begin-update)
+    (remove-hook 'gnus-after-getting-new-news-hook #'tessera-gnus-notify--finish-update)
     (dolist (function tessera-gnus-notify--update-functions)
-      (advice-remove function
-                     #'tessera-gnus-notify--around-update))))
+      (advice-remove function #'tessera-gnus-notify--around-update))))
 
 (provide 'tessera-gnus-notify)
 ;;; tessera-gnus-notify.el ends here

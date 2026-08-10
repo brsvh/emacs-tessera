@@ -12,7 +12,8 @@ DIST_DIR := dist
 LISP_DIR := lisp
 TESSERA_DIR := $(LISP_DIR)/tessera
 TESSERA_GNUS_DIR := $(LISP_DIR)/tessera-gnus
-PACKAGES := tessera tessera-gnus
+TESSERA_MU4E_DIR := $(LISP_DIR)/tessera-mu4e
+PACKAGES := tessera tessera-gnus tessera-mu4e
 ARCHIVE_TARGETS := $(addsuffix -archive,$(PACKAGES))
 
 # Core package files.
@@ -39,17 +40,37 @@ TESSERA_GNUS_LISP_FILES := $(filter-out \
 TESSERA_GNUS_ELC_FILES := \
 	$(TESSERA_GNUS_LISP_FILES:.el=.elc)
 
+# mu4e package files.
+TESSERA_MU4E_MAIN := $(TESSERA_MU4E_DIR)/tessera-mu4e.el
+TESSERA_MU4E_PKG := \
+	$(TESSERA_MU4E_DIR)/tessera-mu4e-pkg.el
+TESSERA_MU4E_AUTOLOADS := \
+	$(TESSERA_MU4E_DIR)/tessera-mu4e-autoloads.el
+TESSERA_MU4E_ARCHIVE_STAMP := \
+	$(DIST_DIR)/.tessera-mu4e-archive
+TESSERA_MU4E_LISP_FILES := $(filter-out \
+	$(TESSERA_MU4E_PKG) $(TESSERA_MU4E_AUTOLOADS), \
+	$(wildcard $(TESSERA_MU4E_DIR)/*.el))
+TESSERA_MU4E_ELC_FILES := \
+	$(TESSERA_MU4E_LISP_FILES:.el=.elc)
+
 # Generated files.
-PKG_FILES := $(TESSERA_PKG) $(TESSERA_GNUS_PKG)
+PKG_FILES := \
+	$(TESSERA_PKG) \
+	$(TESSERA_GNUS_PKG) \
+	$(TESSERA_MU4E_PKG)
 AUTOLOAD_FILES := \
 	$(TESSERA_AUTOLOADS) \
-	$(TESSERA_GNUS_AUTOLOADS)
+	$(TESSERA_GNUS_AUTOLOADS) \
+	$(TESSERA_MU4E_AUTOLOADS)
 ELC_FILES := \
 	$(TESSERA_ELC_FILES) \
-	$(TESSERA_GNUS_ELC_FILES)
+	$(TESSERA_GNUS_ELC_FILES) \
+	$(TESSERA_MU4E_ELC_FILES)
 ARCHIVE_STAMPS := \
 	$(TESSERA_ARCHIVE_STAMP) \
-	$(TESSERA_GNUS_ARCHIVE_STAMP)
+	$(TESSERA_GNUS_ARCHIVE_STAMP) \
+	$(TESSERA_MU4E_ARCHIVE_STAMP)
 GENERATED_FILES := \
 	$(PKG_FILES) \
 	$(AUTOLOAD_FILES) \
@@ -122,9 +143,14 @@ endef
 	tessera-gnus-pkg \
 	tessera-gnus-autoloads \
 	tessera-gnus-compile \
-	tessera-gnus-archive
+	tessera-gnus-archive \
+	tessera-mu4e \
+	tessera-mu4e-pkg \
+	tessera-mu4e-autoloads \
+	tessera-mu4e-compile \
+	tessera-mu4e-archive
 
-all: tessera tessera-gnus
+all: tessera tessera-gnus tessera-mu4e
 
 tessera: \
 	tessera-pkg \
@@ -154,10 +180,25 @@ tessera-gnus-compile: $(TESSERA_GNUS_ELC_FILES)
 
 tessera-gnus-archive: $(TESSERA_GNUS_ARCHIVE_STAMP)
 
+tessera-mu4e: \
+	tessera-mu4e-pkg \
+	tessera-mu4e-autoloads \
+	tessera-mu4e-compile \
+	tessera-mu4e-archive
+
+tessera-mu4e-pkg: $(TESSERA_MU4E_PKG)
+
+tessera-mu4e-autoloads: $(TESSERA_MU4E_AUTOLOADS)
+
+tessera-mu4e-compile: $(TESSERA_MU4E_ELC_FILES)
+
+tessera-mu4e-archive: $(TESSERA_MU4E_ARCHIVE_STAMP)
+
 archives: $(ARCHIVE_TARGETS)
 
 $(TESSERA_PKG): $(TESSERA_MAIN) $(BUILD_FILE)
 $(TESSERA_GNUS_PKG): $(TESSERA_GNUS_MAIN) $(BUILD_FILE)
+$(TESSERA_MU4E_PKG): $(TESSERA_MU4E_MAIN) $(BUILD_FILE)
 
 $(PKG_FILES):
 	@env \
@@ -171,6 +212,9 @@ $(TESSERA_AUTOLOADS): \
 	$(BUILD_FILE)
 $(TESSERA_GNUS_AUTOLOADS): \
 	$(TESSERA_GNUS_LISP_FILES) \
+	$(BUILD_FILE)
+$(TESSERA_MU4E_AUTOLOADS): \
+	$(TESSERA_MU4E_LISP_FILES) \
 	$(BUILD_FILE)
 
 $(AUTOLOAD_FILES):
@@ -204,6 +248,16 @@ $(TESSERA_GNUS_ELC_FILES) &: \
 		--eval '(setq byte-compile-error-on-warn t load-prefer-newer t)' \
 		-f batch-byte-compile $(TESSERA_GNUS_LISP_FILES)
 
+$(TESSERA_MU4E_ELC_FILES) &: \
+	$(TESSERA_MU4E_LISP_FILES) \
+	$(TESSERA_ELC_FILES) \
+	$(BUILD_FILE)
+	$(EMACS_BATCH) \
+		-L $(TESSERA_DIR) \
+		-L $(TESSERA_MU4E_DIR) \
+		--eval '(setq byte-compile-error-on-warn t load-prefer-newer t)' \
+		-f batch-byte-compile $(TESSERA_MU4E_LISP_FILES)
+
 $(TESSERA_ARCHIVE_STAMP): \
 	$(TESSERA_LISP_FILES) \
 	$(TESSERA_PKG) \
@@ -214,9 +268,15 @@ $(TESSERA_GNUS_ARCHIVE_STAMP): \
 	$(TESSERA_GNUS_PKG) \
 	COPYING \
 	$(BUILD_FILE)
+$(TESSERA_MU4E_ARCHIVE_STAMP): \
+	$(TESSERA_MU4E_LISP_FILES) \
+	$(TESSERA_MU4E_PKG) \
+	COPYING \
+	$(BUILD_FILE)
 
 $(TESSERA_ARCHIVE_STAMP): PACKAGE_SOURCE := $(TESSERA_MAIN)
 $(TESSERA_GNUS_ARCHIVE_STAMP): PACKAGE_SOURCE := $(TESSERA_GNUS_MAIN)
+$(TESSERA_MU4E_ARCHIVE_STAMP): PACKAGE_SOURCE := $(TESSERA_MU4E_MAIN)
 
 $(ARCHIVE_STAMPS):
 	@set -eu
