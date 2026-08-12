@@ -93,27 +93,29 @@
           (run-hook-with-args 'editorconfig-hack-properties-functions
                               properties)
         (error
-         (display-warning 'elfmt
-                          (format "EditorConfig property hook failed: %S" err)
-                          :warning)))
-      (editorconfig-set-coding-system-revert (gethash 'end_of_line properties)
-                                             (gethash 'charset properties))
+         (display-warning
+          'elfmt
+          (format "EditorConfig property hook failed: %S" err)
+          :warning)))
+      (editorconfig-set-coding-system-revert
+       (gethash 'end_of_line properties)
+       (gethash 'charset properties))
       (setq editorconfig-properties-hash properties)
       (editorconfig-set-local-variables properties)
       (condition-case err
           (run-hook-with-args 'editorconfig-after-apply-functions
                               properties)
         (error
-         (display-warning 'elfmt
-                          (format "EditorConfig after-apply hook failed: %S" err)
-                          :warning))))))
+         (display-warning
+          'elfmt
+          (format "EditorConfig after-apply hook failed: %S" err)
+          :warning))))))
 
 (defun elfmt--check-mode (file)
   "Ensure the current buffer uses a mode supported for FILE."
   (unless (derived-mode-p 'emacs-lisp-mode 'lisp-data-mode)
     (elfmt--signal "%s is not a supported Lisp file (major mode: %S)"
-                   file
-                   major-mode)))
+                   file major-mode)))
 
 (defun elfmt--definition-indent-spec (form)
   "Return a safe indentation declaration from definition FORM."
@@ -147,7 +149,8 @@
             (while t
               (let* ((form (read (current-buffer)))
                      (indent-spec
-                      (ignore-errors (elfmt--definition-indent-spec form))))
+                      (ignore-errors
+                        (elfmt--definition-indent-spec form))))
                 (when indent-spec
                   (setq indent-specs
                         (cons indent-spec
@@ -227,12 +230,10 @@
                 (save-buffer)))
           (when (buffer-live-p buffer)
             (kill-buffer buffer)))
-      (elfmt-error
-       (signal (car err) (cdr err)))
+      (elfmt-error (signal (car err) (cdr err)))
       (error
        (elfmt--signal "failed to format %s: %s"
-                      file-name
-                      (error-message-string err))))))
+                      file-name (error-message-string err))))))
 
 (defun elfmt--run (files)
   "Format FILES in a process-local, noninteractive environment."
@@ -246,8 +247,7 @@
         (save-silently t)
         (vc-follow-symlinks t))
     (elfmt--configure-editorconfig)
-    (mapc #'elfmt--format-file
-          (elfmt--validate-files files))))
+    (mapc #'elfmt--format-file (elfmt--validate-files files))))
 
 (defun elfmt--main ()
   "Run the command-line formatter and return its process exit status."
@@ -255,12 +255,8 @@
       (progn
         (elfmt--run (elfmt--command-line-files))
         0)
-    (elfmt-error
-     (elfmt--print-error (cadr err))
-     1)
-    (error
-     (elfmt--print-error (error-message-string err))
-     1)))
+    (elfmt-error (elfmt--print-error (cadr err)) 1)
+    (error (elfmt--print-error (error-message-string err)) 1)))
 
 (when (elfmt--script-invocation-p)
   (kill-emacs (elfmt--main)))

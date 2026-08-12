@@ -4,7 +4,6 @@
   emacsPackagesFor,
   git,
   lib,
-  mu,
   projectRoot,
   writeShellApplication,
 }:
@@ -16,13 +15,8 @@ let
   emacsWithPackages = (emacsPackagesFor emacs).withPackages (
     emacsPackages: with emacsPackages; [
       better-defaults
-      elfeed
-      mood-line
       modus-themes
-      mu4e
-      nerd-icons
-      tessera-gnus
-      tessera-mu4e
+      tessera
     ]
   );
 
@@ -34,7 +28,6 @@ writeShellApplication {
   runtimeInputs = [
     coreutils
     git
-    mu
   ];
 
   text = ''
@@ -47,17 +40,10 @@ writeShellApplication {
       exit 1
     fi
 
-    if [ ! -f "$runtimeProjectRoot/test/init.el.in" ]; then
-      printf '%s\n' \
-        'emacs-tessera: test/init.el.in is missing from the project checkout' \
-        >&2
-      exit 1
-    fi
-
     initDirectory="$runtimeProjectRoot/local"
     initFile="$initDirectory/init.el"
 
-    mkdir -p -- "$initDirectory/news" "$initDirectory/feeds"
+    mkdir -p -- "$initDirectory"
 
     if [ -e "$initFile" ] || [ -L "$initFile" ]; then
       if [ ! -f "$initFile" ]; then

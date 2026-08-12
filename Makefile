@@ -3,88 +3,27 @@
 
 SHELL := /bin/sh
 
-# Tools and paths.
 EMACS ?= emacs
 EMACS_BATCH := $(EMACS) -Q --batch
 
 BUILD_FILE := Makefile
 DIST_DIR := dist
 LISP_DIR := lisp
-TESSERA_DIR := $(LISP_DIR)/tessera
-TESSERA_GNUS_DIR := $(LISP_DIR)/tessera-gnus
-TESSERA_MU4E_DIR := $(LISP_DIR)/tessera-mu4e
-PACKAGES := tessera tessera-gnus tessera-mu4e
-ARCHIVE_TARGETS := $(addsuffix -archive,$(PACKAGES))
+PACKAGE := tessera
+MAIN := $(LISP_DIR)/$(PACKAGE).el
+PKG := $(LISP_DIR)/$(PACKAGE)-pkg.el
+AUTOLOADS := $(LISP_DIR)/$(PACKAGE)-autoloads.el
+ARCHIVE_STAMP := $(DIST_DIR)/.$(PACKAGE)-archive
+LISP_FILES := $(filter-out $(PKG) $(AUTOLOADS),$(wildcard $(LISP_DIR)/*.el))
+ELC_FILES := $(LISP_FILES:.el=.elc)
+GENERATED_FILES := $(PKG) $(AUTOLOADS) $(ELC_FILES)
 
-# Core package files.
-TESSERA_MAIN := $(TESSERA_DIR)/tessera.el
-TESSERA_PKG := $(TESSERA_DIR)/tessera-pkg.el
-TESSERA_AUTOLOADS := $(TESSERA_DIR)/tessera-autoloads.el
-TESSERA_ARCHIVE_STAMP := $(DIST_DIR)/.tessera-archive
-TESSERA_LISP_FILES := $(filter-out \
-	$(TESSERA_PKG) $(TESSERA_AUTOLOADS), \
-	$(wildcard $(TESSERA_DIR)/*.el))
-TESSERA_ELC_FILES := $(TESSERA_LISP_FILES:.el=.elc)
-
-# Gnus package files.
-TESSERA_GNUS_MAIN := $(TESSERA_GNUS_DIR)/tessera-gnus.el
-TESSERA_GNUS_PKG := \
-	$(TESSERA_GNUS_DIR)/tessera-gnus-pkg.el
-TESSERA_GNUS_AUTOLOADS := \
-	$(TESSERA_GNUS_DIR)/tessera-gnus-autoloads.el
-TESSERA_GNUS_ARCHIVE_STAMP := \
-	$(DIST_DIR)/.tessera-gnus-archive
-TESSERA_GNUS_LISP_FILES := $(filter-out \
-	$(TESSERA_GNUS_PKG) $(TESSERA_GNUS_AUTOLOADS), \
-	$(wildcard $(TESSERA_GNUS_DIR)/*.el))
-TESSERA_GNUS_ELC_FILES := \
-	$(TESSERA_GNUS_LISP_FILES:.el=.elc)
-
-# mu4e package files.
-TESSERA_MU4E_MAIN := $(TESSERA_MU4E_DIR)/tessera-mu4e.el
-TESSERA_MU4E_PKG := \
-	$(TESSERA_MU4E_DIR)/tessera-mu4e-pkg.el
-TESSERA_MU4E_AUTOLOADS := \
-	$(TESSERA_MU4E_DIR)/tessera-mu4e-autoloads.el
-TESSERA_MU4E_ARCHIVE_STAMP := \
-	$(DIST_DIR)/.tessera-mu4e-archive
-TESSERA_MU4E_LISP_FILES := $(filter-out \
-	$(TESSERA_MU4E_PKG) $(TESSERA_MU4E_AUTOLOADS), \
-	$(wildcard $(TESSERA_MU4E_DIR)/*.el))
-TESSERA_MU4E_ELC_FILES := \
-	$(TESSERA_MU4E_LISP_FILES:.el=.elc)
-
-# Generated files.
-PKG_FILES := \
-	$(TESSERA_PKG) \
-	$(TESSERA_GNUS_PKG) \
-	$(TESSERA_MU4E_PKG)
-AUTOLOAD_FILES := \
-	$(TESSERA_AUTOLOADS) \
-	$(TESSERA_GNUS_AUTOLOADS) \
-	$(TESSERA_MU4E_AUTOLOADS)
-ELC_FILES := \
-	$(TESSERA_ELC_FILES) \
-	$(TESSERA_GNUS_ELC_FILES) \
-	$(TESSERA_MU4E_ELC_FILES)
-ARCHIVE_STAMPS := \
-	$(TESSERA_ARCHIVE_STAMP) \
-	$(TESSERA_GNUS_ARCHIVE_STAMP) \
-	$(TESSERA_MU4E_ARCHIVE_STAMP)
-GENERATED_FILES := \
-	$(PKG_FILES) \
-	$(AUTOLOAD_FILES) \
-	$(ELC_FILES)
-
-# Batch Emacs expressions.
 # bake-format off
 define GENERATE_PKG_ELISP
 (progn
   (require (quote package))
-  (let ((source
-         (expand-file-name (getenv "PACKAGE_SOURCE")))
-        (output
-         (expand-file-name (getenv "PACKAGE_OUTPUT"))))
+  (let ((source (expand-file-name (getenv "PACKAGE_SOURCE")))
+        (output (expand-file-name (getenv "PACKAGE_OUTPUT"))))
     (with-current-buffer (find-file-noselect source)
       (package-generate-description-file
        (package-buffer-info)
@@ -130,162 +69,50 @@ define CHECK_ARCHIVE_ELISP
 endef
 # bake-format on
 
-.PHONY: \
-	all \
-	archives \
-	clean \
-	tessera \
-	tessera-pkg \
-	tessera-autoloads \
-	tessera-compile \
-	tessera-archive \
-	tessera-gnus \
-	tessera-gnus-pkg \
-	tessera-gnus-autoloads \
-	tessera-gnus-compile \
-	tessera-gnus-archive \
-	tessera-mu4e \
-	tessera-mu4e-pkg \
-	tessera-mu4e-autoloads \
-	tessera-mu4e-compile \
-	tessera-mu4e-archive
+.PHONY: all archive autoloads clean compile package
 
-all: tessera tessera-gnus tessera-mu4e
+all: package autoloads compile archive
 
-tessera: \
-	tessera-pkg \
-	tessera-autoloads \
-	tessera-compile \
-	tessera-archive
+package: $(PKG)
 
-tessera-pkg: $(TESSERA_PKG)
+autoloads: $(AUTOLOADS)
 
-tessera-autoloads: $(TESSERA_AUTOLOADS)
+compile: $(ELC_FILES)
 
-tessera-compile: $(TESSERA_ELC_FILES)
+archive: $(ARCHIVE_STAMP)
 
-tessera-archive: $(TESSERA_ARCHIVE_STAMP)
-
-tessera-gnus: \
-	tessera-gnus-pkg \
-	tessera-gnus-autoloads \
-	tessera-gnus-compile \
-	tessera-gnus-archive
-
-tessera-gnus-pkg: $(TESSERA_GNUS_PKG)
-
-tessera-gnus-autoloads: $(TESSERA_GNUS_AUTOLOADS)
-
-tessera-gnus-compile: $(TESSERA_GNUS_ELC_FILES)
-
-tessera-gnus-archive: $(TESSERA_GNUS_ARCHIVE_STAMP)
-
-tessera-mu4e: \
-	tessera-mu4e-pkg \
-	tessera-mu4e-autoloads \
-	tessera-mu4e-compile \
-	tessera-mu4e-archive
-
-tessera-mu4e-pkg: $(TESSERA_MU4E_PKG)
-
-tessera-mu4e-autoloads: $(TESSERA_MU4E_AUTOLOADS)
-
-tessera-mu4e-compile: $(TESSERA_MU4E_ELC_FILES)
-
-tessera-mu4e-archive: $(TESSERA_MU4E_ARCHIVE_STAMP)
-
-archives: $(ARCHIVE_TARGETS)
-
-$(TESSERA_PKG): $(TESSERA_MAIN) $(BUILD_FILE)
-$(TESSERA_GNUS_PKG): $(TESSERA_GNUS_MAIN) $(BUILD_FILE)
-$(TESSERA_MU4E_PKG): $(TESSERA_MU4E_MAIN) $(BUILD_FILE)
-
-$(PKG_FILES):
+$(PKG): $(MAIN) $(BUILD_FILE)
 	@env \
 		PACKAGE_SOURCE="$<" \
 		PACKAGE_OUTPUT="$@" \
 		$(EMACS_BATCH) \
 		--eval '$(GENERATE_PKG_ELISP)'
 
-$(TESSERA_AUTOLOADS): \
-	$(TESSERA_LISP_FILES) \
-	$(BUILD_FILE)
-$(TESSERA_GNUS_AUTOLOADS): \
-	$(TESSERA_GNUS_LISP_FILES) \
-	$(BUILD_FILE)
-$(TESSERA_MU4E_AUTOLOADS): \
-	$(TESSERA_MU4E_LISP_FILES) \
-	$(BUILD_FILE)
-
-$(AUTOLOAD_FILES):
+$(AUTOLOADS): $(LISP_FILES) $(BUILD_FILE)
 	@set -eu
-	package_name="$(patsubst %-autoloads.el,%,$(notdir $@))"
 	temp_dir=$$(mktemp -d)
 	trap 'rm -rf "$$temp_dir"' EXIT HUP INT TERM
 	cp $(filter %.el,$^) "$$temp_dir/"
 	env \
 		PACKAGE_DIR="$$temp_dir" \
-		PACKAGE_NAME="$$package_name" \
+		PACKAGE_NAME="$(PACKAGE)" \
 		$(EMACS_BATCH) \
 		--eval '$(GENERATE_AUTOLOADS_ELISP)'
-	cp "$$temp_dir/$${package_name}-autoloads.el" "$@"
+	cp "$$temp_dir/$(PACKAGE)-autoloads.el" "$@"
 
-$(TESSERA_ELC_FILES) &: \
-	$(TESSERA_LISP_FILES) \
-	$(BUILD_FILE)
+$(ELC_FILES) &: $(LISP_FILES) $(BUILD_FILE)
 	$(EMACS_BATCH) \
-		-L $(TESSERA_DIR) \
+		-L $(LISP_DIR) \
 		--eval '(setq byte-compile-error-on-warn t load-prefer-newer t)' \
-		-f batch-byte-compile $(TESSERA_LISP_FILES)
+		-f batch-byte-compile $(LISP_FILES)
 
-$(TESSERA_GNUS_ELC_FILES) &: \
-	$(TESSERA_GNUS_LISP_FILES) \
-	$(TESSERA_ELC_FILES) \
-	$(BUILD_FILE)
-	$(EMACS_BATCH) \
-		-L $(TESSERA_DIR) \
-		-L $(TESSERA_GNUS_DIR) \
-		--eval '(setq byte-compile-error-on-warn t load-prefer-newer t)' \
-		-f batch-byte-compile $(TESSERA_GNUS_LISP_FILES)
-
-$(TESSERA_MU4E_ELC_FILES) &: \
-	$(TESSERA_MU4E_LISP_FILES) \
-	$(TESSERA_ELC_FILES) \
-	$(BUILD_FILE)
-	$(EMACS_BATCH) \
-		-L $(TESSERA_DIR) \
-		-L $(TESSERA_MU4E_DIR) \
-		--eval '(setq byte-compile-error-on-warn t load-prefer-newer t)' \
-		-f batch-byte-compile $(TESSERA_MU4E_LISP_FILES)
-
-$(TESSERA_ARCHIVE_STAMP): \
-	$(TESSERA_LISP_FILES) \
-	$(TESSERA_PKG) \
-	COPYING \
-	$(BUILD_FILE)
-$(TESSERA_GNUS_ARCHIVE_STAMP): \
-	$(TESSERA_GNUS_LISP_FILES) \
-	$(TESSERA_GNUS_PKG) \
-	COPYING \
-	$(BUILD_FILE)
-$(TESSERA_MU4E_ARCHIVE_STAMP): \
-	$(TESSERA_MU4E_LISP_FILES) \
-	$(TESSERA_MU4E_PKG) \
-	COPYING \
-	$(BUILD_FILE)
-
-$(TESSERA_ARCHIVE_STAMP): PACKAGE_SOURCE := $(TESSERA_MAIN)
-$(TESSERA_GNUS_ARCHIVE_STAMP): PACKAGE_SOURCE := $(TESSERA_GNUS_MAIN)
-$(TESSERA_MU4E_ARCHIVE_STAMP): PACKAGE_SOURCE := $(TESSERA_MU4E_MAIN)
-
-$(ARCHIVE_STAMPS):
+$(ARCHIVE_STAMP): $(LISP_FILES) $(PKG) COPYING $(BUILD_FILE)
 	@set -eu
-	package_name="$(patsubst .%-archive,%,$(notdir $@))"
 	version=$$(env \
-		PACKAGE_SOURCE="$(PACKAGE_SOURCE)" \
+		PACKAGE_SOURCE="$(MAIN)" \
 		$(EMACS_BATCH) \
 		--eval '$(PACKAGE_VERSION_ELISP)')
-	package_dir="$${package_name}-$${version}"
+	package_dir="$(PACKAGE)-$${version}"
 	archive="$(DIST_DIR)/$${package_dir}.tar"
 	temp_dir=$$(mktemp -d)
 	trap 'rm -rf "$$temp_dir"' EXIT HUP INT TERM
@@ -304,7 +131,7 @@ $(ARCHIVE_STAMPS):
 		"$$package_dir"
 	env \
 		PACKAGE_ARCHIVE="$$temp_dir/$${package_dir}.tar" \
-		PACKAGE_NAME="$$package_name" \
+		PACKAGE_NAME="$(PACKAGE)" \
 		PACKAGE_VERSION="$$version" \
 		$(EMACS_BATCH) \
 		--eval '$(CHECK_ARCHIVE_ELISP)'

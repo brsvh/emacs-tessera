@@ -13,7 +13,7 @@
 *-autoloads.el
 *-pkg.el
 *.elc
-/.dir-locals.el
+/.dir-locals-2.el
 /TAGS
 /dist
 /local

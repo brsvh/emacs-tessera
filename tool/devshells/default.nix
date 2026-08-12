@@ -51,7 +51,7 @@ in
           trim_trailing_whitespace = true;
         };
 
-        "*.el" = {
+        "{*.el,*.el.in}" = {
           indent_style = "space";
           indent_size = "unset";
           tab_width = 2;

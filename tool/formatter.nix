@@ -25,6 +25,7 @@ writeShellScriptBin "treefmt" ''
 
   exec ${treefmt}/bin/treefmt \
     --config-file=${file} \
+    --no-cache \
     --tree-root-file=flake.nix \
     "$@"
 ''

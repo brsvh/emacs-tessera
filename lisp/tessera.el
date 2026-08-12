@@ -25,7 +25,8 @@
 
 ;;; Commentary:
 
-;; Common foundation for the Tessera interface packages.
+;; Tessera is a modern interface suite for `elfeed', `gnus', and
+;; `mu4e'.
 
 ;;; Code:
 
@@ -33,8 +34,6 @@
   "Modern interfaces for Emacs communication tools."
   :group 'applications
   :prefix "tessera-")
-
-(require 'tessera-notify)
 
 (provide 'tessera)
 ;;; tessera.el ends here
