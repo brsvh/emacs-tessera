@@ -48,9 +48,8 @@ in
     in
     {
       apps = {
-        emacs = mkEmacsApp pkgs.emacs "Launch Emacs with the local project configuration";
-
-        emacs31 = mkEmacsApp pkgs.emacs31 "Launch Emacs 31 with the local project configuration";
+        emacs = mkEmacsApp pkgs.emacs "Launch Emacs 30";
+        emacs31 = mkEmacsApp pkgs.emacs31 "Launch Emacs 31";
       };
 
       devshells = {

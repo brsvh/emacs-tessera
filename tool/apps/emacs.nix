@@ -15,7 +15,9 @@ let
   emacsWithPackages = (emacsPackagesFor emacs).withPackages (
     emacsPackages: with emacsPackages; [
       better-defaults
+      elfeed
       modus-themes
+      mu4e
       tessera
     ]
   );
