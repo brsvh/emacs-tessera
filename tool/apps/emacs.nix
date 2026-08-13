@@ -16,6 +16,7 @@ let
     emacsPackages: with emacsPackages; [
       better-defaults
       elfeed
+      lorem-ipsum
       modus-themes
       mu4e
       tessera
@@ -44,6 +45,7 @@ writeShellApplication {
 
     initDirectory="$runtimeProjectRoot/local"
     initFile="$initDirectory/init.el"
+    fixtureFile="$runtimeProjectRoot/test/fixtures/tessera-fixtures.el"
 
     mkdir -p -- "$initDirectory"
 
@@ -57,8 +59,16 @@ writeShellApplication {
       printf 'emacs-tessera: created %s\n' "$initFile" >&2
     fi
 
+    if [ ! -f "$fixtureFile" ]; then
+      printf 'emacs-tessera: fixture file not found: %s\n' \
+        "$fixtureFile" >&2
+      exit 1
+    fi
+
     exec ${emacsWithPackages}/bin/emacs \
       --init-directory "$initDirectory" \
+      --load "$fixtureFile" \
+      --funcall tessera-fixtures-prepare \
       "$@"
   '';
 }
