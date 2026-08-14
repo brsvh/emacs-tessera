@@ -30,10 +30,285 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+
 (defgroup tessera nil
   "Modern interfaces for Emacs communication tools."
   :group 'applications
   :prefix "tessera-")
+
+(defvar tessera-glyph-semantics
+  '( accent attention informational muted negative neutral positive
+     warning)
+  "Semantic roles available to Tessera glyphs.")
+
+(cl-defstruct tessera-entry-context
+  "Describe one backend entry and its display environment.
+
+BACKEND identifies the registered adapter.  OBJECT is the backend's
+native object.  BUFFER and WINDOW identify where the entry is being
+rendered.  METADATA belongs to the adapter and remains opaque to the
+Tessera core."
+  backend
+  object
+  buffer
+  window
+  metadata)
+
+(cl-defstruct tessera-glyph
+  "Describe the visual forms and semantic role of a glyph."
+  ascii
+  unicode
+  nerd-icons
+  semantic)
+
+(cl-defstruct tessera-glyph-slot
+  "Describe a fixed-width, single-choice glyph channel.
+
+NAME identifies the slot within its backend.  SELECTOR is called with
+an entry context and returns a variant ID or nil.  WIDTH is measured
+in columns.  ALIGN is one of `left', `center', or `right'.  GLYPHS is
+  an alist of variant specifications."
+  name
+  selector
+  width
+  align
+  glyphs)
+
+(cl-defstruct tessera-entry-layout
+  "Describe the placement of slots and segments in an entry."
+  main-glyph-slots
+  main-left-segments
+  main-right-segments
+  extra-glyph-slots
+  extra-left-segments
+  extra-right-segments)
+
+(cl-defstruct (tessera--entry-backend
+               (:constructor tessera--make-entry-backend))
+  "Store a validated backend entry definition."
+  name
+  context
+  segments
+  glyph-slots
+  layouts)
+
+(defvar tessera--entry-backends (make-hash-table :test #'eq)
+  "Registered Tessera entry backends.")
+
+(defvar tessera--segment-properties
+  '(:grow :min-width :max-width :truncate :priority :optional)
+  "Properties accepted in a layout segment reference.")
+
+(defvar tessera--glyph-variant-properties
+  '(:glyph :mouse-face :help-echo :keymap :pointer :follow-link)
+  "Properties accepted in a glyph variant specification.")
+
+(defun tessera--ensure-list (value description)
+  "Ensure VALUE is a proper list described by DESCRIPTION."
+  (unless (proper-list-p value)
+    (error "%s must be a proper list" description)))
+
+(defun tessera--ensure-unique (values description)
+  "Ensure VALUES contains unique symbols described by DESCRIPTION."
+  (unless (= (length values)
+             (length
+              (cl-delete-duplicates
+               (copy-sequence values) :test #'eq)))
+    (error "%s must not contain duplicate IDs" description)))
+
+(defun tessera--ensure-plist-keys (plist allowed description)
+  "Ensure PLIST uses ALLOWED keys for DESCRIPTION."
+  (unless (and (plistp plist)
+               (cl-loop for (key _) on plist by #'cddr
+                        always (memq key allowed)))
+    (error "%s contains invalid properties" description)))
+
+(defun tessera--validate-glyph (glyph description)
+  "Validate GLYPH described by DESCRIPTION."
+  (unless (tessera-glyph-p glyph)
+    (error "%s must contain a Tessera glyph" description))
+  (let ((ascii (tessera-glyph-ascii glyph))
+        (unicode (tessera-glyph-unicode glyph))
+        (nerd-icons (tessera-glyph-nerd-icons glyph))
+        (semantic (tessera-glyph-semantic glyph)))
+    (unless (and (stringp ascii)
+                 (> (length ascii) 0)
+                 (cl-every (lambda (character)
+                             (< character 128))
+                           ascii))
+      (error "%s has an invalid ASCII representation" description))
+    (unless (and (stringp unicode) (> (length unicode) 0))
+      (error "%s has an invalid Unicode representation"
+             description))
+    (unless (and (plistp nerd-icons)
+                 (plist-get nerd-icons :function)
+                 (symbolp (plist-get nerd-icons :function))
+                 (stringp (plist-get nerd-icons :name))
+                 (> (length (plist-get nerd-icons :name)) 0))
+      (error "%s has an invalid Nerd Icons descriptor"
+             description))
+    (unless (memq semantic tessera-glyph-semantics)
+      (error "%s has unknown semantic `%s'"
+             description semantic))))
+
+(defun tessera--validate-glyph-variant (variant slot-name)
+  "Validate VARIANT belonging to SLOT-NAME and return its glyph."
+  (unless (and (consp variant)
+               (car variant)
+               (symbolp (car variant)))
+    (error "Glyph slot `%s' has an invalid variant" slot-name))
+  (let ((description
+         (format "Glyph variant `%s' in slot `%s'"
+                 (car variant) slot-name))
+        (properties (cdr variant)))
+    (tessera--ensure-plist-keys
+     properties tessera--glyph-variant-properties description)
+    (unless (plist-member properties :glyph)
+      (error "%s has no :glyph property" description))
+    (let ((glyph (plist-get properties :glyph)))
+      (tessera--validate-glyph glyph description)
+      glyph)))
+
+(defun tessera--validate-glyph-slot (slot)
+  "Validate glyph SLOT."
+  (unless (tessera-glyph-slot-p slot)
+    (error "Glyph slots must be Tessera glyph slots"))
+  (let ((name (tessera-glyph-slot-name slot))
+        (selector (tessera-glyph-slot-selector slot))
+        (width (tessera-glyph-slot-width slot))
+        (align (tessera-glyph-slot-align slot))
+        (glyphs (tessera-glyph-slot-glyphs slot)))
+    (unless (and name (symbolp name))
+      (error "Glyph slot names must be non-nil symbols"))
+    (unless (functionp selector)
+      (error "Glyph slot `%s' has an invalid selector" name))
+    (unless (and (integerp width) (> width 0))
+      (error "Glyph slot `%s' has an invalid width" name))
+    (unless (memq align '(left center right))
+      (error "Glyph slot `%s' has an invalid alignment" name))
+    (tessera--ensure-list glyphs
+                          (format "Glyphs in slot `%s'" name))
+    (tessera--ensure-unique
+     (mapcar #'car glyphs)
+     (format "Glyphs in slot `%s'" name))
+    (dolist (variant glyphs)
+      (let* ((glyph
+              (tessera--validate-glyph-variant variant name))
+             (ascii (tessera-glyph-ascii glyph)))
+        (when (> (string-width ascii) width)
+          (error "Glyph variant `%s' exceeds slot `%s' width"
+                 (car variant) name))))))
+
+(defun tessera--segment-reference-name (reference)
+  "Return the segment name in REFERENCE, or signal an error."
+  (cond
+   ((and reference (symbolp reference)) reference)
+   ((and (consp reference)
+         (symbolp (car reference))
+         (car reference))
+    (car reference))
+   (t
+    (error "Invalid segment reference `%S'" reference))))
+
+(defun tessera--validate-segment-reference (reference names)
+  "Validate segment REFERENCE against registered NAMES."
+  (let ((name (tessera--segment-reference-name reference)))
+    (unless (memq name names)
+      (error "Layout references unknown segment `%s'" name))
+    (when (consp reference)
+      (tessera--ensure-plist-keys
+       (cdr reference) tessera--segment-properties
+       (format "Segment reference `%s'" name)))))
+
+(defun tessera--validate-layout
+    (layout segment-names slot-names description)
+  "Validate LAYOUT for SEGMENT-NAMES and SLOT-NAMES.
+DESCRIPTION identifies the layout in errors."
+  (unless (tessera-entry-layout-p layout)
+    (error "%s must contain a Tessera entry layout" description))
+  (let ((slot-lists
+         (list (tessera-entry-layout-main-glyph-slots layout)
+               (tessera-entry-layout-extra-glyph-slots layout)))
+        (segment-lists
+         (list (tessera-entry-layout-main-left-segments layout)
+               (tessera-entry-layout-main-right-segments layout)
+               (tessera-entry-layout-extra-left-segments layout)
+               (tessera-entry-layout-extra-right-segments layout))))
+    (dolist (slots slot-lists)
+      (tessera--ensure-list slots description)
+      (dolist (slot slots)
+        (unless (and (symbolp slot) (memq slot slot-names))
+          (error "%s references unknown glyph slot `%s'"
+                 description slot))))
+    (dolist (segments segment-lists)
+      (tessera--ensure-list segments description)
+      (dolist (segment segments)
+        (tessera--validate-segment-reference
+         segment segment-names)))))
+
+(defun tessera--validate-segments (segments)
+  "Validate the SEGMENTS provider alist."
+  (tessera--ensure-list segments "Segments")
+  (dolist (segment segments)
+    (unless (and (consp segment)
+                 (car segment)
+                 (symbolp (car segment))
+                 (functionp (cdr segment)))
+      (error "Invalid segment provider `%S'" segment)))
+  (tessera--ensure-unique (mapcar #'car segments) "Segments"))
+
+(defun tessera--validate-layouts
+    (layouts segment-names slot-names)
+  "Validate LAYOUTS against SEGMENT-NAMES and SLOT-NAMES."
+  (tessera--ensure-list layouts "Layouts")
+  (unless layouts
+    (error "A backend must register at least one layout"))
+  (dolist (entry layouts)
+    (unless (and (consp entry)
+                 (car entry)
+                 (symbolp (car entry)))
+      (error "Invalid layout entry `%S'" entry))
+    (tessera--validate-layout
+     (cdr entry) segment-names slot-names
+     (format "Layout `%s'" (car entry))))
+  (tessera--ensure-unique (mapcar #'car layouts) "Layouts"))
+
+(cl-defun tessera-entry-register
+    (backend &key context segments glyph-slots layouts)
+  "Register or replace entry BACKEND.
+
+CONTEXT is a function of an object, buffer, and window which returns
+a `tessera-entry-context'.  SEGMENTS is an alist mapping segment IDs
+to provider functions.  GLYPH-SLOTS is a list of
+`tessera-glyph-slot' objects.  LAYOUTS is an alist mapping layout IDs
+to `tessera-entry-layout' objects.
+
+The new definition is installed only after it has been validated.
+Return BACKEND."
+  (unless (and backend (symbolp backend))
+    (error "Backend must be a non-nil symbol"))
+  (unless (functionp context)
+    (error "Backend `%s' has an invalid context function" backend))
+  (tessera--validate-segments segments)
+  (tessera--ensure-list glyph-slots "Glyph slots")
+  (dolist (slot glyph-slots)
+    (tessera--validate-glyph-slot slot))
+  (let ((segment-names (mapcar #'car segments))
+        (slot-names
+         (mapcar #'tessera-glyph-slot-name glyph-slots)))
+    (tessera--ensure-unique slot-names "Glyph slots")
+    (tessera--validate-layouts
+     layouts segment-names slot-names)
+    (let ((definition
+           (tessera--make-entry-backend
+            :name backend
+            :context context
+            :segments segments
+            :glyph-slots glyph-slots
+            :layouts layouts)))
+      (puthash backend definition tessera--entry-backends)))
+  backend)
 
 (provide 'tessera)
 ;;; tessera.el ends here
