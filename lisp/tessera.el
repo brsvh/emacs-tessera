@@ -32,10 +32,55 @@
 
 (require 'cl-lib)
 
+;;;; Customization
+
 (defgroup tessera nil
   "Modern interfaces for Emacs communication tools."
   :group 'applications
   :prefix "tessera-")
+
+(defcustom tessera-entry-layout 'single-line
+  "Layout used to render Tessera entries."
+  :type 'symbol
+  :safe #'symbolp
+  :group 'tessera)
+
+(defcustom tessera-entry-safe-gap 1
+  "Width in columns outside each side of an entry surface."
+  :type 'natnum
+  :safe #'natnump
+  :group 'tessera)
+
+(defcustom tessera-entry-left-padding 1
+  "Width in columns inside the left edge of an entry surface."
+  :type 'natnum
+  :safe #'natnump
+  :group 'tessera)
+
+(defcustom tessera-entry-right-padding 1
+  "Width in columns inside the right edge of an entry surface."
+  :type 'natnum
+  :safe #'natnump
+  :group 'tessera)
+
+(defcustom tessera-entry-segment-gap 1
+  "Width in columns between adjacent entry segments."
+  :type 'natnum
+  :safe #'natnump
+  :group 'tessera)
+
+(defcustom tessera-entry-flex-gap-min-width 1
+  "Minimum width in columns between left and right content."
+  :type 'natnum
+  :safe #'natnump
+  :group 'tessera)
+
+(defface tessera-entry-hover-face
+  '((t :inherit highlight))
+  "Face used when the pointer is over an entry surface."
+  :group 'tessera)
+
+;;;; Data model
 
 (defvar tessera-glyph-semantics
   '( accent attention informational muted negative neutral positive
@@ -68,7 +113,7 @@ Tessera core."
 NAME identifies the slot within its backend.  SELECTOR is called with
 an entry context and returns a variant ID or nil.  WIDTH is measured
 in columns.  ALIGN is one of `left', `center', or `right'.  GLYPHS is
-  an alist of variant specifications."
+an alist of variant specifications."
   name
   selector
   width
@@ -83,6 +128,8 @@ in columns.  ALIGN is one of `left', `center', or `right'.  GLYPHS is
   extra-glyph-slots
   extra-left-segments
   extra-right-segments)
+
+;;;; Backend registration
 
 (cl-defstruct (tessera--entry-backend
                (:constructor tessera--make-entry-backend))
@@ -113,14 +160,16 @@ in columns.  ALIGN is one of `left', `center', or `right'.  GLYPHS is
   "Ensure VALUES contains unique symbols described by DESCRIPTION."
   (unless (= (length values)
              (length
-              (cl-delete-duplicates
-               (copy-sequence values) :test #'eq)))
+              (cl-delete-duplicates (copy-sequence values)
+                                    :test #'eq)))
     (error "%s must not contain duplicate IDs" description)))
 
 (defun tessera--ensure-plist-keys (plist allowed description)
   "Ensure PLIST uses ALLOWED keys for DESCRIPTION."
   (unless (and (plistp plist)
-               (cl-loop for (key _) on plist by #'cddr
+               (cl-loop for (key _)
+                        on plist
+                        by #'cddr
                         always (memq key allowed)))
     (error "%s contains invalid properties" description)))
 
@@ -139,18 +188,15 @@ in columns.  ALIGN is one of `left', `center', or `right'.  GLYPHS is
                            ascii))
       (error "%s has an invalid ASCII representation" description))
     (unless (and (stringp unicode) (> (length unicode) 0))
-      (error "%s has an invalid Unicode representation"
-             description))
+      (error "%s has an invalid Unicode representation" description))
     (unless (and (plistp nerd-icons)
                  (plist-get nerd-icons :function)
                  (symbolp (plist-get nerd-icons :function))
                  (stringp (plist-get nerd-icons :name))
                  (> (length (plist-get nerd-icons :name)) 0))
-      (error "%s has an invalid Nerd Icons descriptor"
-             description))
+      (error "%s has an invalid Nerd Icons descriptor" description))
     (unless (memq semantic tessera-glyph-semantics)
-      (error "%s has unknown semantic `%s'"
-             description semantic))))
+      (error "%s has unknown semantic `%s'" description semantic))))
 
 (defun tessera--validate-glyph-variant (variant slot-name)
   "Validate VARIANT belonging to SLOT-NAME and return its glyph."
@@ -162,8 +208,9 @@ in columns.  ALIGN is one of `left', `center', or `right'.  GLYPHS is
          (format "Glyph variant `%s' in slot `%s'"
                  (car variant) slot-name))
         (properties (cdr variant)))
-    (tessera--ensure-plist-keys
-     properties tessera--glyph-variant-properties description)
+    (tessera--ensure-plist-keys properties
+                                tessera--glyph-variant-properties
+                                description)
     (unless (plist-member properties :glyph)
       (error "%s has no :glyph property" description))
     (let ((glyph (plist-get properties :glyph)))
@@ -187,14 +234,11 @@ in columns.  ALIGN is one of `left', `center', or `right'.  GLYPHS is
       (error "Glyph slot `%s' has an invalid width" name))
     (unless (memq align '(left center right))
       (error "Glyph slot `%s' has an invalid alignment" name))
-    (tessera--ensure-list glyphs
-                          (format "Glyphs in slot `%s'" name))
-    (tessera--ensure-unique
-     (mapcar #'car glyphs)
-     (format "Glyphs in slot `%s'" name))
+    (tessera--ensure-list glyphs (format "Glyphs in slot `%s'" name))
+    (tessera--ensure-unique (mapcar #'car glyphs)
+                            (format "Glyphs in slot `%s'" name))
     (dolist (variant glyphs)
-      (let* ((glyph
-              (tessera--validate-glyph-variant variant name))
+      (let* ((glyph (tessera--validate-glyph-variant variant name))
              (ascii (tessera-glyph-ascii glyph)))
         (when (> (string-width ascii) width)
           (error "Glyph variant `%s' exceeds slot `%s' width"
@@ -203,7 +247,8 @@ in columns.  ALIGN is one of `left', `center', or `right'.  GLYPHS is
 (defun tessera--segment-reference-name (reference)
   "Return the segment name in REFERENCE, or signal an error."
   (cond
-   ((and reference (symbolp reference)) reference)
+   ((and reference (symbolp reference))
+    reference)
    ((and (consp reference)
          (symbolp (car reference))
          (car reference))
@@ -218,7 +263,8 @@ in columns.  ALIGN is one of `left', `center', or `right'.  GLYPHS is
       (error "Layout references unknown segment `%s'" name))
     (when (consp reference)
       (tessera--ensure-plist-keys
-       (cdr reference) tessera--segment-properties
+       (cdr reference)
+       tessera--segment-properties
        (format "Segment reference `%s'" name)))))
 
 (defun tessera--validate-layout
@@ -244,8 +290,7 @@ DESCRIPTION identifies the layout in errors."
     (dolist (segments segment-lists)
       (tessera--ensure-list segments description)
       (dolist (segment segments)
-        (tessera--validate-segment-reference
-         segment segment-names)))))
+        (tessera--validate-segment-reference segment segment-names)))))
 
 (defun tessera--validate-segments (segments)
   "Validate the SEGMENTS provider alist."
@@ -270,7 +315,9 @@ DESCRIPTION identifies the layout in errors."
                  (symbolp (car entry)))
       (error "Invalid layout entry `%S'" entry))
     (tessera--validate-layout
-     (cdr entry) segment-names slot-names
+     (cdr entry)
+     segment-names
+     slot-names
      (format "Layout `%s'" (car entry))))
   (tessera--ensure-unique (mapcar #'car layouts) "Layouts"))
 
@@ -295,11 +342,9 @@ Return BACKEND."
   (dolist (slot glyph-slots)
     (tessera--validate-glyph-slot slot))
   (let ((segment-names (mapcar #'car segments))
-        (slot-names
-         (mapcar #'tessera-glyph-slot-name glyph-slots)))
+        (slot-names (mapcar #'tessera-glyph-slot-name glyph-slots)))
     (tessera--ensure-unique slot-names "Glyph slots")
-    (tessera--validate-layouts
-     layouts segment-names slot-names)
+    (tessera--validate-layouts layouts segment-names slot-names)
     (let ((definition
            (tessera--make-entry-backend
             :name backend
@@ -309,6 +354,213 @@ Return BACKEND."
             :layouts layouts)))
       (puthash backend definition tessera--entry-backends)))
   backend)
+
+;;;; Rendering
+
+(defun tessera--find-entry-backend (backend)
+  "Return the registered definition for BACKEND."
+  (or (gethash backend tessera--entry-backends)
+      (error "Unknown Tessera entry backend `%s'" backend)))
+
+(defun tessera--find-entry-layout (definition)
+  "Return the selected layout from backend DEFINITION."
+  (let ((entry
+         (assq tessera-entry-layout
+               (tessera--entry-backend-layouts definition))))
+    (or (cdr entry)
+        (error "Backend `%s' has no layout `%s'"
+               (tessera--entry-backend-name definition)
+               tessera-entry-layout))))
+
+(defun tessera--ensure-single-line-layout (layout)
+  "Ensure LAYOUT contains no extra visual line."
+  (when (or (tessera-entry-layout-extra-glyph-slots layout)
+            (tessera-entry-layout-extra-left-segments layout)
+            (tessera-entry-layout-extra-right-segments layout))
+    (error "Layout `%s' requires the two-line renderer"
+           tessera-entry-layout)))
+
+(defun tessera--make-entry-context
+    (definition object window)
+  "Build a context for OBJECT, DEFINITION, and WINDOW."
+  (let* ((backend (tessera--entry-backend-name definition))
+         (context
+          (funcall (tessera--entry-backend-context definition)
+                   object
+                   (current-buffer)
+                   window)))
+    (unless (tessera-entry-context-p context)
+      (error "Backend `%s' returned an invalid entry context" backend))
+    (unless (eq (tessera-entry-context-backend context) backend)
+      (error "Entry context names backend `%s', expected `%s'"
+             (tessera-entry-context-backend context) backend))
+    context))
+
+(defun tessera--space (width)
+  "Return a display space occupying WIDTH columns."
+  (if (> width 0)
+      (propertize " " 'display `(space :width ,width))
+    ""))
+
+(defun tessera--align-space (right-offset)
+  "Return a display space aligned RIGHT-OFFSET from the right edge."
+  (propertize " " 'display `(space :align-to (- right ,right-offset))))
+
+(defun tessera--add-default-property (string property value)
+  "Add PROPERTY with VALUE where STRING does not already have it."
+  (let ((position 0)
+        (end (length string)))
+    (while (< position end)
+      (let ((next
+             (next-single-property-change position property string end)))
+        (unless (get-text-property position property string)
+          (put-text-property position next property value string))
+        (setq position next))))
+  string)
+
+(defun tessera--render-segment (reference definition context)
+  "Render segment REFERENCE using DEFINITION and CONTEXT."
+  (let* ((name (tessera--segment-reference-name reference))
+         (provider
+          (cdr (assq name
+                     (tessera--entry-backend-segments definition))))
+         (value (funcall provider context)))
+    (unless (or (null value) (stringp value))
+      (error "Segment provider `%s' returned `%S'" name value))
+    (when (and value (string-match-p "[\n\r]" value))
+      (error "Segment provider `%s' returned multiline text" name))
+    value))
+
+(defun tessera--render-segments (references definition context)
+  "Render REFERENCES using DEFINITION and CONTEXT.
+Return a cons of the rendered string and its width in columns."
+  (let (strings
+        (width 0))
+    (dolist (reference references)
+      (let ((string
+             (tessera--render-segment reference definition context)))
+        (when string
+          (when strings
+            (setq width (+ width tessera-entry-segment-gap)))
+          (setq width (+ width (string-width string)))
+          (push string strings))))
+    (setq strings (nreverse strings))
+    (cons (mapconcat #'identity strings
+                     (tessera--space tessera-entry-segment-gap))
+          width)))
+
+(defun tessera--glyph-slot-padding (slot content-width)
+  "Return left and right padding for SLOT and CONTENT-WIDTH."
+  (let* ((width (tessera-glyph-slot-width slot))
+         (remaining (- width content-width))
+         (left
+          (pcase (tessera-glyph-slot-align slot)
+            ('left 0)
+            ('center (/ remaining 2))
+            ('right remaining))))
+    (cons left (- remaining left))))
+
+(defun tessera--render-glyph-slot (slot context)
+  "Render glyph SLOT for CONTEXT at its fixed width."
+  (let* ((variant-id
+          (funcall (tessera-glyph-slot-selector slot) context))
+         (variant
+          (and variant-id
+               (assq variant-id
+                     (tessera-glyph-slot-glyphs slot)))))
+    (cond
+     ((null variant-id)
+      (tessera--space (tessera-glyph-slot-width slot)))
+     ((null variant)
+      (display-warning
+       'tessera
+       (format "Glyph slot `%s' selected unknown variant `%s'"
+               (tessera-glyph-slot-name slot) variant-id)
+       :warning)
+      (tessera--space (tessera-glyph-slot-width slot)))
+     (t
+      (let* ((glyph (plist-get (cdr variant) :glyph))
+             (text (tessera-glyph-unicode glyph))
+             (content-width (string-width text)))
+        (when (> content-width
+                 (tessera-glyph-slot-width slot))
+          (error "Glyph variant `%s' exceeds slot `%s' width"
+                 variant-id (tessera-glyph-slot-name slot)))
+        (let ((padding
+               (tessera--glyph-slot-padding slot content-width)))
+          (concat (tessera--space (car padding))
+                  text
+                  (tessera--space (cdr padding)))))))))
+
+(defun tessera--render-glyph-slots
+    (names definition context)
+  "Render glyph slots NAMES using DEFINITION and CONTEXT."
+  (mapconcat
+   (lambda (name)
+     (let ((slot
+            (cl-find name (tessera--entry-backend-glyph-slots definition)
+                     :key #'tessera-glyph-slot-name)))
+       (tessera--render-glyph-slot slot context)))
+   names
+   ""))
+
+(defun tessera--render-single-line
+    (layout definition context)
+  "Render single-line LAYOUT using DEFINITION and CONTEXT."
+  (let* ((slot-names
+          (tessera-entry-layout-main-glyph-slots layout))
+         (slots
+          (tessera--render-glyph-slots slot-names definition context))
+         (left
+          (tessera--render-segments
+           (tessera-entry-layout-main-left-segments layout)
+           definition
+           context))
+         (right
+          (tessera--render-segments
+           (tessera-entry-layout-main-right-segments layout)
+           definition
+           context))
+         (slot-gap
+          (if (and slot-names (> (length (car left)) 0))
+              (tessera--space tessera-entry-segment-gap)
+            ""))
+         (right-offset
+          (+ tessera-entry-safe-gap
+             tessera-entry-right-padding
+             (cdr right)))
+         (surface
+          (concat
+           (tessera--space tessera-entry-left-padding)
+           slots
+           slot-gap
+           (car left)
+           (tessera--space tessera-entry-flex-gap-min-width)
+           (tessera--align-space right-offset)
+           (car right)
+           (tessera--space tessera-entry-right-padding))))
+    (tessera--add-default-property surface
+                                   'mouse-face
+                                   'tessera-entry-hover-face)
+    (concat (tessera--space tessera-entry-safe-gap)
+            surface
+            (tessera--space tessera-entry-safe-gap))))
+
+(defun tessera-entry-render (backend object &optional window)
+  "Render OBJECT registered for BACKEND in WINDOW.
+
+Return a propertized string without newline characters.  WINDOW
+defaults to a window displaying the current buffer, when one exists."
+  (when (and window (not (window-live-p window)))
+    (error "Cannot render an entry for a dead window"))
+  (let* ((definition (tessera--find-entry-backend backend))
+         (layout (tessera--find-entry-layout definition))
+         (target-window (or window
+                            (get-buffer-window (current-buffer))))
+         (context
+          (tessera--make-entry-context definition object target-window)))
+    (tessera--ensure-single-line-layout layout)
+    (tessera--render-single-line layout definition context)))
 
 (provide 'tessera)
 ;;; tessera.el ends here
