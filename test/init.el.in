@@ -14,6 +14,8 @@
 (setq modus-themes-to-toggle '(modus-operandi modus-vivendi))
 (load-theme 'modus-operandi t)
 
+(setq gnus-home-directory user-emacs-directory)
+
 (setq server-socket-dir
       (locate-user-emacs-file (format "server/emacs-%s/"
                                       emacs-version)))
