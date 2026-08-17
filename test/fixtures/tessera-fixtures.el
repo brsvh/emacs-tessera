@@ -985,7 +985,7 @@ Use BASE-TAGS, zero-based INDEX, and random STATE to populate it."
 
 Persist backend-supported marks through `nnmaildir'.  Install
 summary-only states, such as scores and agent marks, through the
-  ordinary Gnus summary variables."
+ordinary Gnus summary variables."
   (let (actions)
     (dolist (scenario tessera-fixtures--gnus-mark-scenarios)
       (when-let* ((storage-mark (nth 1 scenario))

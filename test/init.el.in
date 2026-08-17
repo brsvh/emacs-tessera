@@ -17,8 +17,8 @@
 (setq gnus-home-directory user-emacs-directory)
 
 (setq server-socket-dir
-      (locate-user-emacs-file (format "server/emacs-%s/"
-                                      emacs-version)))
+      (locate-user-emacs-file
+       (format "server/emacs-%s/" emacs-version)))
 (unless (server-running-p)
   (server-start))
 

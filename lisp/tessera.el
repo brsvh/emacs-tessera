@@ -75,9 +75,70 @@
   :safe #'natnump
   :group 'tessera)
 
+(defcustom tessera-glyph-style 'unicode
+  "Preferred visual style for Tessera glyphs."
+  :type '(choice
+          (const :tag "ASCII" ascii)
+          (const :tag "Unicode" unicode)
+          (const :tag "Nerd Icons" nerd-icons))
+  :safe #'symbolp
+  :group 'tessera)
+
+(defcustom tessera-glyph-color t
+  "Color treatment applied to Tessera glyphs.
+
+A nil value inherits the surrounding foreground.  A t value uses
+the glyph's semantic face.  A color string applies that foreground
+to every glyph."
+  :type '(choice
+          (const :tag "Monochrome" nil)
+          (const :tag "Semantic colors" t)
+          (color :tag "Uniform color"))
+  :group 'tessera)
+
 (defface tessera-entry-hover-face
   '((t :inherit highlight))
   "Face used when the pointer is over an entry surface."
+  :group 'tessera)
+
+(defface tessera-glyph-neutral-face
+  '((t :inherit default))
+  "Face used for neutral Tessera glyphs."
+  :group 'tessera)
+
+(defface tessera-glyph-muted-face
+  '((t :inherit shadow))
+  "Face used for muted Tessera glyphs."
+  :group 'tessera)
+
+(defface tessera-glyph-accent-face
+  '((t :inherit font-lock-keyword-face))
+  "Face used for accent Tessera glyphs."
+  :group 'tessera)
+
+(defface tessera-glyph-informational-face
+  '((t :inherit font-lock-type-face))
+  "Face used for informational Tessera glyphs."
+  :group 'tessera)
+
+(defface tessera-glyph-positive-face
+  '((t :inherit success))
+  "Face used for positive Tessera glyphs."
+  :group 'tessera)
+
+(defface tessera-glyph-attention-face
+  '((t :inherit font-lock-warning-face))
+  "Face used for attention Tessera glyphs."
+  :group 'tessera)
+
+(defface tessera-glyph-warning-face
+  '((t :inherit warning))
+  "Face used for warning Tessera glyphs."
+  :group 'tessera)
+
+(defface tessera-glyph-negative-face
+  '((t :inherit error))
+  "Face used for negative Tessera glyphs."
   :group 'tessera)
 
 ;;;; Data model
@@ -86,6 +147,28 @@
   '( accent attention informational muted negative neutral positive
      warning)
   "Semantic roles available to Tessera glyphs.")
+
+(defvar tessera--glyph-semantic-faces
+  '((accent . tessera-glyph-accent-face)
+    (attention . tessera-glyph-attention-face)
+    (informational . tessera-glyph-informational-face)
+    (muted . tessera-glyph-muted-face)
+    (negative . tessera-glyph-negative-face)
+    (neutral . tessera-glyph-neutral-face)
+    (positive . tessera-glyph-positive-face)
+    (warning . tessera-glyph-warning-face))
+  "Map glyph semantics to their faces.")
+
+(defvar tessera--glyph-interaction-properties
+  '((:mouse-face . mouse-face)
+    (:help-echo . help-echo)
+    (:keymap . keymap)
+    (:pointer . pointer)
+    (:follow-link . follow-link))
+  "Map glyph variant keys to text properties.")
+
+(defvar tessera--nerd-icons-availability nil
+  "Cached availability of the optional Nerd Icons library.")
 
 (cl-defstruct tessera-entry-context
   "Describe one backend entry and its display environment.
@@ -449,6 +532,117 @@ Return a cons of the rendered string and its width in columns."
                      (tessera--space tessera-entry-segment-gap))
           width)))
 
+(defun tessera--glyph-frame (context)
+  "Return the frame used to render glyphs for CONTEXT."
+  (let ((window (tessera-entry-context-window context)))
+    (if (window-live-p window)
+        (window-frame window)
+      (selected-frame))))
+
+(defun tessera--glyph-string-displayable-p (string frame)
+  "Return non-nil when every character in STRING displays on FRAME."
+  (with-selected-frame frame
+    (cl-every #'char-displayable-p string)))
+
+(defun tessera--unicode-glyph-text (glyph frame)
+  "Return GLYPH's Unicode text when it can display on FRAME."
+  (let ((text (tessera-glyph-unicode glyph)))
+    (when (and (display-graphic-p frame)
+               (tessera--glyph-string-displayable-p text frame))
+      text)))
+
+(defun tessera--nerd-icons-available-p ()
+  "Return non-nil when the optional Nerd Icons library is available."
+  (cond
+   ((featurep 'nerd-icons)
+    (setq tessera--nerd-icons-availability 'available))
+   ((eq tessera--nerd-icons-availability 'unavailable)
+    nil)
+   ((require 'nerd-icons nil t)
+    (setq tessera--nerd-icons-availability 'available))
+   (t
+    (setq tessera--nerd-icons-availability 'unavailable)
+    nil)))
+
+(defun tessera--nerd-icons-glyph-text (glyph frame)
+  "Return GLYPH's Nerd Icons text when it can display on FRAME."
+  (when (and (display-graphic-p frame)
+             (tessera--nerd-icons-available-p))
+    (let* ((descriptor (tessera-glyph-nerd-icons glyph))
+           (function (plist-get descriptor :function))
+           (name (plist-get descriptor :name)))
+      (when (fboundp function)
+        (condition-case nil
+            (let ((text (funcall function name)))
+              (when (and (stringp text)
+                         (> (length text) 0)
+                         (tessera--glyph-string-displayable-p text frame))
+                text))
+          (error nil))))))
+
+(defun tessera--glyph-text (glyph context)
+  "Return the best available text for GLYPH in CONTEXT."
+  (let ((frame (tessera--glyph-frame context))
+        (ascii (tessera-glyph-ascii glyph)))
+    (pcase tessera-glyph-style
+      ('ascii ascii)
+      ('unicode
+       (or (tessera--unicode-glyph-text glyph frame)
+           ascii))
+      ('nerd-icons
+       (or (tessera--nerd-icons-glyph-text glyph frame)
+           (tessera--unicode-glyph-text glyph frame)
+           ascii))
+      (_
+       (error "Unknown Tessera glyph style `%s'"
+              tessera-glyph-style)))))
+
+(defun tessera--glyph-color-face (glyph)
+  "Return the configured color face for GLYPH, or nil."
+  (cond
+   ((eq tessera-glyph-color t)
+    (alist-get (tessera-glyph-semantic glyph)
+               tessera--glyph-semantic-faces))
+   ((stringp tessera-glyph-color)
+    `(:foreground ,tessera-glyph-color))))
+
+(defun tessera--glyph-hover-color-face (face context)
+  "Return a foreground-only hover FACE for CONTEXT."
+  (if (symbolp face)
+      `(:foreground
+        ,(face-attribute face :foreground
+                         (tessera--glyph-frame context) 'default))
+    face))
+
+(defun tessera--apply-glyph-color (text glyph context)
+  "Apply GLYPH's configured color and metadata to TEXT in CONTEXT."
+  (let* ((face (tessera--glyph-color-face glyph))
+         (hover-face (and face
+                          (tessera--glyph-hover-color-face face context))))
+    (put-text-property 0 (length text) 'tessera-glyph-semantic
+                       (tessera-glyph-semantic glyph) text)
+    (when face
+      (add-face-text-property 0 (length text) face t text)
+      (put-text-property 0 (length text) 'mouse-face
+                         (list hover-face 'tessera-entry-hover-face)
+                         text)))
+  text)
+
+(defun tessera--apply-glyph-interaction (text properties glyph)
+  "Apply variant PROPERTIES for GLYPH to TEXT."
+  (let ((color-face (tessera--glyph-color-face glyph)))
+    (dolist (entry tessera--glyph-interaction-properties)
+      (let ((keyword (car entry))
+            (property (cdr entry)))
+        (when (plist-member properties keyword)
+          (let ((value (plist-get properties keyword)))
+            (when (and value
+                       (eq property 'mouse-face)
+                       color-face)
+              (setq value (list value color-face)))
+            (put-text-property 0 (length text) property value text))))))
+  text)
+
 (defun tessera--glyph-slot-padding (slot content-width)
   "Return left and right padding for SLOT and CONTENT-WIDTH."
   (let* ((width (tessera-glyph-slot-width slot))
@@ -479,15 +673,17 @@ Return a cons of the rendered string and its width in columns."
        :warning)
       (tessera--space (tessera-glyph-slot-width slot)))
      (t
-      (let* ((glyph (plist-get (cdr variant) :glyph))
-             (text (tessera-glyph-unicode glyph))
+      (let* ((properties (cdr variant))
+             (glyph (plist-get properties :glyph))
+             (text (copy-sequence (tessera--glyph-text glyph context)))
              (content-width (string-width text)))
         (when (> content-width
                  (tessera-glyph-slot-width slot))
           (error "Glyph variant `%s' exceeds slot `%s' width"
                  variant-id (tessera-glyph-slot-name slot)))
-        (let ((padding
-               (tessera--glyph-slot-padding slot content-width)))
+        (let ((padding (tessera--glyph-slot-padding slot content-width)))
+          (tessera--apply-glyph-color text glyph context)
+          (tessera--apply-glyph-interaction text properties glyph)
           (concat (tessera--space (car padding))
                   text
                   (tessera--space (cdr padding)))))))))
@@ -497,9 +693,8 @@ Return a cons of the rendered string and its width in columns."
   "Render glyph slots NAMES using DEFINITION and CONTEXT."
   (mapconcat
    (lambda (name)
-     (let ((slot
-            (cl-find name (tessera--entry-backend-glyph-slots definition)
-                     :key #'tessera-glyph-slot-name)))
+     (let ((slot (cl-find name (tessera--entry-backend-glyph-slots definition)
+                          :key #'tessera-glyph-slot-name)))
        (tessera--render-glyph-slot slot context)))
    names
    ""))
