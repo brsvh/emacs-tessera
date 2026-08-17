@@ -101,29 +101,9 @@ to every glyph."
   "Face used when the pointer is over an entry surface."
   :group 'tessera)
 
-(defface tessera-glyph-neutral-face
-  '((t :inherit default))
-  "Face used for neutral Tessera glyphs."
-  :group 'tessera)
-
-(defface tessera-glyph-muted-face
-  '((t :inherit shadow))
-  "Face used for muted Tessera glyphs."
-  :group 'tessera)
-
 (defface tessera-glyph-accent-face
   '((t :inherit font-lock-keyword-face))
   "Face used for accent Tessera glyphs."
-  :group 'tessera)
-
-(defface tessera-glyph-informational-face
-  '((t :inherit font-lock-type-face))
-  "Face used for informational Tessera glyphs."
-  :group 'tessera)
-
-(defface tessera-glyph-positive-face
-  '((t :inherit success))
-  "Face used for positive Tessera glyphs."
   :group 'tessera)
 
 (defface tessera-glyph-attention-face
@@ -131,14 +111,34 @@ to every glyph."
   "Face used for attention Tessera glyphs."
   :group 'tessera)
 
-(defface tessera-glyph-warning-face
-  '((t :inherit warning))
-  "Face used for warning Tessera glyphs."
+(defface tessera-glyph-informational-face
+  '((t :inherit font-lock-type-face))
+  "Face used for informational Tessera glyphs."
+  :group 'tessera)
+
+(defface tessera-glyph-muted-face
+  '((t :inherit shadow))
+  "Face used for muted Tessera glyphs."
   :group 'tessera)
 
 (defface tessera-glyph-negative-face
   '((t :inherit error))
   "Face used for negative Tessera glyphs."
+  :group 'tessera)
+
+(defface tessera-glyph-neutral-face
+  '((t :inherit default))
+  "Face used for neutral Tessera glyphs."
+  :group 'tessera)
+
+(defface tessera-glyph-positive-face
+  '((t :inherit success))
+  "Face used for positive Tessera glyphs."
+  :group 'tessera)
+
+(defface tessera-glyph-warning-face
+  '((t :inherit warning))
+  "Face used for warning Tessera glyphs."
   :group 'tessera)
 
 ;;;; Data model
@@ -147,28 +147,6 @@ to every glyph."
   '( accent attention informational muted negative neutral positive
      warning)
   "Semantic roles available to Tessera glyphs.")
-
-(defvar tessera--glyph-semantic-faces
-  '((accent . tessera-glyph-accent-face)
-    (attention . tessera-glyph-attention-face)
-    (informational . tessera-glyph-informational-face)
-    (muted . tessera-glyph-muted-face)
-    (negative . tessera-glyph-negative-face)
-    (neutral . tessera-glyph-neutral-face)
-    (positive . tessera-glyph-positive-face)
-    (warning . tessera-glyph-warning-face))
-  "Map glyph semantics to their faces.")
-
-(defvar tessera--glyph-interaction-properties
-  '((:mouse-face . mouse-face)
-    (:help-echo . help-echo)
-    (:keymap . keymap)
-    (:pointer . pointer)
-    (:follow-link . follow-link))
-  "Map glyph variant keys to text properties.")
-
-(defvar tessera--nerd-icons-availability nil
-  "Cached availability of the optional Nerd Icons library.")
 
 (cl-defstruct tessera-entry-context
   "Describe one backend entry and its display environment.
@@ -348,7 +326,29 @@ an alist of variant specifications."
       (tessera--ensure-plist-keys
        (cdr reference)
        tessera--segment-properties
-       (format "Segment reference `%s'" name)))))
+       (format "Segment reference `%s'" name))
+      (let* ((properties (cdr reference))
+             (grow (plist-get properties :grow))
+             (minimum (plist-get properties :min-width))
+             (maximum (plist-get properties :max-width))
+             (truncate (plist-get properties :truncate))
+             (priority (plist-get properties :priority))
+             (optional (plist-get properties :optional)))
+        (unless (memq grow '(nil t))
+          (error "Segment reference `%s' has invalid :grow" name))
+        (unless (or (null minimum) (natnump minimum))
+          (error "Segment reference `%s' has invalid :min-width" name))
+        (unless (or (null maximum) (natnump maximum))
+          (error "Segment reference `%s' has invalid :max-width" name))
+        (when (and minimum maximum (> minimum maximum))
+          (error "Segment reference `%s' has :min-width above :max-width"
+                 name))
+        (unless (memq truncate '(nil head middle tail))
+          (error "Segment reference `%s' has invalid :truncate" name))
+        (unless (or (null priority) (integerp priority))
+          (error "Segment reference `%s' has invalid :priority" name))
+        (unless (memq optional '(nil t))
+          (error "Segment reference `%s' has invalid :optional" name))))))
 
 (defun tessera--validate-layout
     (layout segment-names slot-names description)
@@ -438,7 +438,7 @@ Return BACKEND."
       (puthash backend definition tessera--entry-backends)))
   backend)
 
-;;;; Rendering
+;;;; Rendering support
 
 (defun tessera--find-entry-backend (backend)
   "Return the registered definition for BACKEND."
@@ -501,6 +501,22 @@ Return BACKEND."
         (setq position next))))
   string)
 
+;;;; Segment rendering
+
+(cl-defstruct (tessera--rendered-segment
+               (:constructor tessera--make-rendered-segment))
+  "Store one rendered segment and its width policy."
+  string
+  width
+  target-width
+  grow
+  min-width
+  max-width
+  truncate
+  priority
+  optional
+  visible)
+
 (defun tessera--render-segment (reference definition context)
   "Render segment REFERENCE using DEFINITION and CONTEXT."
   (let* ((name (tessera--segment-reference-name reference))
@@ -512,25 +528,207 @@ Return BACKEND."
       (error "Segment provider `%s' returned `%S'" name value))
     (when (and value (string-match-p "[\n\r]" value))
       (error "Segment provider `%s' returned multiline text" name))
-    value))
+    (when value
+      (let* ((properties (and (consp reference) (cdr reference)))
+             (width (string-width value))
+             (maximum (plist-get properties :max-width))
+             (truncate (plist-get properties :truncate)))
+        (tessera--make-rendered-segment
+         :string value
+         :width width
+         :target-width (if (and maximum truncate)
+                           (min width maximum)
+                         width)
+         :grow (plist-get properties :grow)
+         :min-width (or (plist-get properties :min-width) 0)
+         :max-width maximum
+         :truncate truncate
+         :priority (or (plist-get properties :priority) 0)
+         :optional (plist-get properties :optional)
+         :visible t)))))
 
 (defun tessera--render-segments (references definition context)
-  "Render REFERENCES using DEFINITION and CONTEXT.
-Return a cons of the rendered string and its width in columns."
-  (let (strings
-        (width 0))
-    (dolist (reference references)
-      (let ((string
-             (tessera--render-segment reference definition context)))
-        (when string
-          (when strings
-            (setq width (+ width tessera-entry-segment-gap)))
-          (setq width (+ width (string-width string)))
-          (push string strings))))
-    (setq strings (nreverse strings))
-    (cons (mapconcat #'identity strings
-                     (tessera--space tessera-entry-segment-gap))
-          width)))
+  "Render REFERENCES using DEFINITION and CONTEXT."
+  (delq nil
+        (mapcar (lambda (reference)
+                  (tessera--render-segment reference definition context))
+                references)))
+
+(defun tessera--visible-segments (segments)
+  "Return the visible members of SEGMENTS."
+  (cl-remove-if-not #'tessera--rendered-segment-visible segments))
+
+(defun tessera--segments-width (segments)
+  "Return the allocated width of visible SEGMENTS."
+  (let ((visible (tessera--visible-segments segments)))
+    (+ (cl-loop for segment in visible
+                sum (tessera--rendered-segment-target-width segment))
+       (* tessera-entry-segment-gap
+          (max 0 (1- (length visible)))))))
+
+(defun tessera--single-line-width (left right slot-width)
+  "Return the allocated line width for LEFT, RIGHT, and SLOT-WIDTH."
+  (+ (* 2 tessera-entry-safe-gap)
+     tessera-entry-left-padding
+     slot-width
+     (if (and (> slot-width 0)
+              (tessera--visible-segments left))
+         tessera-entry-segment-gap
+       0)
+     (tessera--segments-width left)
+     tessera-entry-flex-gap-min-width
+     (tessera--segments-width right)
+     tessera-entry-right-padding))
+
+(defun tessera--segments-by-priority (segments predicate)
+  "Return SEGMENTS matching PREDICATE from low to high priority."
+  (cl-stable-sort
+   (cl-remove-if-not predicate (copy-sequence segments))
+   #'<
+   :key #'tessera--rendered-segment-priority))
+
+(defun tessera--shrink-segments (segments overflow predicate)
+  "Shrink SEGMENTS by up to OVERFLOW columns when PREDICATE allows it.
+Return the number of columns still overflowing."
+  (dolist (segment (tessera--segments-by-priority segments predicate))
+    (when (> overflow 0)
+      (let* ((target (tessera--rendered-segment-target-width segment))
+             (minimum (min target
+                           (tessera--rendered-segment-min-width segment)))
+             (reduction (min overflow (- target minimum))))
+        (setf (tessera--rendered-segment-target-width segment)
+              (- target reduction))
+        (setq overflow (- overflow reduction)))))
+  overflow)
+
+(defun tessera--grow-segments (segments spare-width)
+  "Give visible growing SEGMENTS up to SPARE-WIDTH columns."
+  (dolist (segment
+           (cl-stable-sort
+            (cl-remove-if-not
+             (lambda (candidate)
+               (and (tessera--rendered-segment-visible candidate)
+                    (tessera--rendered-segment-grow candidate)))
+             (copy-sequence segments))
+            #'>
+            :key #'tessera--rendered-segment-priority))
+    (when (> spare-width 0)
+      (let* ((target (tessera--rendered-segment-target-width segment))
+             (natural (tessera--rendered-segment-width segment))
+             (maximum (tessera--rendered-segment-max-width segment))
+             (desired (if (and maximum
+                               (tessera--rendered-segment-truncate segment))
+                          (min natural maximum)
+                        natural))
+             (increase (min spare-width (- desired target))))
+        (setf (tessera--rendered-segment-target-width segment)
+              (+ target increase))
+        (setq spare-width (- spare-width increase)))))
+  spare-width)
+
+(defun tessera--allocate-segment-widths
+    (left right slot-width available-width)
+  "Fit LEFT and RIGHT segments beside SLOT-WIDTH in AVAILABLE-WIDTH."
+  (let* ((segments (append left right))
+         (overflow (max 0 (- (tessera--single-line-width
+                              left right slot-width)
+                             available-width))))
+    (setq overflow
+          (tessera--shrink-segments
+           segments overflow
+           (lambda (segment)
+             (and (tessera--rendered-segment-visible segment)
+                  (tessera--rendered-segment-grow segment)
+                  (tessera--rendered-segment-truncate segment)))))
+    (dolist (segment
+             (tessera--segments-by-priority
+              segments
+              (lambda (candidate)
+                (and (tessera--rendered-segment-visible candidate)
+                     (tessera--rendered-segment-optional candidate)))))
+      (when (> overflow 0)
+        (setf (tessera--rendered-segment-visible segment) nil)
+        (setq overflow
+              (max 0 (- (tessera--single-line-width
+                         left right slot-width)
+                        available-width)))))
+    (when (= overflow 0)
+      (tessera--grow-segments
+       segments
+       (- available-width
+          (tessera--single-line-width left right slot-width))))
+    (tessera--shrink-segments
+     segments overflow
+     (lambda (segment)
+       (and (tessera--rendered-segment-visible segment)
+            (tessera--rendered-segment-truncate segment))))))
+
+(defun tessera--truncate-string (string width method)
+  "Truncate STRING to WIDTH columns according to METHOD."
+  (let ((natural-width (string-width string)))
+    (cond
+     ((or (>= width natural-width) (null method))
+      string)
+     ((<= width 0)
+      "")
+     ((eq method 'tail)
+      (truncate-string-to-width string width nil nil t))
+     (t
+      (let* ((ellipsis "…")
+             (ellipsis-width (string-width ellipsis))
+             (content-width (max 0 (- width ellipsis-width))))
+        (if (<= width ellipsis-width)
+            (truncate-string-to-width ellipsis width)
+          (pcase method
+            ('head
+             (concat
+              ellipsis
+              (truncate-string-to-width
+               string natural-width (- natural-width content-width))))
+            ('middle
+             (let* ((left-width (/ (1+ content-width) 2))
+                    (right-width (- content-width left-width)))
+               (concat
+                (truncate-string-to-width string left-width)
+                ellipsis
+                (truncate-string-to-width
+                 string natural-width (- natural-width right-width)))))
+            (_ string))))))))
+
+(defun tessera--render-segment-group (segments)
+  "Return visible SEGMENTS as one rendered string."
+  (mapconcat
+   (lambda (segment)
+     (tessera--truncate-string
+      (tessera--rendered-segment-string segment)
+      (tessera--rendered-segment-target-width segment)
+      (tessera--rendered-segment-truncate segment)))
+   (tessera--visible-segments segments)
+   (tessera--space tessera-entry-segment-gap)))
+
+;;;; Glyph rendering
+
+(defvar tessera--glyph-semantic-faces
+  '((accent . tessera-glyph-accent-face)
+    (attention . tessera-glyph-attention-face)
+    (informational . tessera-glyph-informational-face)
+    (muted . tessera-glyph-muted-face)
+    (negative . tessera-glyph-negative-face)
+    (neutral . tessera-glyph-neutral-face)
+    (positive . tessera-glyph-positive-face)
+    (warning . tessera-glyph-warning-face))
+  "Map glyph semantics to their faces.")
+
+(defvar tessera--glyph-interaction-properties
+  '((:mouse-face . mouse-face)
+    (:help-echo . help-echo)
+    (:keymap . keymap)
+    (:pointer . pointer)
+    (:follow-link . follow-link))
+  "Map glyph variant keys to text properties.")
+
+(defvar tessera--nerd-icons-availability nil
+  "Cached availability of the optional Nerd Icons library.")
 
 (defun tessera--glyph-frame (context)
   "Return the frame used to render glyphs for CONTEXT."
@@ -654,6 +852,15 @@ Return a cons of the rendered string and its width in columns."
             ('right remaining))))
     (cons left (- remaining left))))
 
+(defun tessera--glyph-slots-width (names definition)
+  "Return the fixed width of glyph slots NAMES in DEFINITION."
+  (cl-loop for name in names
+           for slot = (cl-find
+                       name
+                       (tessera--entry-backend-glyph-slots definition)
+                       :key #'tessera-glyph-slot-name)
+           sum (tessera-glyph-slot-width slot)))
+
 (defun tessera--render-glyph-slot (slot context)
   "Render glyph SLOT for CONTEXT at its fixed width."
   (let* ((variant-id
@@ -699,11 +906,15 @@ Return a cons of the rendered string and its width in columns."
    names
    ""))
 
+;;;; Entry rendering
+
 (defun tessera--render-single-line
     (layout definition context)
   "Render single-line LAYOUT using DEFINITION and CONTEXT."
   (let* ((slot-names
           (tessera-entry-layout-main-glyph-slots layout))
+         (slot-width
+          (tessera--glyph-slots-width slot-names definition))
          (slots
           (tessera--render-glyph-slots slot-names definition context))
          (left
@@ -716,30 +927,36 @@ Return a cons of the rendered string and its width in columns."
            (tessera-entry-layout-main-right-segments layout)
            definition
            context))
-         (slot-gap
-          (if (and slot-names (> (length (car left)) 0))
-              (tessera--space tessera-entry-segment-gap)
-            ""))
-         (right-offset
-          (+ tessera-entry-safe-gap
-             tessera-entry-right-padding
-             (cdr right)))
-         (surface
-          (concat
-           (tessera--space tessera-entry-left-padding)
-           slots
-           slot-gap
-           (car left)
-           (tessera--space tessera-entry-flex-gap-min-width)
-           (tessera--align-space right-offset)
-           (car right)
-           (tessera--space tessera-entry-right-padding))))
-    (tessera--add-default-property surface
-                                   'mouse-face
-                                   'tessera-entry-hover-face)
-    (concat (tessera--space tessera-entry-safe-gap)
-            surface
-            (tessera--space tessera-entry-safe-gap))))
+         (window (tessera-entry-context-window context)))
+    (when (window-live-p window)
+      (tessera--allocate-segment-widths
+       left right slot-width (window-body-width window)))
+    (let* ((left-string (tessera--render-segment-group left))
+           (right-string (tessera--render-segment-group right))
+           (slot-gap
+            (if (and slot-names (> (length left-string) 0))
+                (tessera--space tessera-entry-segment-gap)
+              ""))
+           (right-offset
+            (+ tessera-entry-safe-gap
+               tessera-entry-right-padding
+               (string-width right-string)))
+           (surface
+            (concat
+             (tessera--space tessera-entry-left-padding)
+             slots
+             slot-gap
+             left-string
+             (tessera--space tessera-entry-flex-gap-min-width)
+             (tessera--align-space right-offset)
+             right-string
+             (tessera--space tessera-entry-right-padding))))
+      (tessera--add-default-property surface
+                                     'mouse-face
+                                     'tessera-entry-hover-face)
+      (concat (tessera--space tessera-entry-safe-gap)
+              surface
+              (tessera--space tessera-entry-safe-gap)))))
 
 (defun tessera-entry-render (backend object &optional window)
   "Render OBJECT registered for BACKEND in WINDOW.
