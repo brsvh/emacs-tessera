@@ -39,6 +39,10 @@
   :group 'applications
   :prefix "tessera-")
 
+(defun tessera--nonnegative-number-p (value)
+  "Return non-nil when VALUE is a nonnegative number."
+  (and (numberp value) (>= value 0)))
+
 (defcustom tessera-entry-layout 'single-line
   "Layout used to render Tessera entries."
   :type 'symbol
@@ -65,14 +69,18 @@
 
 (defcustom tessera-entry-top-padding 0
   "Height above entry content in normal line heights."
-  :type 'natnum
-  :safe #'natnump
+  :type '(restricted-sexp
+          :tag "Normal line heights"
+          :match-alternatives (tessera--nonnegative-number-p))
+  :safe #'tessera--nonnegative-number-p
   :group 'tessera)
 
 (defcustom tessera-entry-bottom-padding 0
   "Height below entry content in normal line heights."
-  :type 'natnum
-  :safe #'natnump
+  :type '(restricted-sexp
+          :tag "Normal line heights"
+          :match-alternatives (tessera--nonnegative-number-p))
+  :safe #'tessera--nonnegative-number-p
   :group 'tessera)
 
 (defcustom tessera-entry-segment-gap 1
@@ -195,7 +203,10 @@ an alist of variant specifications."
 
 (cl-defstruct tessera-entry-layout
   "Describe the placement of slots and segments in an entry.
-Non-nil extra fields add a second visual line to the logical entry."
+Non-nil extra fields add a second visual line to the logical entry.
+Glyph slot lists accept slot names and `(NAME :reserve t)'
+references.  A reserved reference occupies the selected glyph's
+display width without showing it."
   main-glyph-slots
   main-left-segments
   main-right-segments
@@ -220,6 +231,10 @@ Non-nil extra fields add a second visual line to the logical entry."
 (defvar tessera--segment-properties
   '(:grow :min-width :max-width :truncate :priority :optional)
   "Properties accepted in a layout segment reference.")
+
+(defvar tessera--glyph-slot-properties
+  '(:reserve)
+  "Properties accepted in a layout glyph slot reference.")
 
 (defvar tessera--glyph-variant-properties
   '(:glyph :mouse-face :help-echo :keymap :pointer :follow-link)
@@ -363,6 +378,39 @@ Non-nil extra fields add a second visual line to the logical entry."
         (unless (memq optional '(nil t))
           (error "Segment reference `%s' has invalid :optional" name))))))
 
+(defun tessera--glyph-slot-reference-name (reference)
+  "Return the glyph slot name in REFERENCE, or signal an error."
+  (cond
+   ((and reference (symbolp reference))
+    reference)
+   ((and (consp reference)
+         (symbolp (car reference))
+         (car reference))
+    (car reference))
+   (t
+    (error "Invalid glyph slot reference `%S'" reference))))
+
+(defun tessera--glyph-slot-reference-reserved-p (reference)
+  "Return non-nil when glyph slot REFERENCE reserves its space."
+  (and (consp reference)
+       (plist-get (cdr reference) :reserve)))
+
+(defun tessera--validate-glyph-slot-reference
+    (reference names description)
+  "Validate glyph slot REFERENCE against NAMES for DESCRIPTION."
+  (let ((name (tessera--glyph-slot-reference-name reference)))
+    (unless (memq name names)
+      (error "%s references unknown glyph slot `%s'"
+             description name))
+    (when (consp reference)
+      (tessera--ensure-plist-keys
+       (cdr reference)
+       tessera--glyph-slot-properties
+       (format "Glyph slot reference `%s'" name))
+      (unless (memq (plist-get (cdr reference) :reserve) '(nil t))
+        (error "Glyph slot reference `%s' has invalid :reserve"
+               name)))))
+
 (defun tessera--validate-layout
     (layout segment-names slot-names description)
   "Validate LAYOUT for SEGMENT-NAMES and SLOT-NAMES.
@@ -380,9 +428,8 @@ DESCRIPTION identifies the layout in errors."
     (dolist (slots slot-lists)
       (tessera--ensure-list slots description)
       (dolist (slot slots)
-        (unless (and (symbolp slot) (memq slot slot-names))
-          (error "%s references unknown glyph slot `%s'"
-                 description slot))))
+        (tessera--validate-glyph-slot-reference
+         slot slot-names description)))
     (dolist (segments segment-lists)
       (tessera--ensure-list segments description)
       (dolist (segment segments)
@@ -846,6 +893,24 @@ Return the number of columns still overflowing."
             (put-text-property 0 (length text) property value text))))))
   text)
 
+(defun tessera-glyph-render (glyph context &optional properties)
+  "Render GLYPH for CONTEXT with optional interaction PROPERTIES.
+
+PROPERTIES accepts the interaction keys supported by registered
+glyph variants."
+  (tessera--validate-glyph glyph "Glyph")
+  (unless (tessera-entry-context-p context)
+    (error "Glyph context must be a Tessera entry context"))
+  (tessera--ensure-plist-keys properties
+                              tessera--glyph-variant-properties
+                              "Glyph interaction properties")
+  (when (plist-member properties :glyph)
+    (error "Glyph interaction properties must not contain :glyph"))
+  (let ((text (copy-sequence (tessera--glyph-text glyph context))))
+    (tessera--apply-glyph-color text glyph context)
+    (tessera--apply-glyph-interaction text properties glyph)
+    text))
+
 (defun tessera--glyph-slot-padding (slot content-width)
   "Return left and right padding for SLOT and CONTENT-WIDTH."
   (let* ((width (tessera-glyph-slot-width slot))
@@ -857,9 +922,10 @@ Return the number of columns still overflowing."
             ('right remaining))))
     (cons left (- remaining left))))
 
-(defun tessera--glyph-slots-width (names definition)
-  "Return the fixed width of glyph slots NAMES in DEFINITION."
-  (cl-loop for name in names
+(defun tessera--glyph-slots-width (references definition)
+  "Return the fixed width of slot REFERENCES in DEFINITION."
+  (cl-loop for reference in references
+           for name = (tessera--glyph-slot-reference-name reference)
            for slot = (cl-find
                        name
                        (tessera--entry-backend-glyph-slots definition)
@@ -887,28 +953,50 @@ Return the number of columns still overflowing."
      (t
       (let* ((properties (cdr variant))
              (glyph (plist-get properties :glyph))
-             (text (copy-sequence (tessera--glyph-text glyph context)))
+             (text
+              (tessera-glyph-render
+               glyph context
+               (cl-loop for (key value) on properties by #'cddr
+                        unless (eq key :glyph)
+                        append (list key value))))
              (content-width (string-width text)))
         (when (> content-width
                  (tessera-glyph-slot-width slot))
           (error "Glyph variant `%s' exceeds slot `%s' width"
                  variant-id (tessera-glyph-slot-name slot)))
         (let ((padding (tessera--glyph-slot-padding slot content-width)))
-          (tessera--apply-glyph-color text glyph context)
-          (tessera--apply-glyph-interaction text properties glyph)
           (concat (tessera--space (car padding))
                   text
                   (tessera--space (cdr padding)))))))))
 
+(defun tessera--reserve-glyph-slot (slot rendered context)
+  "Return a blank occupying RENDERED SLOT's display width in CONTEXT."
+  (let* ((window (tessera-entry-context-window context))
+         (frame (and (window-live-p window) (window-frame window))))
+    (if (display-graphic-p frame)
+        (let ((width
+               (if frame
+                   (with-selected-frame frame
+                     (string-pixel-width rendered))
+                 (string-pixel-width rendered))))
+          (propertize " " 'display `(space :width (,width))))
+      (tessera--space (tessera-glyph-slot-width slot)))))
+
 (defun tessera--render-glyph-slots
-    (names definition context)
-  "Render glyph slots NAMES using DEFINITION and CONTEXT."
+    (references definition context)
+  "Render glyph slot REFERENCES using DEFINITION and CONTEXT."
   (mapconcat
-   (lambda (name)
-     (let ((slot (cl-find name (tessera--entry-backend-glyph-slots definition)
-                          :key #'tessera-glyph-slot-name)))
-       (tessera--render-glyph-slot slot context)))
-   names
+   (lambda (reference)
+     (let* ((name (tessera--glyph-slot-reference-name reference))
+            (slot
+             (cl-find name
+                      (tessera--entry-backend-glyph-slots definition)
+                      :key #'tessera-glyph-slot-name))
+            (rendered (tessera--render-glyph-slot slot context)))
+       (if (tessera--glyph-slot-reference-reserved-p reference)
+           (tessera--reserve-glyph-slot slot rendered context)
+         rendered)))
+   references
    ""))
 
 ;;;; Entry rendering
@@ -929,15 +1017,22 @@ Return the number of columns still overflowing."
   "Return a logical space displayed as a visual line break."
   (propertize " " 'display "\n"))
 
+(defun tessera--padding-line-break (height)
+  "Return a visual line break ending padding of HEIGHT."
+  (propertize " "
+              'display "\n"
+              'face `(:height ,height)
+              'line-height t))
+
 (defun tessera--render-line
-    (slot-names left-references right-references definition context)
-  "Render one visual line from SLOT-NAMES and segment references.
+    (slot-references left-references right-references definition context)
+  "Render one visual line from SLOT-REFERENCES and segment references.
 LEFT-REFERENCES and RIGHT-REFERENCES name segments in DEFINITION.
 CONTEXT supplies their entry data and target window."
   (let* ((slot-width
-          (tessera--glyph-slots-width slot-names definition))
+          (tessera--glyph-slots-width slot-references definition))
          (slots (tessera--render-glyph-slots
-                 slot-names definition context))
+                 slot-references definition context))
          (left
           (tessera--render-segments
            left-references definition context))
@@ -951,7 +1046,7 @@ CONTEXT supplies their entry data and target window."
     (let* ((left-string (tessera--render-segment-group left))
            (right-string (tessera--render-segment-group right))
            (slot-gap
-            (if (and slot-names (> (length left-string) 0))
+            (if (and slot-references (> (length left-string) 0))
                 (tessera--space tessera-entry-segment-gap)
               ""))
            (right-offset
@@ -1006,16 +1101,29 @@ CONTEXT supplies their entry data and target window."
 
 (defun tessera--render-padding-line (height)
   "Render an entry padding line of HEIGHT normal line heights."
-  (let ((surface
+  (let ((safe-gap
+         (propertize
+          " " 'display `(space :width ,tessera-entry-safe-gap
+                               :height ,height)))
+        (surface
          (propertize
           " "
           'display
           `(space :align-to (- right ,tessera-entry-safe-gap)
                   :height ,height)
           'mouse-face 'tessera-entry-hover-face)))
-    (concat (tessera--space tessera-entry-safe-gap)
-            surface
-            (tessera--space tessera-entry-safe-gap))))
+    (concat safe-gap surface safe-gap)))
+
+(defun tessera--finalize-entry-terminator (position)
+  "Apply bottom padding properties to the newline at POSITION."
+  (when-let* (((eq (char-after position) ?\n))
+              ((> position (point-min)))
+              (height
+               (get-text-property
+                (1- position) 'tessera-entry-bottom-padding)))
+    (add-text-properties
+     position (1+ position)
+     `(face (:height ,height) line-height t))))
 
 (defun tessera--add-entry-padding (entry)
   "Add configured vertical padding to rendered ENTRY."
@@ -1023,15 +1131,19 @@ CONTEXT supplies their entry data and target window."
     (setq entry
           (concat
            (tessera--render-padding-line tessera-entry-top-padding)
-           (tessera--visual-line-break)
+           (tessera--padding-line-break tessera-entry-top-padding)
            entry)))
   (when (> tessera-entry-bottom-padding 0)
-    (setq entry
-          (concat
-           entry
-           (tessera--visual-line-break)
+    (let ((padding
            (tessera--render-padding-line
-            tessera-entry-bottom-padding))))
+            tessera-entry-bottom-padding)))
+      (add-text-properties
+       0 (length padding)
+       `(tessera-entry-bottom-padding
+         ,tessera-entry-bottom-padding)
+       padding)
+      (setq entry
+            (concat entry (tessera--visual-line-break) padding))))
   entry)
 
 (defun tessera--render-entry-lines (layout definition context)
