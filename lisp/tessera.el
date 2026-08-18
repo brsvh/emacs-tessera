@@ -751,10 +751,14 @@ Return the number of columns still overflowing."
   "Return visible SEGMENTS as one rendered string."
   (mapconcat
    (lambda (segment)
-     (tessera--truncate-string
-      (tessera--rendered-segment-string segment)
-      (tessera--rendered-segment-target-width segment)
-      (tessera--rendered-segment-truncate segment)))
+     (let ((text
+            (copy-sequence
+             (tessera--truncate-string
+              (tessera--rendered-segment-string segment)
+              (tessera--rendered-segment-target-width segment)
+              (tessera--rendered-segment-truncate segment)))))
+       (tessera--add-default-property
+        text 'mouse-face 'tessera-entry-hover-face)))
    (tessera--visible-segments segments)
    (tessera--space tessera-entry-segment-gap)))
 
@@ -909,6 +913,8 @@ glyph variants."
   (let ((text (copy-sequence (tessera--glyph-text glyph context))))
     (tessera--apply-glyph-color text glyph context)
     (tessera--apply-glyph-interaction text properties glyph)
+    (tessera--add-default-property
+     text 'mouse-face 'tessera-entry-hover-face)
     text))
 
 (defun tessera--glyph-slot-padding (slot content-width)
@@ -1063,9 +1069,6 @@ CONTEXT supplies their entry data and target window."
              (tessera--align-space right-offset)
              right-string
              (tessera--space tessera-entry-right-padding))))
-      (tessera--add-default-property surface
-                                     'mouse-face
-                                     'tessera-entry-hover-face)
       (concat (tessera--space tessera-entry-safe-gap)
               surface
               (tessera--space tessera-entry-safe-gap)))))
@@ -1110,8 +1113,7 @@ CONTEXT supplies their entry data and target window."
           " "
           'display
           `(space :align-to (- right ,tessera-entry-safe-gap)
-                  :height ,height)
-          'mouse-face 'tessera-entry-hover-face)))
+                  :height ,height))))
     (concat safe-gap surface safe-gap)))
 
 (defun tessera--finalize-entry-terminator (position)
