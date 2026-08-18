@@ -19,6 +19,7 @@ let
       lorem-ipsum
       modus-themes
       mu4e
+      nerd-icons
       tessera
     ]
   );
