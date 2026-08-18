@@ -63,6 +63,18 @@
   :safe #'natnump
   :group 'tessera)
 
+(defcustom tessera-entry-top-padding 0
+  "Height above entry content in normal line heights."
+  :type 'natnum
+  :safe #'natnump
+  :group 'tessera)
+
+(defcustom tessera-entry-bottom-padding 0
+  "Height below entry content in normal line heights."
+  :type 'natnum
+  :safe #'natnump
+  :group 'tessera)
+
 (defcustom tessera-entry-segment-gap 1
   "Width in columns between adjacent entry segments."
   :type 'natnum
@@ -182,7 +194,8 @@ an alist of variant specifications."
   glyphs)
 
 (cl-defstruct tessera-entry-layout
-  "Describe the placement of slots and segments in an entry."
+  "Describe the placement of slots and segments in an entry.
+Non-nil extra fields add a second visual line to the logical entry."
   main-glyph-slots
   main-left-segments
   main-right-segments
@@ -454,14 +467,6 @@ Return BACKEND."
         (error "Backend `%s' has no layout `%s'"
                (tessera--entry-backend-name definition)
                tessera-entry-layout))))
-
-(defun tessera--ensure-single-line-layout (layout)
-  "Ensure LAYOUT contains no extra visual line."
-  (when (or (tessera-entry-layout-extra-glyph-slots layout)
-            (tessera-entry-layout-extra-left-segments layout)
-            (tessera-entry-layout-extra-right-segments layout))
-    (error "Layout `%s' requires the two-line renderer"
-           tessera-entry-layout)))
 
 (defun tessera--make-entry-context
     (definition object window)
@@ -908,25 +913,37 @@ Return the number of columns still overflowing."
 
 ;;;; Entry rendering
 
-(defun tessera--render-single-line
-    (layout definition context)
-  "Render single-line LAYOUT using DEFINITION and CONTEXT."
-  (let* ((slot-names
-          (tessera-entry-layout-main-glyph-slots layout))
-         (slot-width
+(defun tessera--layout-has-extra-line-p (layout)
+  "Return non-nil when LAYOUT defines an extra visual line."
+  (or (tessera-entry-layout-extra-glyph-slots layout)
+      (tessera-entry-layout-extra-left-segments layout)
+      (tessera-entry-layout-extra-right-segments layout)))
+
+(defun tessera--ensure-single-line-layout (layout)
+  "Ensure LAYOUT contains no extra visual line."
+  (when (tessera--layout-has-extra-line-p layout)
+    (error "Layout `%s' requires the two-line renderer"
+           tessera-entry-layout)))
+
+(defun tessera--visual-line-break ()
+  "Return a logical space displayed as a visual line break."
+  (propertize " " 'display "\n"))
+
+(defun tessera--render-line
+    (slot-names left-references right-references definition context)
+  "Render one visual line from SLOT-NAMES and segment references.
+LEFT-REFERENCES and RIGHT-REFERENCES name segments in DEFINITION.
+CONTEXT supplies their entry data and target window."
+  (let* ((slot-width
           (tessera--glyph-slots-width slot-names definition))
-         (slots
-          (tessera--render-glyph-slots slot-names definition context))
+         (slots (tessera--render-glyph-slots
+                 slot-names definition context))
          (left
           (tessera--render-segments
-           (tessera-entry-layout-main-left-segments layout)
-           definition
-           context))
+           left-references definition context))
          (right
           (tessera--render-segments
-           (tessera-entry-layout-main-right-segments layout)
-           definition
-           context))
+           right-references definition context))
          (window (tessera-entry-context-window context)))
     (when (window-live-p window)
       (tessera--allocate-segment-widths
@@ -958,11 +975,78 @@ Return the number of columns still overflowing."
               surface
               (tessera--space tessera-entry-safe-gap)))))
 
+(defun tessera--render-single-line (layout definition context)
+  "Render single-line LAYOUT using DEFINITION and CONTEXT."
+  (tessera--ensure-single-line-layout layout)
+  (tessera--render-line
+   (tessera-entry-layout-main-glyph-slots layout)
+   (tessera-entry-layout-main-left-segments layout)
+   (tessera-entry-layout-main-right-segments layout)
+   definition
+   context))
+
+(defun tessera--render-two-line (layout definition context)
+  "Render two-line LAYOUT using DEFINITION and CONTEXT."
+  (mapconcat
+   #'identity
+   (list
+    (tessera--render-line
+     (tessera-entry-layout-main-glyph-slots layout)
+     (tessera-entry-layout-main-left-segments layout)
+     (tessera-entry-layout-main-right-segments layout)
+     definition
+     context)
+    (tessera--render-line
+     (tessera-entry-layout-extra-glyph-slots layout)
+     (tessera-entry-layout-extra-left-segments layout)
+     (tessera-entry-layout-extra-right-segments layout)
+     definition
+     context))
+   (tessera--visual-line-break)))
+
+(defun tessera--render-padding-line (height)
+  "Render an entry padding line of HEIGHT normal line heights."
+  (let ((surface
+         (propertize
+          " "
+          'display
+          `(space :align-to (- right ,tessera-entry-safe-gap)
+                  :height ,height)
+          'mouse-face 'tessera-entry-hover-face)))
+    (concat (tessera--space tessera-entry-safe-gap)
+            surface
+            (tessera--space tessera-entry-safe-gap))))
+
+(defun tessera--add-entry-padding (entry)
+  "Add configured vertical padding to rendered ENTRY."
+  (when (> tessera-entry-top-padding 0)
+    (setq entry
+          (concat
+           (tessera--render-padding-line tessera-entry-top-padding)
+           (tessera--visual-line-break)
+           entry)))
+  (when (> tessera-entry-bottom-padding 0)
+    (setq entry
+          (concat
+           entry
+           (tessera--visual-line-break)
+           (tessera--render-padding-line
+            tessera-entry-bottom-padding))))
+  entry)
+
+(defun tessera--render-entry-lines (layout definition context)
+  "Render the visual lines of LAYOUT using DEFINITION and CONTEXT."
+  (tessera--add-entry-padding
+   (if (tessera--layout-has-extra-line-p layout)
+       (tessera--render-two-line layout definition context)
+     (tessera--render-single-line layout definition context))))
+
 (defun tessera-entry-render (backend object &optional window)
   "Render OBJECT registered for BACKEND in WINDOW.
 
-Return a propertized string without newline characters.  WINDOW
-defaults to a window displaying the current buffer, when one exists."
+The result can display multiple visual lines, but is one propertized
+logical string without newline characters.  WINDOW defaults to a
+window displaying the current buffer, when one exists."
   (when (and window (not (window-live-p window)))
     (error "Cannot render an entry for a dead window"))
   (let* ((definition (tessera--find-entry-backend backend))
@@ -971,8 +1055,7 @@ defaults to a window displaying the current buffer, when one exists."
                             (get-buffer-window (current-buffer))))
          (context
           (tessera--make-entry-context definition object target-window)))
-    (tessera--ensure-single-line-layout layout)
-    (tessera--render-single-line layout definition context)))
+    (tessera--render-entry-lines layout definition context)))
 
 (provide 'tessera)
 ;;; tessera.el ends here
