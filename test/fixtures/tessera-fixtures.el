@@ -604,6 +604,136 @@ and BODY customize the generated article."
    :in-reply-to in-reply-to
    :body body))
 
+(defun tessera-fixtures--mime-part (type body &optional headers)
+  "Return a MIME part with TYPE, BODY, and optional extra HEADERS."
+  (concat "Content-Type: " type "\n" headers "\n" body "\n"))
+
+(defun tessera-fixtures--multipart
+    (subtype boundary parts &optional protocol)
+  "Return (TYPE . BODY) for multipart SUBTYPE with PARTS.
+BOUNDARY separates the parts; PROTOCOL identifies security content."
+  (cons
+   (concat "multipart/" subtype "; boundary=\"" boundary "\""
+           (when protocol (concat "; protocol=\"" protocol "\"")))
+   (concat
+    (mapconcat (lambda (part)
+                 (concat "--" boundary "\n" part))
+               parts "")
+    "--" boundary "--\n")))
+
+(defun tessera-fixtures--gnus-content-scenarios ()
+  "Return named Gnus label and MIME scenarios.
+Security payloads are intentionally invalid fixture data."
+  (let* ((plain (tessera-fixtures--mime-part
+                 "text/plain; charset=utf-8" "Fixture text."))
+         (attachment
+          (tessera-fixtures--mime-part
+           "text/plain; name=\"report.txt\"" "Fixture report."
+           (concat "Content-Disposition: attachment; "
+                   "filename=\"report.txt\"\n")))
+         (image
+          (tessera-fixtures--mime-part
+           "image/png; name=\"pixel.png\""
+           (concat "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC"
+                   "AAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=")
+           (concat "Content-Disposition: inline; "
+                   "filename=\"pixel.png\"\n"
+                   "Content-ID: <pixel@fixtures.test>\n"
+                   "Content-Transfer-Encoding: base64\n")))
+         (absent
+          (tessera-fixtures--multipart
+           "alternative" "content-absent"
+           (list plain (tessera-fixtures--mime-part
+                        "text/html" "<p>Fixture text.</p>"))))
+         (signed
+          (tessera-fixtures--multipart
+           "signed" "content-signed"
+           (list plain
+                 (tessera-fixtures--mime-part
+                  "application/pgp-signature"
+                  (concat "-----BEGIN PGP SIGNATURE-----\n"
+                          "Invalid fixture signature.\n"
+                          "-----END PGP SIGNATURE-----")))
+           "application/pgp-signature"))
+         (encrypted
+          (tessera-fixtures--multipart
+           "encrypted" "content-encrypted"
+           (list (tessera-fixtures--mime-part
+                  "application/pgp-encrypted" "Version: 1")
+                 (tessera-fixtures--mime-part
+                  "application/octet-stream"
+                  (concat "-----BEGIN PGP MESSAGE-----\n"
+                          "Invalid fixture ciphertext.\n"
+                          "-----END PGP MESSAGE-----")))
+           "application/pgp-encrypted"))
+         (broken
+          (tessera-fixtures--multipart
+           "signed" "content-unsupported"
+           (list plain (tessera-fixtures--mime-part
+                        "application/x-tessera-signature"
+                        "Unsupported fixture protocol."))
+           "application/x-tessera-signature"))
+         (labels
+          (concat "Keywords: Work, release, Two words\n"
+                  "X-GM-LABELS: (\"Work\" \"Review\" "
+                  "\"Two words\")\n")))
+    (list
+     (list "unknown" "Content 01: Not opened; unknown slots"
+           nil (cons "text/plain"
+                     "Open other content samples first."))
+     (list "absent" "Content 02: Parsed MIME without attributes"
+           nil absent)
+     (list "keywords" "Content 03: Multiple Keywords"
+           "Keywords: release, planning, follow up\n" absent)
+     (list "labels" "Content 04: Duplicate labels across sources"
+           labels absent)
+     (list "long-labels" "Content 05: Long labels and subject"
+           (concat "Keywords: A deliberately long release planning "
+                   "label, follow up, documentation, review\n")
+           absent)
+     (list "attachment" "Content 06: Attachment and labels"
+           labels (tessera-fixtures--multipart
+                   "mixed" "content-attachment"
+                   (list plain attachment)))
+     (list "inline" "Content 07: Inline image is not an attachment"
+           nil (tessera-fixtures--multipart
+                "related" "content-inline" (list plain image)))
+     (list "signed" "Content 08: Signature; invalid test payload"
+           labels signed)
+     (list "encrypted" "Content 09: Encrypted; invalid test payload"
+           labels encrypted)
+     (list "combined" "Content 10: Attachment, signature, encryption"
+           labels
+           (tessera-fixtures--multipart
+            "mixed" "content-combined"
+            (list plain attachment
+                  (tessera-fixtures--mime-part
+                   (car signed) (cdr signed))
+                  (tessera-fixtures--mime-part
+                   (car encrypted) (cdr encrypted)))))
+     (list "error" "Content 11: Unsupported signature protocol"
+           "Keywords: error, review\n" broken))))
+
+(defun tessera-fixtures--create-gnus-content ()
+  "Write label and MIME samples into the level-1 fixture group."
+  (let ((maildir (expand-file-name "level-1-critical/"
+                                   tessera-fixtures--gnus-root)))
+    (cl-loop
+     for (name subject headers mime) in
+     (tessera-fixtures--gnus-content-scenarios)
+     for index from 0
+     do
+     (tessera-fixtures--write-file
+      (tessera-fixtures--mail-file
+       maildir (format "2300.content-%s.fixture" name))
+      (tessera-fixtures--message
+       :id (concat "content-" name ".gnus") :subject subject
+       :from "Content Fixture <content@fixtures.test>"
+       :to "Gnus Fixture <gnus@fixtures.test>"
+       :date (tessera-fixtures--date-header (+ 30 index))
+       :extra-headers headers :content-type (car mime)
+       :body (cdr mime))))))
+
 (defun tessera-fixtures--create-gnus-fixtures ()
   "Create local Gnus groups, messages, threads, and mark files."
   (cl-loop
@@ -943,6 +1073,8 @@ Use BASE-TAGS, zero-based INDEX, and random STATE to populate it."
           gnus-save-newsrc-file t
           gnus-read-newsrc-file t
           gnus-check-new-newsgroups nil
+          nnmail-extra-headers
+          '(To Cc Keywords Gcc Newsgroups X-GM-LABELS)
           gnus-use-cache nil
           gnus-agent nil
           gnus-show-threads t
@@ -1103,6 +1235,7 @@ ordinary Gnus summary variables."
   (interactive)
   (make-directory tessera-fixtures-state-directory t)
   (tessera-fixtures--create-gnus-fixtures)
+  (tessera-fixtures--create-gnus-content)
   (tessera-fixtures--configure-gnus)
   (message "Prepared Gnus fixtures in %s"
            tessera-fixtures--gnus-root))
@@ -1156,6 +1289,36 @@ ordinary Gnus summary variables."
     (gnus-summary-exit-no-update t)
     (gnus-group-read-group t t group)
     (tessera-fixtures--gnus-install-marks)))
+
+;;;###autoload
+(defun tessera-fixtures-open-gnus-content ()
+  "Display native Gnus label and content samples.
+Read the MIME samples with verification and decryption disabled.
+The unsupported-protocol sample exercises Gnus's own error result.
+Leave the unknown sample unopened and keep all articles listed."
+  (interactive)
+  (tessera-fixtures-open-gnus-marks)
+  (let ((summary (current-buffer))
+        (mm-verify-option 'never)
+        (mm-decrypt-option 'never))
+    (dolist (scenario
+             (cdr (tessera-fixtures--gnus-content-scenarios)))
+      (with-current-buffer summary
+        (when-let* ((number (tessera-fixtures--gnus-article-number
+                             (nth 1 scenario))))
+          (gnus-summary-goto-subject number)
+          (let ((mm-verify-option
+                 (if (equal (car scenario) "error")
+                     'always
+                   mm-verify-option)))
+            (gnus-summary-select-article nil t nil number)))))
+    (switch-to-buffer summary)
+    (delete-other-windows)
+    (gnus-summary-show-all-threads)
+    (gnus-summary-goto-subject
+     (tessera-fixtures--gnus-article-number
+      "Content 02: Parsed MIME without attributes"))
+    (recenter 0)))
 
 (provide 'tessera-fixtures)
 ;;; tessera-fixtures.el ends here

@@ -30,6 +30,7 @@
 ;;; Code:
 
 (require 'tessera)
+(require 'tessera-gnus-data)
 (require 'gnus-sum)
 (require 'gnus-spec)
 (require 'subr-x)
@@ -64,6 +65,11 @@
 (defface tessera-gnus-summary-date-face
   '((t :inherit font-lock-constant-face))
   "Face for article dates."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-label-face
+  '((t :inherit font-lock-keyword-face))
+  "Face for article labels from every supported source."
   :group 'tessera-gnus-summary)
 
 (defconst tessera-gnus-summary--states
@@ -235,6 +241,92 @@
        (error date))
      'face 'tessera-gnus-summary-date-face 'help-echo date)))
 
+(defun tessera-gnus-summary--labels (context)
+  "Return the labels in CONTEXT as one optional text segment."
+  (when-let* ((labels (tessera-gnus-data-labels
+                       (tessera-entry-context-object context))))
+    (let ((all (mapconcat #'car labels ", ")))
+      (mapconcat
+       (lambda (label)
+         (propertize
+          (car label) 'face 'tessera-gnus-summary-label-face
+          'help-echo (format "%s (%s)\nLabels: %s"
+                             (car label)
+                             (string-join (cdr label) ", ") all)))
+       labels (propertize "," 'face 'default
+                          'mouse-face 'default)))))
+
+(defun tessera-gnus-summary--content-state (key context)
+  "Return the visible content state for KEY in CONTEXT."
+  (let ((state (plist-get
+                (tessera-gnus-data-content
+                 (tessera-entry-context-object context)) key)))
+    ;; Unknown and absent remain distinct data, but neither is shown.
+    (unless (eq state 'unknown) state)))
+
+(defun tessera-gnus-summary--content-help
+    (key label window object position)
+  "Describe KEY with LABEL at POSITION in OBJECT or WINDOW."
+  (when-let* ((buffer (if (bufferp object) object
+                        (and (window-live-p window)
+                             (window-buffer window)))))
+    (with-current-buffer buffer
+      (when-let* ((entry (get-text-property
+                          position 'tessera-gnus-summary-entry)))
+        (let* ((content (tessera-gnus-data-content (car entry)))
+               (state (plist-get content key))
+               (details
+                (plist-get content
+                           (pcase key
+                             (:signature :signature-details)
+                             (:encryption :encryption-details)))))
+          (string-join
+           (cons (concat label
+                         (pcase state
+                           ('processed ": Gnus result available")
+                           ('error ": Gnus processing error")
+                           (_ "")))
+                 details)
+           "\n"))))))
+
+(defun tessera-gnus-summary--content-slots ()
+  "Return independent attachment, signature, and encryption slots."
+  (mapcar
+   (lambda (spec)
+     (pcase-let* ((`(,name ,key ,ascii ,unicode ,icon ,label) spec)
+                  (glyph
+                   (make-tessera-glyph
+                    :ascii ascii :unicode unicode
+                    :nerd-icons (list :function 'nerd-icons-mdicon
+                                      :name icon)
+                    :semantic 'informational))
+                  (help (apply-partially
+                         #'tessera-gnus-summary--content-help
+                         key label)))
+       (make-tessera-glyph-slot
+        :name name :width 2 :align 'center
+        :selector (apply-partially
+                   #'tessera-gnus-summary--content-state key)
+        :glyphs
+        (append
+         (list (list 'present :glyph glyph :help-echo help))
+         (unless (eq key :attachment)
+           (list
+            (list 'processed :glyph glyph :help-echo help)
+            (list 'error
+                  :glyph
+                  (make-tessera-glyph
+                   :ascii "!" :unicode "!"
+                   :nerd-icons
+                   '(:function nerd-icons-mdicon
+                               :name "nf-md-alert_circle_outline")
+                   :semantic 'negative)
+                  :help-echo help)))))))
+   '((attachment :attachment "a" "📎" "nf-md-paperclip" "Attachment")
+     (signature :signature "S" "✍" "nf-md-file_sign" "Signature")
+     (encryption :encryption "E" "🔒" "nf-md-lock_outline"
+                 "Encrypted content"))))
+
 (defun tessera-gnus-summary--register ()
   "Register the Gnus summary entry backend."
   (tessera-entry-register
@@ -242,9 +334,12 @@
    :segments
    '((subject . tessera-gnus-summary--subject)
      (author . tessera-gnus-summary--author)
-     (date . tessera-gnus-summary--date))
-   :glyph-slots (mapcar #'tessera-gnus-summary--slot
-                        tessera-gnus-summary--states)
+     (date . tessera-gnus-summary--date)
+     (labels . tessera-gnus-summary--labels))
+   :glyph-slots
+   (append (mapcar #'tessera-gnus-summary--slot
+                   tessera-gnus-summary--states)
+           (tessera-gnus-summary--content-slots))
    :layouts
    (list
     (cons 'single-line
@@ -260,9 +355,15 @@
            :main-glyph-slots '(secondary status)
            :main-left-segments
            '((subject :grow t :min-width 4 :truncate tail))
+           :main-right-segments
+           '((labels :grow t :max-width 24 :min-width 0
+                     :truncate tail :priority -1 :optional t))
            :extra-glyph-slots '(score availability)
            :extra-left-segments
-           '((author :grow t :min-width 4 :truncate tail))
+           '((author :grow t :min-width 4 :truncate tail)
+             (:slots (attachment :optional t)
+                     (signature :optional t)
+                     (encryption :optional t)))
            :extra-right-segments '(date))))))
 
 (defun tessera-gnus-summary--render (header metadata)
@@ -285,7 +386,7 @@
         (remove-text-properties 0 1 '(display nil) result))
       (compose-string result 0 1 (aref glyph 0))
       (put-text-property 1 5 'display "" result))
-    (put-text-property 0 4 'tessera-gnus-summary-entry
+    (put-text-property 0 (length result) 'tessera-gnus-summary-entry
                        (cons header metadata) result)
     (let ((position 0))
       (while (< position (length result))
@@ -408,6 +509,37 @@ FORCE also redraws entries whose native marks have not changed."
             (tessera-entry-clear-layout start (1+ end))
           (tessera-entry-apply-layout start end))))))
 
+(defun tessera-gnus-summary--article-updated ()
+  "Observe the displayed article and refresh its summary entry."
+  ;; Gnus also runs its article preparation hook in the summary.
+  (if (derived-mode-p 'gnus-summary-mode)
+      (when (get-buffer gnus-article-buffer)
+        (with-current-buffer gnus-article-buffer
+          (tessera-gnus-summary--article-updated)))
+    (when (and (derived-mode-p 'gnus-article-mode)
+               gnus-summary-buffer
+               (buffer-live-p (get-buffer gnus-summary-buffer)))
+      (let ((handles gnus-article-mime-handles)
+            (article-buffer (current-buffer)))
+        (with-current-buffer gnus-summary-buffer
+          (when (and tessera-gnus-summary--active
+                     gnus-current-headers)
+            (with-current-buffer article-buffer
+              (add-hook 'post-command-hook
+                        #'tessera-gnus-summary--article-updated t t))
+            (when (tessera-gnus-data-observe
+                   gnus-current-headers handles)
+              (save-excursion
+                (when-let* ((position
+                             (text-property-any
+                              (point-min) (point-max) 'gnus-number
+                              (mail-header-number
+                               gnus-current-headers))))
+                  (goto-char position)
+                  (let ((tessera-gnus-summary--updating t))
+                    (tessera-gnus-summary--sync-line t))))
+              (tessera-entry-highlight-current))))))))
+
 (defun tessera-gnus-summary--update-line ()
   "Synchronize the article just updated by Gnus."
   (when (and tessera-gnus-summary--active
@@ -438,8 +570,12 @@ FORCE also redraws entries whose native marks have not changed."
   (when tessera-gnus-summary--active
     (let* ((appearance (tessera-gnus-summary--appearance))
            (folds (tessera-gnus-summary--folds))
-           (force (not (equal appearance
-                              tessera-gnus-summary--appearance))))
+           (force (or (not (equal appearance
+                                  tessera-gnus-summary--appearance))
+                      (and (symbolp this-command)
+                           (string-prefix-p
+                            "gnus-registry-"
+                            (symbol-name this-command))))))
       (when (or force tessera-gnus-summary--dirty
                 (not (equal folds tessera-gnus-summary--folds)))
         (tessera-gnus-summary--sync-buffer force)
@@ -510,7 +646,8 @@ FORCE also redraws entries whose native marks have not changed."
     (setq tessera-gnus-summary--saved-settings nil
           tessera-gnus-summary--appearance nil
           tessera-gnus-summary--folds nil
-          tessera-gnus-summary--dirty nil)
+          tessera-gnus-summary--dirty nil
+          tessera-gnus-data--content-cache nil)
     (tessera-gnus-summary--refresh)))
 
 (provide 'tessera-gnus-summary)

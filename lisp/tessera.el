@@ -210,9 +210,12 @@ an alist of variant specifications."
 (cl-defstruct tessera-entry-layout
   "Describe the placement of slots and segments in an entry.
 Non-nil extra fields add a second visual line to the logical entry.
+Segment lists also accept `(:slots SLOT...)' for an inline group
+of fixed-width glyph slots.
 Glyph slot lists accept slot names and `(NAME :reserve t)'
 references.  A reserved reference occupies the selected glyph's
-display width without showing it."
+display width without showing it.  `(NAME :optional t)' omits the
+slot when its selector returns nil, including its width."
   main-glyph-slots
   main-left-segments
   main-right-segments
@@ -239,7 +242,7 @@ display width without showing it."
   "Properties accepted in a layout segment reference.")
 
 (defvar tessera--glyph-slot-properties
-  '(:reserve)
+  '(:reserve :optional)
   "Properties accepted in a layout glyph slot reference.")
 
 (defvar tessera--glyph-variant-properties
@@ -417,9 +420,10 @@ display width without showing it."
        (cdr reference)
        tessera--glyph-slot-properties
        (format "Glyph slot reference `%s'" name))
-      (unless (memq (plist-get (cdr reference) :reserve) '(nil t))
-        (error "Glyph slot reference `%s' has invalid :reserve"
-               name)))))
+      (dolist (property tessera--glyph-slot-properties)
+        (unless (memq (plist-get (cdr reference) property) '(nil t))
+          (error "Glyph slot reference `%s' has invalid %s"
+                 name property))))))
 
 (defun tessera--validate-layout
     (layout segment-names slot-names description)
@@ -443,8 +447,16 @@ DESCRIPTION identifies the layout in errors."
     (dolist (segments segment-lists)
       (tessera--ensure-list segments description)
       (dolist (segment segments)
-        (tessera--validate-segment-reference
-         segment segment-names)))))
+        (if (eq (car-safe segment) :slots)
+            (progn
+              (tessera--ensure-list segment description)
+              (unless (cdr segment)
+                (error "%s contains an empty slot group" description))
+              (dolist (slot (cdr segment))
+                (tessera--validate-glyph-slot-reference
+                 slot slot-names description)))
+          (tessera--validate-segment-reference
+           segment segment-names))))))
 
 (defun tessera--validate-segments (segments)
   "Validate the SEGMENTS provider alist."
@@ -587,33 +599,35 @@ Return BACKEND."
 
 (defun tessera--render-segment (reference definition context)
   "Render segment REFERENCE using DEFINITION and CONTEXT."
-  (let* ((name (tessera--segment-reference-name reference))
-         (provider
-          (cdr (assq name
-                     (tessera--entry-backend-segments definition))))
-         (value (funcall provider context)))
-    (unless (or (null value) (stringp value))
-      (error "Segment provider `%s' returned `%S'" name value))
-    (when (and value (string-match-p "[\n\r]" value))
-      (error "Segment provider `%s' returned multiline text" name))
-    (when value
-      (let* ((properties (and (consp reference) (cdr reference)))
-             (width (string-width value))
-             (maximum (plist-get properties :max-width))
-             (truncate (plist-get properties :truncate)))
-        (tessera--make-rendered-segment
-         :string value
-         :width width
-         :target-width (if (and maximum truncate)
-                           (min width maximum)
-                         width)
-         :grow (plist-get properties :grow)
-         :min-width (or (plist-get properties :min-width) 0)
-         :max-width maximum
-         :truncate truncate
-         :priority (or (plist-get properties :priority) 0)
-         :optional (plist-get properties :optional)
-         :visible t)))))
+  (if (eq (car-safe reference) :slots)
+      (tessera--render-slot-group (cdr reference) definition context)
+    (let* ((name (tessera--segment-reference-name reference))
+           (provider
+            (cdr (assq name
+                       (tessera--entry-backend-segments definition))))
+           (value (funcall provider context)))
+      (unless (or (null value) (stringp value))
+        (error "Segment provider `%s' returned `%S'" name value))
+      (when (and value (string-match-p "[\n\r]" value))
+        (error "Segment provider `%s' returned multiline text" name))
+      (when value
+        (let* ((properties (and (consp reference) (cdr reference)))
+               (width (string-width value))
+               (maximum (plist-get properties :max-width))
+               (truncate (plist-get properties :truncate)))
+          (tessera--make-rendered-segment
+           :string value
+           :width width
+           :target-width (if (and maximum truncate)
+                             (min width maximum)
+                           width)
+           :grow (plist-get properties :grow)
+           :min-width (or (plist-get properties :min-width) 0)
+           :max-width maximum
+           :truncate truncate
+           :priority (or (plist-get properties :priority) 0)
+           :optional (plist-get properties :optional)
+           :visible t))))))
 
 (defun tessera--render-segments (references definition context)
   "Render REFERENCES using DEFINITION and CONTEXT."
@@ -1050,6 +1064,43 @@ glyph variants."
    references
    ""))
 
+(defun tessera--rendered-slots-width
+    (references rendered definition context)
+  "Measure RENDERED slot REFERENCES from DEFINITION in CONTEXT."
+  (let* ((window (tessera-entry-context-window context))
+         (frame (and (window-live-p window) (window-frame window))))
+    (if (and frame (display-graphic-p frame))
+        (with-selected-frame frame
+          (ceiling (string-pixel-width rendered) (frame-char-width)))
+      (tessera--glyph-slots-width references definition))))
+
+(defun tessera--active-slot-references (references definition context)
+  "Omit empty optional REFERENCES in DEFINITION for CONTEXT."
+  (cl-remove-if
+   (lambda (reference)
+     (and (consp reference)
+          (plist-get (cdr reference) :optional)
+          (let ((slot
+                 (cl-find (car reference)
+                          (tessera--entry-backend-glyph-slots
+                           definition)
+                          :key #'tessera-glyph-slot-name)))
+            (null (funcall (tessera-glyph-slot-selector slot)
+                           context)))))
+   references))
+
+(defun tessera--render-slot-group (references definition context)
+  "Render inline slot REFERENCES from DEFINITION in CONTEXT."
+  (when-let* ((active (tessera--active-slot-references
+                       references definition context)))
+    (let* ((text (tessera--render-glyph-slots
+                  active definition context))
+           (width (tessera--rendered-slots-width
+                   active text definition context)))
+      (tessera--make-rendered-segment
+       :string text :width width :target-width width
+       :min-width width :max-width width :priority 0 :visible t))))
+
 ;;;; Entry rendering
 
 (defun tessera--layout-has-extra-line-p (layout)
@@ -1069,15 +1120,13 @@ glyph variants."
 LEFT-REFERENCES and RIGHT-REFERENCES name segments in DEFINITION.
 CONTEXT supplies their entry data and target window."
   (let* ((window (tessera-entry-context-window context))
+         (slot-references (tessera--active-slot-references
+                           slot-references definition context))
          (slots (tessera--render-glyph-slots
                  slot-references definition context))
          (slot-width
-          (if (and (window-live-p window)
-                   (display-graphic-p (window-frame window)))
-              (with-selected-frame (window-frame window)
-                (ceiling (string-pixel-width slots)
-                         (frame-char-width)))
-            (tessera--glyph-slots-width slot-references definition)))
+          (tessera--rendered-slots-width
+           slot-references slots definition context))
          (left
           (tessera--render-segments
            left-references definition context))
@@ -1096,7 +1145,7 @@ CONTEXT supplies their entry data and target window."
            (right-offset
             (+ tessera-entry-safe-gap
                tessera-entry-right-padding
-               (string-width right-string)))
+               (tessera--segments-width right)))
            (surface
             (concat
              (tessera--space tessera-entry-left-padding)

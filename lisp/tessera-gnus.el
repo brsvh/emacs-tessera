@@ -41,6 +41,9 @@
 (declare-function tessera-gnus-summary--disable
                   "tessera-gnus-summary")
 
+(declare-function tessera-gnus-summary--article-updated
+                  "tessera-gnus-summary")
+
 (defun tessera-gnus--map-summary-buffers (function)
   "Call FUNCTION in each live Gnus summary buffer."
   (dolist (buffer (buffer-list))
@@ -63,10 +66,22 @@
       (progn
         (add-hook 'gnus-summary-mode-hook
                   #'tessera-gnus--enable-summary)
+        (add-hook 'gnus-article-prepare-hook
+                  #'tessera-gnus-summary--article-updated t)
         (tessera-gnus--map-summary-buffers
-         #'tessera-gnus--enable-summary))
+         #'tessera-gnus--enable-summary)
+        (when (featurep 'tessera-gnus-summary)
+          (dolist (buffer (buffer-list))
+            (with-current-buffer buffer
+              (tessera-gnus-summary--article-updated)))))
     (remove-hook 'gnus-summary-mode-hook
                  #'tessera-gnus--enable-summary)
+    (remove-hook 'gnus-article-prepare-hook
+                 #'tessera-gnus-summary--article-updated)
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (remove-hook 'post-command-hook
+                     #'tessera-gnus-summary--article-updated t)))
     (when (featurep 'tessera-gnus-summary)
       (tessera-gnus--map-summary-buffers
        #'tessera-gnus-summary--disable))))
