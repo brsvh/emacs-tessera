@@ -117,6 +117,11 @@ to every glyph."
           (color :tag "Uniform color"))
   :group 'tessera)
 
+(defface tessera-entry-current-face
+  '((t :inherit hl-line :extend nil))
+  "Face used for the entry containing point."
+  :group 'tessera)
+
 (defface tessera-entry-hover-face
   '((t :inherit highlight))
   "Face used when the pointer is over an entry surface."
@@ -1035,12 +1040,6 @@ glyph variants."
       (tessera-entry-layout-extra-left-segments layout)
       (tessera-entry-layout-extra-right-segments layout)))
 
-(defun tessera--ensure-single-line-layout (layout)
-  "Ensure LAYOUT contains no extra visual line."
-  (when (tessera--layout-has-extra-line-p layout)
-    (error "Layout `%s' requires the two-line renderer"
-           tessera-entry-layout)))
-
 (defun tessera--visual-line-break ()
   "Return a logical space displayed as a visual line break."
   (propertize " " 'display "\n"))
@@ -1095,7 +1094,6 @@ CONTEXT supplies their entry data and target window."
 
 (defun tessera--render-single-line (layout definition context)
   "Render single-line LAYOUT using DEFINITION and CONTEXT."
-  (tessera--ensure-single-line-layout layout)
   (tessera--render-line
    (tessera-entry-layout-main-glyph-slots layout)
    (tessera-entry-layout-main-left-segments layout)
@@ -1167,9 +1165,118 @@ CONTEXT supplies their entry data and target window."
      content)
     content))
 
+(defvar-local tessera--current-entry nil
+  "Current entry's boundary markers, layout, and saved decorations.")
+
+(defun tessera-entry-clear-current ()
+  "Restore the current entry's original faces and decorations."
+  (when tessera--current-entry
+    (pcase-let ((`(,start ,end ,_layout ,decorations)
+                 tessera--current-entry))
+      (with-silent-modifications
+        (let ((inhibit-read-only t)
+              (position (marker-position start))
+              (limit (marker-position end)))
+          (while (< position limit)
+            (let ((next (next-single-property-change
+                         position 'tessera--current-face nil limit))
+                  (saved (get-text-property
+                          position 'tessera--current-face)))
+              (when saved
+                (if (car saved)
+                    (put-text-property
+                     position next 'face (car saved))
+                  (remove-text-properties position next '(face nil)))
+                (remove-text-properties
+                 position next '(tessera--current-face nil)))
+              (setq position next)))))
+      (dolist (decoration decorations)
+        (pcase-let ((`(,overlay ,property ,original ,styled)
+                     decoration))
+          (when (and (overlay-buffer overlay)
+                     (eq (overlay-get overlay property) styled))
+            (overlay-put overlay property original))))
+      (set-marker start nil)
+      (set-marker end nil))
+    (setq tessera--current-entry nil)))
+
+(defun tessera--current-entry-decorations (start end)
+  "Style horizontal layout spaces between START and END.
+Return the original and styled overlay strings for restoration."
+  (let (decorations)
+    (dolist (overlay (overlays-in start end))
+      (when (overlay-get overlay 'tessera-entry-overlay)
+        (dolist (property '(before-string after-string))
+          (when-let* ((original (overlay-get overlay property)))
+            (let ((styled (copy-sequence original))
+                  (position 0)
+                  (limit (length original)))
+              (while (< position limit)
+                (let ((next (next-single-property-change
+                             position 'tessera--layout-space
+                             original limit)))
+                  (when (get-text-property
+                         position 'tessera--layout-space original)
+                    (add-face-text-property
+                     position next 'tessera-entry-current-face
+                     nil styled))
+                  (setq position next)))
+              (overlay-put overlay property styled)
+              (push (list overlay property original styled)
+                    decorations))))))
+    decorations))
+
+(defun tessera-entry-highlight-current ()
+  "Visually distinguish the entry containing point.
+Keep native content faces and mouse interactions, and exclude
+vertical padding.  Restore the previous entry before moving the
+highlight.  This function is suitable for `post-command-hook'."
+  (let* ((start (line-beginning-position))
+         (end (min (point-max) (1+ (line-end-position))))
+         (layout (get-text-property start 'tessera--entry-layout)))
+    (unless (and tessera--current-entry
+                 (= start (nth 0 tessera--current-entry))
+                 (= end (nth 1 tessera--current-entry))
+                 (eq layout (nth 2 tessera--current-entry)))
+      (tessera-entry-clear-current)
+      (when layout
+        (with-silent-modifications
+          (let ((inhibit-read-only t)
+                (position start))
+            (while (< position end)
+              (let ((next (next-single-property-change
+                           position 'face nil end)))
+                (put-text-property
+                 position next 'tessera--current-face
+                 (list (get-text-property position 'face)))
+                (add-face-text-property
+                 position next 'tessera-entry-current-face)
+                (setq position next)))
+            (let ((position start))
+              (while (< position end)
+                (let ((next (next-single-property-change
+                             position 'display nil end)))
+                  (when (equal (get-text-property position 'display)
+                               "\n")
+                    (add-face-text-property
+                     position next '(:extend t)))
+                  (setq position next))))
+            (when (eq (char-before end) ?\n)
+              (add-face-text-property (1- end) end '(:extend t)))))
+        (setq tessera--current-entry
+              (list (copy-marker start) (copy-marker end) layout
+                    (tessera--current-entry-decorations
+                     start end)))))))
+
 (defun tessera-entry-clear-layout (&optional start end)
   "Remove Tessera layout overlays between START and END.
 Omitted bounds select the whole accessible buffer."
+  (when (and tessera--current-entry
+             (< (or start (point-min))
+                (nth 1 tessera--current-entry))
+             (> (or end (point-max))
+                (nth 0 tessera--current-entry)))
+    (tessera-entry-clear-current))
   (remove-overlays start end 'tessera-entry-overlay t))
 
 (defun tessera-entry-apply-layout (start end)

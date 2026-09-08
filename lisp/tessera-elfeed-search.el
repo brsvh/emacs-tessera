@@ -44,6 +44,7 @@
 
 (defvar elfeed-search-print-entry-function)
 (defvar elfeed-search-update-hook)
+(defvar elfeed-search-separator-date-format)
 
 (defun tessera-elfeed-search--set-glyph (symbol value)
   "Set glyph option SYMBOL to VALUE and refresh active buffers."
@@ -144,6 +145,13 @@ The value has the same shape as
 
 (defvar-local tessera-elfeed-search--saved-layout-local-p nil
   "Whether the saved entry layout was buffer-local.")
+
+(defvar-local tessera-elfeed-search--saved-separator-format nil
+  "Date separator format saved before enabling Tessera.")
+
+(defvar-local tessera-elfeed-search--saved-separator-format-local-p
+    nil
+  "Whether the saved date separator format was buffer-local.")
 
 (defun tessera-elfeed-search--entry (context)
   "Return the Elfeed entry stored in CONTEXT."
@@ -380,7 +388,8 @@ The value has the same shape as
         (while (< (point) (point-max))
           (tessera-entry-apply-layout (point) (line-end-position))
           (forward-line 1))))
-    (tessera-elfeed-search--style-separators)))
+    (tessera-elfeed-search--style-separators)
+    (tessera-entry-highlight-current)))
 
 (defun tessera-elfeed-search--refresh-active-buffers ()
   "Refresh live Elfeed search buffers using Tessera."
@@ -400,12 +409,19 @@ The value has the same shape as
           tessera-elfeed-search--saved-layout-local-p
           (local-variable-p 'tessera-entry-layout)
           tessera-elfeed-search--saved-layout
-          tessera-entry-layout)
+          tessera-entry-layout
+          tessera-elfeed-search--saved-separator-format-local-p
+          (local-variable-p 'elfeed-search-separator-date-format)
+          tessera-elfeed-search--saved-separator-format
+          elfeed-search-separator-date-format)
     (setq-local elfeed-search-print-entry-function
                 #'tessera-elfeed-search-print-entry)
     (setq-local tessera-entry-layout 'two-line)
+    (setq-local elfeed-search-separator-date-format nil)
     (add-hook 'elfeed-search-update-hook
               #'tessera-elfeed-search--apply-layout t t)
+    (add-hook 'post-command-hook
+              #'tessera-entry-highlight-current nil t)
     (setq tessera-elfeed-search--active t)
     (tessera-elfeed-search--refresh)))
 
@@ -420,15 +436,24 @@ The value has the same shape as
         (setq-local tessera-entry-layout
                     tessera-elfeed-search--saved-layout)
       (kill-local-variable 'tessera-entry-layout))
+    (if tessera-elfeed-search--saved-separator-format-local-p
+        (setq-local elfeed-search-separator-date-format
+                    tessera-elfeed-search--saved-separator-format)
+      (kill-local-variable 'elfeed-search-separator-date-format))
     (remove-hook 'elfeed-search-update-hook
                  #'tessera-elfeed-search--apply-layout t)
+    (remove-hook 'post-command-hook
+                 #'tessera-entry-highlight-current t)
+    (tessera-entry-clear-current)
     (tessera-entry-clear-layout)
     (tessera-elfeed-search--restore-separators)
     (setq tessera-elfeed-search--active nil
           tessera-elfeed-search--saved-printer nil
           tessera-elfeed-search--saved-printer-local-p nil
           tessera-elfeed-search--saved-layout nil
-          tessera-elfeed-search--saved-layout-local-p nil)
+          tessera-elfeed-search--saved-layout-local-p nil
+          tessera-elfeed-search--saved-separator-format nil
+          tessera-elfeed-search--saved-separator-format-local-p nil)
     (tessera-elfeed-search--refresh)))
 
 (provide 'tessera-elfeed-search)
