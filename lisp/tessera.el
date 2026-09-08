@@ -942,10 +942,11 @@ glyph variants."
      text 'mouse-face 'tessera-entry-hover-face)
     text))
 
-(defun tessera--glyph-slot-padding (slot content-width)
-  "Return left and right padding for SLOT and CONTENT-WIDTH."
-  (let* ((width (tessera-glyph-slot-width slot))
-         (remaining (- width content-width))
+(defun tessera--glyph-slot-padding
+    (slot content-width &optional target-width)
+  "Return SLOT padding for CONTENT-WIDTH and optional TARGET-WIDTH."
+  (let* ((width (or target-width (tessera-glyph-slot-width slot)))
+         (remaining (max 0 (- width content-width)))
          (left
           (pcase (tessera-glyph-slot-align slot)
             ('left 0)
@@ -995,11 +996,28 @@ glyph variants."
                  (tessera-glyph-slot-width slot))
           (error "Glyph variant `%s' exceeds slot `%s' width"
                  variant-id (tessera-glyph-slot-name slot)))
-        (let ((padding
-               (tessera--glyph-slot-padding slot content-width)))
-          (concat (tessera--space (car padding))
+        (let* ((frame (tessera--glyph-frame context))
+               (pixels (display-graphic-p frame))
+               (padding
+                (if pixels
+                    (with-selected-frame frame
+                      (tessera--glyph-slot-padding
+                       slot (string-pixel-width text)
+                       (* (tessera-glyph-slot-width slot)
+                          (frame-char-width frame))))
+                  (tessera--glyph-slot-padding slot content-width)))
+               (space (if pixels #'tessera--pixel-space
+                        #'tessera--space)))
+          (concat (funcall space (car padding))
                   text
-                  (tessera--space (cdr padding)))))))))
+                  (funcall space (cdr padding)))))))))
+
+(defun tessera--pixel-space (width)
+  "Return a decorative space occupying WIDTH pixels."
+  (if (> width 0)
+      (propertize " " 'display `(space :width (,width))
+                  'tessera--layout-space t)
+    ""))
 
 (defun tessera--reserve-glyph-slot (slot rendered context)
   "Return a blank occupying RENDERED SLOT's display width in CONTEXT."
@@ -1132,11 +1150,11 @@ CONTEXT supplies their entry data and target window."
     (propertize " \n" 'face `((:height ,height) default)
                 'line-height t 'mouse-face 'default)))
 
-(defun tessera--entry-content (rendered)
-  "Extract content and overlay placement data from RENDERED."
+(defun tessera--entry-content (rendered &optional prefix)
+  "Extract RENDERED content and layout after native PREFIX."
   (let ((position 0)
         (length (length rendered))
-        (content "")
+        (content (copy-sequence (or prefix "")))
         (pending (tessera--padding-string
                   tessera-entry-top-padding))
         placements)
@@ -1149,7 +1167,12 @@ CONTEXT supplies their entry data and target window."
         (if space
             (setq pending (concat pending part))
           (when pending
-            (push (list (length content) 'before-string pending)
+            ;; Leading decoration precedes native control text too.
+            ;; Otherwise its newline leaves a hidden visual row.
+            (push (list (if (= (length content) (length prefix))
+                            0
+                          (length content))
+                        'before-string pending)
                   placements)
             (setq pending nil))
           (setq content (concat content part)))
@@ -1313,13 +1336,16 @@ on buffer text, and all decorative spaces live in overlay strings."
         (overlay-put overlay 'after-string
                      (tessera--padding-string bottom))))))
 
-(defun tessera-entry-render (backend object &optional window)
+(defun tessera-entry-render
+    (backend object &optional window prefix)
   "Render OBJECT registered for BACKEND in WINDOW.
 
 The result contains one logical line of content and layout metadata.
 After inserting it and the native terminating newline, call
 `tessera-entry-apply-layout' to display padding and alignment.
-WINDOW defaults to a window displaying the current buffer."
+WINDOW defaults to a window displaying the current buffer.
+PREFIX is optional non-displaying native text placed before content;
+it does not participate in width allocation."
   (when (and window (not (window-live-p window)))
     (error "Cannot render an entry for a dead window"))
   (let* ((definition (tessera--find-entry-backend backend))
@@ -1330,7 +1356,8 @@ WINDOW defaults to a window displaying the current buffer."
           (tessera--make-entry-context
            definition object target-window)))
     (tessera--entry-content
-     (tessera--render-entry-lines layout definition context))))
+     (tessera--render-entry-lines layout definition context)
+     prefix)))
 
 (provide 'tessera)
 ;;; tessera.el ends here
