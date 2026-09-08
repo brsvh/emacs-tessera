@@ -39,6 +39,9 @@
 (declare-function tessera-elfeed-search--enable
                   "tessera-elfeed-search")
 
+(declare-function tessera-elfeed-search--register
+                  "tessera-elfeed-search")
+
 (defun tessera-elfeed--map-search-buffers (function)
   "Call FUNCTION in every live Elfeed search buffer."
   (dolist (buffer (buffer-list))
@@ -49,6 +52,7 @@
 (defun tessera-elfeed--enable-search ()
   "Enable the Tessera adapter in the current Elfeed search buffer."
   (require 'tessera-elfeed-search)
+  (tessera-elfeed-search--register)
   (tessera-elfeed-search--enable))
 
 ;;;###autoload

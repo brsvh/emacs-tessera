@@ -48,7 +48,8 @@
 (defun tessera-elfeed-search--set-glyph (symbol value)
   "Set glyph option SYMBOL to VALUE and refresh active buffers."
   (set-default symbol value)
-  (when (and (fboundp 'tessera-elfeed-search--register)
+  (when (and (gethash 'elfeed-search tessera--entry-backends)
+             (fboundp 'tessera-elfeed-search--register)
              (fboundp 'tessera-elfeed-search--refresh-active-buffers))
     (tessera-elfeed-search--register)
     (tessera-elfeed-search--refresh-active-buffers)))
@@ -333,23 +334,53 @@ The value has the same shape as
 
 (defun tessera-elfeed-search-print-entry (entry)
   "Insert a Tessera rendering of Elfeed ENTRY."
-  (insert
-   (tessera-entry-render
-    'elfeed-search entry (get-buffer-window (current-buffer)))))
+  (let ((start (point)))
+    ;; A single-entry update retains the native terminating newline.
+    (tessera-entry-clear-layout start (min (point-max) (1+ start)))
+    (insert
+     (tessera-entry-render
+      'elfeed-search entry (get-buffer-window (current-buffer))))
+    (when (eq (char-after) ?\n)
+      (tessera-entry-apply-layout start (point)))))
 
 (defun tessera-elfeed-search--refresh ()
   "Refresh the current Elfeed search buffer."
   (when (derived-mode-p 'elfeed-search-mode)
     (elfeed-search-update :force)))
 
-(defun tessera-elfeed-search--finalize-entry-padding ()
-  "Apply bottom padding to entry terminators in the current buffer."
+(defun tessera-elfeed-search--style-separators ()
+  "Keep native separator strings from inheriting an icon font."
+  (dolist (overlay (overlays-in (point-min) (point-max)))
+    (when (and (eq (overlay-get overlay 'category)
+                   'elfeed-search-separator)
+               (not (overlay-get overlay
+                                 'tessera-elfeed-search-separator)))
+      (when-let* ((original (overlay-get overlay 'before-string)))
+        (let ((string (copy-sequence original)))
+          (add-face-text-property 0 (length string) 'default t string)
+          (overlay-put overlay 'tessera-elfeed-search-separator
+                       original)
+          (overlay-put overlay 'before-string string))))))
+
+(defun tessera-elfeed-search--restore-separators ()
+  "Restore native separator strings when disabling the adapter."
+  (dolist (overlay (overlays-in (point-min) (point-max)))
+    (when-let* ((original
+                 (overlay-get overlay
+                              'tessera-elfeed-search-separator)))
+      (overlay-put overlay 'before-string original)
+      (overlay-put overlay 'tessera-elfeed-search-separator nil))))
+
+(defun tessera-elfeed-search--apply-layout ()
+  "Attach layouts after Elfeed has inserted entry terminators."
   (when tessera-elfeed-search--active
     (let ((inhibit-read-only t))
       (save-excursion
         (goto-char (point-min))
-        (while (search-forward "\n" nil t)
-          (tessera--finalize-entry-terminator (1- (point))))))))
+        (while (< (point) (point-max))
+          (tessera-entry-apply-layout (point) (line-end-position))
+          (forward-line 1))))
+    (tessera-elfeed-search--style-separators)))
 
 (defun tessera-elfeed-search--refresh-active-buffers ()
   "Refresh live Elfeed search buffers using Tessera."
@@ -362,7 +393,6 @@ The value has the same shape as
 (defun tessera-elfeed-search--enable ()
   "Enable Tessera rendering in the current Elfeed search buffer."
   (unless tessera-elfeed-search--active
-    (tessera-elfeed-search--register)
     (setq tessera-elfeed-search--saved-printer-local-p
           (local-variable-p 'elfeed-search-print-entry-function)
           tessera-elfeed-search--saved-printer
@@ -375,7 +405,7 @@ The value has the same shape as
                 #'tessera-elfeed-search-print-entry)
     (setq-local tessera-entry-layout 'two-line)
     (add-hook 'elfeed-search-update-hook
-              #'tessera-elfeed-search--finalize-entry-padding nil t)
+              #'tessera-elfeed-search--apply-layout t t)
     (setq tessera-elfeed-search--active t)
     (tessera-elfeed-search--refresh)))
 
@@ -391,15 +421,15 @@ The value has the same shape as
                     tessera-elfeed-search--saved-layout)
       (kill-local-variable 'tessera-entry-layout))
     (remove-hook 'elfeed-search-update-hook
-                 #'tessera-elfeed-search--finalize-entry-padding t)
+                 #'tessera-elfeed-search--apply-layout t)
+    (tessera-entry-clear-layout)
+    (tessera-elfeed-search--restore-separators)
     (setq tessera-elfeed-search--active nil
           tessera-elfeed-search--saved-printer nil
           tessera-elfeed-search--saved-printer-local-p nil
           tessera-elfeed-search--saved-layout nil
           tessera-elfeed-search--saved-layout-local-p nil)
     (tessera-elfeed-search--refresh)))
-
-(tessera-elfeed-search--register)
 
 (provide 'tessera-elfeed-search)
 ;;; tessera-elfeed-search.el ends here

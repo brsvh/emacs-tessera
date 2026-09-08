@@ -31,6 +31,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 
 ;;;; Customization
 
@@ -365,18 +366,22 @@ display width without showing it."
         (unless (memq grow '(nil t))
           (error "Segment reference `%s' has invalid :grow" name))
         (unless (or (null minimum) (natnump minimum))
-          (error "Segment reference `%s' has invalid :min-width" name))
-        (unless (or (null maximum) (natnump maximum))
-          (error "Segment reference `%s' has invalid :max-width" name))
-        (when (and minimum maximum (> minimum maximum))
-          (error "Segment reference `%s' has :min-width above :max-width"
+          (error "Segment reference `%s' has invalid :min-width"
                  name))
+        (unless (or (null maximum) (natnump maximum))
+          (error "Segment reference `%s' has invalid :max-width"
+                 name))
+        (when (and minimum maximum (> minimum maximum))
+          (error
+           "Segment reference `%s' has :min-width above :max-width"
+           name))
         (unless (memq truncate '(nil head middle tail))
           (error "Segment reference `%s' has invalid :truncate" name))
         (unless (or (null priority) (integerp priority))
           (error "Segment reference `%s' has invalid :priority" name))
         (unless (memq optional '(nil t))
-          (error "Segment reference `%s' has invalid :optional" name))))))
+          (error "Segment reference `%s' has invalid :optional"
+                 name))))))
 
 (defun tessera--glyph-slot-reference-name (reference)
   "Return the glyph slot name in REFERENCE, or signal an error."
@@ -433,7 +438,8 @@ DESCRIPTION identifies the layout in errors."
     (dolist (segments segment-lists)
       (tessera--ensure-list segments description)
       (dolist (segment segments)
-        (tessera--validate-segment-reference segment segment-names)))))
+        (tessera--validate-segment-reference
+         segment segment-names)))))
 
 (defun tessera--validate-segments (segments)
   "Validate the SEGMENTS provider alist."
@@ -525,7 +531,8 @@ Return BACKEND."
                    (current-buffer)
                    window)))
     (unless (tessera-entry-context-p context)
-      (error "Backend `%s' returned an invalid entry context" backend))
+      (error "Backend `%s' returned an invalid entry context"
+             backend))
     (unless (eq (tessera-entry-context-backend context) backend)
       (error "Entry context names backend `%s', expected `%s'"
              (tessera-entry-context-backend context) backend))
@@ -534,12 +541,15 @@ Return BACKEND."
 (defun tessera--space (width)
   "Return a display space occupying WIDTH columns."
   (if (> width 0)
-      (propertize " " 'display `(space :width ,width))
+      (propertize " " 'display `(space :width ,width)
+                  'tessera--layout-space t)
     ""))
 
 (defun tessera--align-space (right-offset)
   "Return a display space aligned RIGHT-OFFSET from the right edge."
-  (propertize " " 'display `(space :align-to (- right ,right-offset))))
+  (propertize
+   " " 'display `(space :align-to (- right ,right-offset))
+   'tessera--layout-space t))
 
 (defun tessera--add-default-property (string property value)
   "Add PROPERTY with VALUE where STRING does not already have it."
@@ -547,7 +557,8 @@ Return BACKEND."
         (end (length string)))
     (while (< position end)
       (let ((next
-             (next-single-property-change position property string end)))
+             (next-single-property-change
+              position property string end)))
         (unless (get-text-property position property string)
           (put-text-property position next property value string))
         (setq position next))))
@@ -603,7 +614,8 @@ Return BACKEND."
   "Render REFERENCES using DEFINITION and CONTEXT."
   (delq nil
         (mapcar (lambda (reference)
-                  (tessera--render-segment reference definition context))
+                  (tessera--render-segment
+                   reference definition context))
                 references)))
 
 (defun tessera--visible-segments (segments)
@@ -646,7 +658,8 @@ Return the number of columns still overflowing."
     (when (> overflow 0)
       (let* ((target (tessera--rendered-segment-target-width segment))
              (minimum (min target
-                           (tessera--rendered-segment-min-width segment)))
+                           (tessera--rendered-segment-min-width
+                            segment)))
              (reduction (min overflow (- target minimum))))
         (setf (tessera--rendered-segment-target-width segment)
               (- target reduction))
@@ -669,7 +682,8 @@ Return the number of columns still overflowing."
              (natural (tessera--rendered-segment-width segment))
              (maximum (tessera--rendered-segment-max-width segment))
              (desired (if (and maximum
-                               (tessera--rendered-segment-truncate segment))
+                               (tessera--rendered-segment-truncate
+                                segment))
                           (min natural maximum)
                         natural))
              (increase (min spare-width (- desired target))))
@@ -697,7 +711,8 @@ Return the number of columns still overflowing."
               segments
               (lambda (candidate)
                 (and (tessera--rendered-segment-visible candidate)
-                     (tessera--rendered-segment-optional candidate)))))
+                     (tessera--rendered-segment-optional
+                      candidate)))))
       (when (> overflow 0)
         (setf (tessera--rendered-segment-visible segment) nil)
         (setq overflow
@@ -744,7 +759,8 @@ Return the number of columns still overflowing."
                 (truncate-string-to-width string left-width)
                 ellipsis
                 (truncate-string-to-width
-                 string natural-width (- natural-width right-width)))))
+                 string natural-width
+                 (- natural-width right-width)))))
             (_ string))))))))
 
 (defun tessera--render-segment-group (segments)
@@ -802,7 +818,8 @@ Return the number of columns still overflowing."
   "Return GLYPH's Unicode text when it can display on FRAME."
   (let ((text (tessera-glyph-unicode glyph)))
     (when (and (display-graphic-p frame)
-               (tessera--glyph-string-displayable-p text frame))
+               (tessera--glyph-string-displayable-p
+                text frame))
       text)))
 
 (defun tessera--nerd-icons-available-p ()
@@ -830,7 +847,8 @@ Return the number of columns still overflowing."
             (let ((text (funcall function name)))
               (when (and (stringp text)
                          (> (length text) 0)
-                         (tessera--glyph-string-displayable-p text frame))
+                         (tessera--glyph-string-displayable-p
+                          text frame))
                 text))
           (error nil))))))
 
@@ -872,7 +890,8 @@ Return the number of columns still overflowing."
   "Apply GLYPH's configured color and metadata to TEXT in CONTEXT."
   (let* ((face (tessera--glyph-color-face glyph))
          (hover-face (and face
-                          (tessera--glyph-hover-color-face face context))))
+                          (tessera--glyph-hover-color-face
+                           face context))))
     (put-text-property 0 (length text) 'tessera-glyph-semantic
                        (tessera-glyph-semantic glyph) text)
     (when face
@@ -894,7 +913,8 @@ Return the number of columns still overflowing."
                        (eq property 'mouse-face)
                        color-face)
               (setq value (list value color-face)))
-            (put-text-property 0 (length text) property value text))))))
+            (put-text-property
+             0 (length text) property value text))))))
   text)
 
 (defun tessera-glyph-render (glyph context &optional properties)
@@ -970,7 +990,8 @@ glyph variants."
                  (tessera-glyph-slot-width slot))
           (error "Glyph variant `%s' exceeds slot `%s' width"
                  variant-id (tessera-glyph-slot-name slot)))
-        (let ((padding (tessera--glyph-slot-padding slot content-width)))
+        (let ((padding
+               (tessera--glyph-slot-padding slot content-width)))
           (concat (tessera--space (car padding))
                   text
                   (tessera--space (cdr padding)))))))))
@@ -985,7 +1006,8 @@ glyph variants."
                    (with-selected-frame frame
                      (string-pixel-width rendered))
                  (string-pixel-width rendered))))
-          (propertize " " 'display `(space :width (,width))))
+          (propertize " " 'display `(space :width (,width))
+                      'tessera--layout-space t))
       (tessera--space (tessera-glyph-slot-width slot)))))
 
 (defun tessera--render-glyph-slots
@@ -1023,29 +1045,28 @@ glyph variants."
   "Return a logical space displayed as a visual line break."
   (propertize " " 'display "\n"))
 
-(defun tessera--padding-line-break (height)
-  "Return a visual line break ending padding of HEIGHT."
-  (propertize " "
-              'display "\n"
-              'face `(:height ,height)
-              'line-height t))
-
 (defun tessera--render-line
-    (slot-references left-references right-references definition context)
+    (slot-references left-references right-references
+                     definition context)
   "Render one visual line from SLOT-REFERENCES and segment references.
 LEFT-REFERENCES and RIGHT-REFERENCES name segments in DEFINITION.
 CONTEXT supplies their entry data and target window."
-  (let* ((slot-width
-          (tessera--glyph-slots-width slot-references definition))
+  (let* ((window (tessera-entry-context-window context))
          (slots (tessera--render-glyph-slots
                  slot-references definition context))
+         (slot-width
+          (if (and (window-live-p window)
+                   (display-graphic-p (window-frame window)))
+              (with-selected-frame (window-frame window)
+                (ceiling (string-pixel-width slots)
+                         (frame-char-width)))
+            (tessera--glyph-slots-width slot-references definition)))
          (left
           (tessera--render-segments
            left-references definition context))
          (right
           (tessera--render-segments
-           right-references definition context))
-         (window (tessera-entry-context-window context)))
+           right-references definition context)))
     (when (window-live-p window)
       (tessera--allocate-segment-widths
        left right slot-width (window-body-width window)))
@@ -1067,11 +1088,10 @@ CONTEXT supplies their entry data and target window."
              left-string
              (tessera--space tessera-entry-flex-gap-min-width)
              (tessera--align-space right-offset)
-             right-string
-             (tessera--space tessera-entry-right-padding))))
-      (concat (tessera--space tessera-entry-safe-gap)
-              surface
-              (tessera--space tessera-entry-safe-gap)))))
+             right-string)))
+      ;; Right alignment already reserves right padding and safe gap.
+      ;; A trailing after-string can wrap the native newline.
+      (concat (tessera--space tessera-entry-safe-gap) surface))))
 
 (defun tessera--render-single-line (layout definition context)
   "Render single-line LAYOUT using DEFINITION and CONTEXT."
@@ -1102,65 +1122,97 @@ CONTEXT supplies their entry data and target window."
      context))
    (tessera--visual-line-break)))
 
-(defun tessera--render-padding-line (height)
-  "Render an entry padding line of HEIGHT normal line heights."
-  (let ((safe-gap
-         (propertize
-          " " 'display `(space :width ,tessera-entry-safe-gap
-                               :height ,height)))
-        (surface
-         (propertize
-          " "
-          'display
-          `(space :align-to (- right ,tessera-entry-safe-gap)
-                  :height ,height))))
-    (concat safe-gap surface safe-gap)))
-
-(defun tessera--finalize-entry-terminator (position)
-  "Apply bottom padding properties to the newline at POSITION."
-  (when-let* (((eq (char-after position) ?\n))
-              ((> position (point-min)))
-              (height
-               (get-text-property
-                (1- position) 'tessera-entry-bottom-padding)))
-    (add-text-properties
-     position (1+ position)
-     `(face (:height ,height) line-height t))))
-
-(defun tessera--add-entry-padding (entry)
-  "Add configured vertical padding to rendered ENTRY."
-  (when (> tessera-entry-top-padding 0)
-    (setq entry
-          (concat
-           (tessera--render-padding-line tessera-entry-top-padding)
-           (tessera--padding-line-break tessera-entry-top-padding)
-           entry)))
-  (when (> tessera-entry-bottom-padding 0)
-    (let ((padding
-           (tessera--render-padding-line
-            tessera-entry-bottom-padding)))
-      (add-text-properties
-       0 (length padding)
-       `(tessera-entry-bottom-padding
-         ,tessera-entry-bottom-padding)
-       padding)
-      (setq entry
-            (concat entry (tessera--visual-line-break) padding))))
-  entry)
-
 (defun tessera--render-entry-lines (layout definition context)
   "Render the visual lines of LAYOUT using DEFINITION and CONTEXT."
-  (tessera--add-entry-padding
-   (if (tessera--layout-has-extra-line-p layout)
-       (tessera--render-two-line layout definition context)
-     (tessera--render-single-line layout definition context))))
+  (if (tessera--layout-has-extra-line-p layout)
+      (tessera--render-two-line layout definition context)
+    (tessera--render-single-line layout definition context)))
+
+(defun tessera--padding-string (height)
+  "Return display-only vertical padding of HEIGHT normal lines."
+  (when (> height 0)
+    (propertize " \n" 'face `((:height ,height) default)
+                'line-height t 'mouse-face 'default)))
+
+(defun tessera--entry-content (rendered)
+  "Extract content and overlay placement data from RENDERED."
+  (let ((position 0)
+        (length (length rendered))
+        (content "")
+        (pending (tessera--padding-string
+                  tessera-entry-top-padding))
+        placements)
+    (while (< position length)
+      (let* ((space (get-text-property
+                     position 'tessera--layout-space rendered))
+             (end (next-single-property-change
+                   position 'tessera--layout-space rendered length))
+             (part (substring rendered position end)))
+        (if space
+            (setq pending (concat pending part))
+          (when pending
+            (push (list (length content) 'before-string pending)
+                  placements)
+            (setq pending nil))
+          (setq content (concat content part)))
+        (setq position end)))
+    (when (string-empty-p content)
+      (setq content (propertize " " 'display '(space :width 0))))
+    (when pending
+      (push (list (1- (length content)) 'after-string pending)
+            placements))
+    (put-text-property
+     0 1 'tessera--entry-layout
+     (list (nreverse placements) tessera-entry-bottom-padding)
+     content)
+    content))
+
+(defun tessera-entry-clear-layout (&optional start end)
+  "Remove Tessera layout overlays between START and END.
+Omitted bounds select the whole accessible buffer."
+  (remove-overlays start end 'tessera-entry-overlay t))
+
+(defun tessera-entry-apply-layout (start end)
+  "Attach rendered entry layout to buffer content from START to END.
+END excludes the client's terminating newline, which must already
+exist when bottom padding is requested.  Reapplying replaces only
+Tessera overlays within this entry.  Native content properties stay
+on buffer text, and all decorative spaces live in overlay strings."
+  (let* ((layout (get-text-property start 'tessera--entry-layout))
+         (bottom (cadr layout))
+         (terminator (eq (char-after end) ?\n))
+         (limit (if terminator (1+ end) end)))
+    (when (and bottom (> bottom 0) (not terminator))
+      (error "Entry bottom padding needs a terminating newline"))
+    (tessera-entry-clear-layout start limit)
+    (dolist (placement (car layout))
+      (pcase-let* ((`(,offset ,property ,string) placement)
+                   (position (+ start offset))
+                   (overlay (make-overlay position (1+ position))))
+        (overlay-put overlay 'tessera-entry-overlay t)
+        (overlay-put overlay 'evaporate t)
+        ;; Place entry decoration after native boundary headings.
+        (overlay-put overlay 'priority 1)
+        (overlay-put
+         overlay property
+         (propertize
+          (tessera--add-default-property
+           (copy-sequence string) 'face 'default)
+          'mouse-face 'default))))
+    (when (and bottom (> bottom 0))
+      (let ((overlay (make-overlay start limit)))
+        (overlay-put overlay 'tessera-entry-overlay t)
+        (overlay-put overlay 'evaporate t)
+        (overlay-put overlay 'after-string
+                     (tessera--padding-string bottom))))))
 
 (defun tessera-entry-render (backend object &optional window)
   "Render OBJECT registered for BACKEND in WINDOW.
 
-The result can display multiple visual lines, but is one propertized
-logical string without newline characters.  WINDOW defaults to a
-window displaying the current buffer, when one exists."
+The result contains one logical line of content and layout metadata.
+After inserting it and the native terminating newline, call
+`tessera-entry-apply-layout' to display padding and alignment.
+WINDOW defaults to a window displaying the current buffer."
   (when (and window (not (window-live-p window)))
     (error "Cannot render an entry for a dead window"))
   (let* ((definition (tessera--find-entry-backend backend))
@@ -1168,8 +1220,10 @@ window displaying the current buffer, when one exists."
          (target-window (or window
                             (get-buffer-window (current-buffer))))
          (context
-          (tessera--make-entry-context definition object target-window)))
-    (tessera--render-entry-lines layout definition context)))
+          (tessera--make-entry-context
+           definition object target-window)))
+    (tessera--entry-content
+     (tessera--render-entry-lines layout definition context))))
 
 (provide 'tessera)
 ;;; tessera.el ends here
