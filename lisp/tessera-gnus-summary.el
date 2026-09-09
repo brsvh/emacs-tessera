@@ -344,14 +344,22 @@
    (list
     (cons 'single-line
           (make-tessera-entry-layout
+           :glyph-slots-align 'right
            :main-glyph-slots
-           '(status secondary availability score)
+           '(score availability secondary status)
            :main-left-segments
            '((author :max-width 20 :truncate tail :optional t)
-             (subject :grow t :min-width 4 :truncate tail))
-           :main-right-segments '(date)))
+             (subject :grow t :min-width 4 :truncate tail)
+             (:slots (attachment :optional t)
+                     (signature :optional t)
+                     (encryption :optional t)))
+           :main-right-segments
+           '((labels :grow t :max-width 24 :min-width 0
+                     :truncate tail :priority -1 :optional t)
+             date)))
     (cons 'two-line
           (make-tessera-entry-layout
+           :glyph-slots-align 'right
            :main-glyph-slots '(secondary status)
            :main-left-segments
            '((subject :grow t :min-width 4 :truncate tail))

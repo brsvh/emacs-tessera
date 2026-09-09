@@ -215,13 +215,17 @@ of fixed-width glyph slots.
 Glyph slot lists accept slot names and `(NAME :reserve t)'
 references.  A reserved reference occupies the selected glyph's
 display width without showing it.  `(NAME :optional t)' omits the
-slot when its selector returns nil, including its width."
+slot when its selector returns nil, including its width.
+GLYPH-SLOTS-ALIGN, when `left' or `right', packs visible prefix icons
+within the full area of all referenced slots.  Nil preserves each
+slot position.  Inline slot groups are unaffected."
   main-glyph-slots
   main-left-segments
   main-right-segments
   extra-glyph-slots
   extra-left-segments
-  extra-right-segments)
+  extra-right-segments
+  glyph-slots-align)
 
 ;;;; Backend registration
 
@@ -431,6 +435,9 @@ slot when its selector returns nil, including its width."
 DESCRIPTION identifies the layout in errors."
   (unless (tessera-entry-layout-p layout)
     (error "%s must contain a Tessera entry layout" description))
+  (unless (memq (tessera-entry-layout-glyph-slots-align layout)
+                '(nil left right))
+    (error "%s has invalid glyph slot alignment" description))
   (let ((slot-lists
          (list (tessera-entry-layout-main-glyph-slots layout)
                (tessera-entry-layout-extra-glyph-slots layout)))
@@ -968,18 +975,9 @@ glyph variants."
             ('right remaining))))
     (cons left (- remaining left))))
 
-(defun tessera--glyph-slots-width (references definition)
-  "Return the fixed width of slot REFERENCES in DEFINITION."
-  (cl-loop for reference in references
-           for name = (tessera--glyph-slot-reference-name reference)
-           for slot = (cl-find
-                       name
-                       (tessera--entry-backend-glyph-slots definition)
-                       :key #'tessera-glyph-slot-name)
-           sum (tessera-glyph-slot-width slot)))
-
-(defun tessera--render-glyph-slot (slot context)
-  "Render glyph SLOT for CONTEXT at its fixed width."
+(defun tessera--render-glyph-slot (slot context &optional omit-empty)
+  "Render glyph SLOT for CONTEXT at its fixed width.
+Return nil when the selector returns nil and OMIT-EMPTY is non-nil."
   (let* ((variant-id
           (funcall (tessera-glyph-slot-selector slot) context))
          (variant
@@ -988,7 +986,8 @@ glyph variants."
                      (tessera-glyph-slot-glyphs slot)))))
     (cond
      ((null variant-id)
-      (tessera--space (tessera-glyph-slot-width slot)))
+      (unless omit-empty
+        (tessera--space (tessera-glyph-slot-width slot))))
      ((null variant)
       (display-warning
        'tessera
@@ -1048,57 +1047,58 @@ glyph variants."
       (tessera--space (tessera-glyph-slot-width slot)))))
 
 (defun tessera--render-glyph-slots
-    (references definition context)
-  "Render glyph slot REFERENCES using DEFINITION and CONTEXT."
-  (mapconcat
-   (lambda (reference)
-     (let* ((name (tessera--glyph-slot-reference-name reference))
-            (slot
-             (cl-find name
-                      (tessera--entry-backend-glyph-slots definition)
-                      :key #'tessera-glyph-slot-name))
-            (rendered (tessera--render-glyph-slot slot context)))
-       (if (tessera--glyph-slot-reference-reserved-p reference)
-           (tessera--reserve-glyph-slot slot rendered context)
-         rendered)))
-   references
-   ""))
-
-(defun tessera--rendered-slots-width
-    (references rendered definition context)
-  "Measure RENDERED slot REFERENCES from DEFINITION in CONTEXT."
-  (let* ((window (tessera-entry-context-window context))
-         (frame (and (window-live-p window) (window-frame window))))
-    (if (and frame (display-graphic-p frame))
-        (with-selected-frame frame
-          (ceiling (string-pixel-width rendered) (frame-char-width)))
-      (tessera--glyph-slots-width references definition))))
-
-(defun tessera--active-slot-references (references definition context)
-  "Omit empty optional REFERENCES in DEFINITION for CONTEXT."
-  (cl-remove-if
-   (lambda (reference)
-     (and (consp reference)
-          (plist-get (cdr reference) :optional)
-          (let ((slot
-                 (cl-find (car reference)
-                          (tessera--entry-backend-glyph-slots
-                           definition)
-                          :key #'tessera-glyph-slot-name)))
-            (null (funcall (tessera-glyph-slot-selector slot)
-                           context)))))
-   references))
+    (references definition context &optional align)
+  "Render slot REFERENCES using DEFINITION and CONTEXT.
+Return (TEXT . WIDTH), or nil if all references are omitted.
+ALIGN packs visible icons at the `left' or `right' of the full area.
+With nil ALIGN, empty optional slots are omitted and other slots
+keep their individual positions.  Each selector runs once."
+  (let (visible hidden (width 0))
+    (dolist (reference references)
+      (let* ((name (tessera--glyph-slot-reference-name reference))
+             (slot
+              (cl-find name
+                       (tessera--entry-backend-glyph-slots definition)
+                       :key #'tessera-glyph-slot-name))
+             (text (tessera--render-glyph-slot
+                    slot context
+                    (and (null align) (consp reference)
+                         (plist-get (cdr reference) :optional)))))
+        (when text
+          (cl-incf width (tessera-glyph-slot-width slot))
+          (when (tessera--glyph-slot-reference-reserved-p reference)
+            (setq text (tessera--reserve-glyph-slot
+                        slot text context)))
+          (if (and align
+                   (not (text-property-not-all
+                         0 (length text)
+                         'tessera-glyph-semantic nil text)))
+              (push text hidden)
+            (push text visible)))))
+    (when (or visible hidden)
+      (let* ((text (apply #'concat (nreverse visible)))
+             (padding (apply #'concat (nreverse hidden)))
+             ;; Preserve decorative strings and their pixel widths.
+             (rendered (if (eq align 'right)
+                           (concat padding text)
+                         (concat text padding)))
+             (window (tessera-entry-context-window context))
+             (frame (and (window-live-p window)
+                         (window-frame window))))
+        (cons rendered
+              (if (and frame (display-graphic-p frame))
+                  (with-selected-frame frame
+                    (ceiling (string-pixel-width rendered)
+                             (frame-char-width)))
+                width))))))
 
 (defun tessera--render-slot-group (references definition context)
   "Render inline slot REFERENCES from DEFINITION in CONTEXT."
-  (when-let* ((active (tessera--active-slot-references
-                       references definition context)))
-    (let* ((text (tessera--render-glyph-slots
-                  active definition context))
-           (width (tessera--rendered-slots-width
-                   active text definition context)))
+  (when-let* ((area (tessera--render-glyph-slots
+                     references definition context)))
+    (let ((width (cdr area)))
       (tessera--make-rendered-segment
-       :string text :width width :target-width width
+       :string (car area) :width width :target-width width
        :min-width width :max-width width :priority 0 :visible t))))
 
 ;;;; Entry rendering
@@ -1115,18 +1115,16 @@ glyph variants."
 
 (defun tessera--render-line
     (slot-references left-references right-references
-                     definition context)
+                     definition context &optional glyph-align)
   "Render one visual line from SLOT-REFERENCES and segment references.
 LEFT-REFERENCES and RIGHT-REFERENCES name segments in DEFINITION.
-CONTEXT supplies their entry data and target window."
+CONTEXT supplies their entry data and target window.
+GLYPH-ALIGN optionally packs prefix icons within their fixed area."
   (let* ((window (tessera-entry-context-window context))
-         (slot-references (tessera--active-slot-references
-                           slot-references definition context))
-         (slots (tessera--render-glyph-slots
-                 slot-references definition context))
-         (slot-width
-          (tessera--rendered-slots-width
-           slot-references slots definition context))
+         (slot-area (tessera--render-glyph-slots
+                     slot-references definition context glyph-align))
+         (slots (car slot-area))
+         (slot-width (or (cdr slot-area) 0))
          (left
           (tessera--render-segments
            left-references definition context))
@@ -1139,7 +1137,7 @@ CONTEXT supplies their entry data and target window."
     (let* ((left-string (tessera--render-segment-group left))
            (right-string (tessera--render-segment-group right))
            (slot-gap
-            (if (and slot-references (> (length left-string) 0))
+            (if (and slot-area (> (length left-string) 0))
                 (tessera--space tessera-entry-segment-gap)
               ""))
            (right-offset
@@ -1165,8 +1163,8 @@ CONTEXT supplies their entry data and target window."
    (tessera-entry-layout-main-glyph-slots layout)
    (tessera-entry-layout-main-left-segments layout)
    (tessera-entry-layout-main-right-segments layout)
-   definition
-   context))
+   definition context
+   (tessera-entry-layout-glyph-slots-align layout)))
 
 (defun tessera--render-two-line (layout definition context)
   "Render two-line LAYOUT using DEFINITION and CONTEXT."
@@ -1177,14 +1175,14 @@ CONTEXT supplies their entry data and target window."
      (tessera-entry-layout-main-glyph-slots layout)
      (tessera-entry-layout-main-left-segments layout)
      (tessera-entry-layout-main-right-segments layout)
-     definition
-     context)
+     definition context
+     (tessera-entry-layout-glyph-slots-align layout))
     (tessera--render-line
      (tessera-entry-layout-extra-glyph-slots layout)
      (tessera-entry-layout-extra-left-segments layout)
      (tessera-entry-layout-extra-right-segments layout)
-     definition
-     context))
+     definition context
+     (tessera-entry-layout-glyph-slots-align layout)))
    (tessera--visual-line-break)))
 
 (defun tessera--render-entry-lines (layout definition context)
