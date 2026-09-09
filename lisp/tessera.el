@@ -68,7 +68,7 @@
   :safe #'natnump
   :group 'tessera)
 
-(defcustom tessera-entry-top-padding 0
+(defcustom tessera-entry-top-padding 0.2
   "Height above entry content in normal line heights."
   :type '(restricted-sexp
           :tag "Normal line heights"
@@ -76,8 +76,40 @@
   :safe #'tessera--nonnegative-number-p
   :group 'tessera)
 
-(defcustom tessera-entry-bottom-padding 0
+(defcustom tessera-entry-bottom-padding 0.2
   "Height below entry content in normal line heights."
+  :type '(restricted-sexp
+          :tag "Normal line heights"
+          :match-alternatives (tessera--nonnegative-number-p))
+  :safe #'tessera--nonnegative-number-p
+  :group 'tessera)
+
+(defcustom tessera-thread-outer-top-padding 0.2
+  "Height above the first thread member in normal line heights."
+  :type '(restricted-sexp
+          :tag "Normal line heights"
+          :match-alternatives (tessera--nonnegative-number-p))
+  :safe #'tessera--nonnegative-number-p
+  :group 'tessera)
+
+(defcustom tessera-thread-outer-bottom-padding 0.2
+  "Height below the last visible member in normal line heights."
+  :type '(restricted-sexp
+          :tag "Normal line heights"
+          :match-alternatives (tessera--nonnegative-number-p))
+  :safe #'tessera--nonnegative-number-p
+  :group 'tessera)
+
+(defcustom tessera-thread-inner-top-padding 0.05
+  "Height above non-first thread members in normal line heights."
+  :type '(restricted-sexp
+          :tag "Normal line heights"
+          :match-alternatives (tessera--nonnegative-number-p))
+  :safe #'tessera--nonnegative-number-p
+  :group 'tessera)
+
+(defcustom tessera-thread-inner-bottom-padding 0.05
+  "Height below non-last visible members in normal line heights."
   :type '(restricted-sexp
           :tag "Normal line heights"
           :match-alternatives (tessera--nonnegative-number-p))
@@ -180,12 +212,27 @@ to every glyph."
 BACKEND identifies the registered adapter.  OBJECT is the backend's
 native object.  BUFFER and WINDOW identify where the entry is being
 rendered.  METADATA belongs to the adapter and remains opaque to the
-Tessera core."
+Tessera core.  THREAD is an optional `tessera-thread-context'
+provided only when the native backend enables threading."
   backend
   object
   buffer
   window
-  metadata)
+  metadata
+  thread)
+
+(cl-defstruct tessera-thread-context
+  "Describe one displayed member of a native thread.
+ID, PARENT, and ROOT are opaque backend identifiers.  PATH lists
+ancestor branches from the root, excluding the root itself; each
+boolean says whether that branch has a following sibling.
+FIRST identifies the displayed representative, LAST the last visible
+member.  TOTAL and UNREAD include folded members of the result set."
+  id parent root path first last total unread)
+
+(cl-defstruct tessera-thread-layout
+  "Compose ordinary entry layouts for thread HEAD and CHILD members."
+  head child)
 
 (cl-defstruct tessera-glyph
   "Describe the visual forms and semantic role of a glyph."
@@ -218,14 +265,19 @@ display width without showing it.  `(NAME :optional t)' omits the
 slot when its selector returns nil, including its width.
 GLYPH-SLOTS-ALIGN, when `left' or `right', packs visible prefix icons
 within the full area of all referenced slots.  Nil preserves each
-slot position.  Inline slot groups are unaffected."
+slot position.  Inline slot groups are unaffected.
+MAIN-LEADING-SEGMENTS and EXTRA-LEADING-SEGMENTS replace glyph slots
+on their respective lines with a right-aligned segment group.
+LEADING-WIDTH is a minimum column width, or a context function
+returning one, shared by both lines."
   main-glyph-slots
   main-left-segments
   main-right-segments
   extra-glyph-slots
   extra-left-segments
   extra-right-segments
-  glyph-slots-align)
+  glyph-slots-align
+  main-leading-segments extra-leading-segments leading-width)
 
 ;;;; Backend registration
 
@@ -236,7 +288,8 @@ slot position.  Inline slot groups are unaffected."
   context
   segments
   glyph-slots
-  layouts)
+  layouts
+  thread-layout)
 
 (defvar tessera--entry-backends (make-hash-table :test #'eq)
   "Registered Tessera entry backends.")
@@ -438,6 +491,15 @@ DESCRIPTION identifies the layout in errors."
   (unless (memq (tessera-entry-layout-glyph-slots-align layout)
                 '(nil left right))
     (error "%s has invalid glyph slot alignment" description))
+  (let ((width (tessera-entry-layout-leading-width layout)))
+    (unless (or (null width) (natnump width) (functionp width))
+      (error "%s has invalid leading width" description)))
+  (when (or (and (tessera-entry-layout-main-glyph-slots layout)
+                 (tessera-entry-layout-main-leading-segments layout))
+            (and (tessera-entry-layout-extra-glyph-slots layout)
+                 (tessera-entry-layout-extra-leading-segments
+                  layout)))
+    (error "%s mixes leading segments and glyph slots" description))
   (let ((slot-lists
          (list (tessera-entry-layout-main-glyph-slots layout)
                (tessera-entry-layout-extra-glyph-slots layout)))
@@ -445,7 +507,9 @@ DESCRIPTION identifies the layout in errors."
          (list (tessera-entry-layout-main-left-segments layout)
                (tessera-entry-layout-main-right-segments layout)
                (tessera-entry-layout-extra-left-segments layout)
-               (tessera-entry-layout-extra-right-segments layout))))
+               (tessera-entry-layout-extra-right-segments layout)
+               (tessera-entry-layout-main-leading-segments layout)
+               (tessera-entry-layout-extra-leading-segments layout))))
     (dolist (slots slot-lists)
       (tessera--ensure-list slots description)
       (dolist (slot slots)
@@ -495,14 +559,15 @@ DESCRIPTION identifies the layout in errors."
   (tessera--ensure-unique (mapcar #'car layouts) "Layouts"))
 
 (cl-defun tessera-entry-register
-    (backend &key context segments glyph-slots layouts)
+    (backend &key context segments glyph-slots layouts thread-layout)
   "Register or replace entry BACKEND.
 
 CONTEXT is a function of an object, buffer, and window which returns
 a `tessera-entry-context'.  SEGMENTS is an alist mapping segment IDs
 to provider functions.  GLYPH-SLOTS is a list of
 `tessera-glyph-slot' objects.  LAYOUTS is an alist mapping layout IDs
-to `tessera-entry-layout' objects.
+to `tessera-entry-layout' objects.  Optional THREAD-LAYOUT is a
+`tessera-thread-layout' used when CONTEXT supplies thread membership.
 
 The new definition is installed only after it has been validated.
 Return BACKEND."
@@ -518,13 +583,21 @@ Return BACKEND."
         (slot-names (mapcar #'tessera-glyph-slot-name glyph-slots)))
     (tessera--ensure-unique slot-names "Glyph slots")
     (tessera--validate-layouts layouts segment-names slot-names)
+    (when thread-layout
+      (unless (tessera-thread-layout-p thread-layout)
+        (error "Invalid thread layout for `%s'" backend))
+      (dolist (layout (list (tessera-thread-layout-head thread-layout)
+                            (tessera-thread-layout-child
+                             thread-layout)))
+        (tessera--validate-layout
+         layout segment-names slot-names "Thread layout")))
     (let ((definition
            (tessera--make-entry-backend
             :name backend
             :context context
             :segments segments
             :glyph-slots glyph-slots
-            :layouts layouts)))
+            :layouts layouts :thread-layout thread-layout)))
       (puthash backend definition tessera--entry-backends)))
   backend)
 
@@ -535,15 +608,61 @@ Return BACKEND."
   (or (gethash backend tessera--entry-backends)
       (error "Unknown Tessera entry backend `%s'" backend)))
 
-(defun tessera--find-entry-layout (definition)
-  "Return the selected layout from backend DEFINITION."
-  (let ((entry
-         (assq tessera-entry-layout
-               (tessera--entry-backend-layouts definition))))
-    (or (cdr entry)
-        (error "Backend `%s' has no layout `%s'"
-               (tessera--entry-backend-name definition)
-               tessera-entry-layout))))
+(defun tessera--find-entry-layout (definition &optional context)
+  "Return the layout for DEFINITION and optional CONTEXT."
+  (let ((thread (and context (tessera-entry-context-thread context)))
+        (layout (tessera--entry-backend-thread-layout definition)))
+    (if (and thread layout)
+        (if (tessera-thread-context-first thread)
+            (tessera-thread-layout-head layout)
+          (tessera-thread-layout-child layout))
+      (or (cdr (assq tessera-entry-layout
+                     (tessera--entry-backend-layouts definition)))
+          (error "Backend `%s' has no layout `%s'"
+                 (tessera--entry-backend-name definition)
+                 tessera-entry-layout)))))
+
+(defun tessera-thread-count (context)
+  "Return the unread/total count of the thread in CONTEXT."
+  (when-let* ((thread (tessera-entry-context-thread context)))
+    (propertize
+     (format "%d/%d" (tessera-thread-context-unread thread)
+             (tessera-thread-context-total thread))
+     'face (if (> (tessera-thread-context-unread thread) 0)
+               'tessera-glyph-accent-face 'tessera-glyph-muted-face)
+     'help-echo "Unread / total, including folded messages")))
+
+(defun tessera-thread-prefix (context)
+  "Return the tree prefix for the native member in CONTEXT.
+Align each branch with its parent text using the segment gap.
+Bound indentation by window width.  Spaces become layout overlays."
+  (when-let* ((thread (tessera-entry-context-thread context))
+              (path (tessera-thread-context-path thread)))
+    (let* ((window (tessera-entry-context-window context))
+           (limit (if (window-live-p window)
+                      (max 1 (min 4 (/ (window-body-width window)
+                                       16)))
+                    4))
+           (ascii (eq tessera-glyph-style 'ascii))
+           (omitted (> (length path) limit))
+           (path (if omitted (last path limit) path))
+           (branch (if (car (last path))
+                       (if ascii "+-" "├─")
+                     (if ascii "`-" "└─")))
+           (indent (+ (string-width branch)
+                      tessera-entry-segment-gap)))
+      (concat
+       (when omitted (propertize (if ascii ":" "…") 'face 'shadow))
+       (mapconcat
+        (lambda (continues)
+          (concat
+           (when continues
+             (propertize (if ascii "|" "│") 'face 'shadow))
+           (propertize
+            (make-string (if continues (1- indent) indent) ?\s)
+            'tessera--layout-space t)))
+        (butlast path) "")
+       (propertize branch 'face 'shadow)))))
 
 (defun tessera--make-entry-context
     (definition object window)
@@ -1105,7 +1224,8 @@ keep their individual positions.  Each selector runs once."
 
 (defun tessera--layout-has-extra-line-p (layout)
   "Return non-nil when LAYOUT defines an extra visual line."
-  (or (tessera-entry-layout-extra-glyph-slots layout)
+  (or (tessera-entry-layout-extra-leading-segments layout)
+      (tessera-entry-layout-extra-glyph-slots layout)
       (tessera-entry-layout-extra-left-segments layout)
       (tessera-entry-layout-extra-right-segments layout)))
 
@@ -1115,16 +1235,32 @@ keep their individual positions.  Each selector runs once."
 
 (defun tessera--render-line
     (slot-references left-references right-references
-                     definition context &optional glyph-align)
+                     definition context &optional glyph-align
+                     leading-references leading-width)
   "Render one visual line from SLOT-REFERENCES and segment references.
 LEFT-REFERENCES and RIGHT-REFERENCES name segments in DEFINITION.
 CONTEXT supplies their entry data and target window.
-GLYPH-ALIGN optionally packs prefix icons within their fixed area."
+GLYPH-ALIGN optionally packs prefix icons within their fixed area.
+LEADING-REFERENCES replace those icons with segments.
+LEADING-WIDTH supplies the shared minimum width of that area."
   (let* ((window (tessera-entry-context-window context))
          (slot-area (tessera--render-glyph-slots
                      slot-references definition context glyph-align))
-         (slots (car slot-area))
-         (slot-width (or (cdr slot-area) 0))
+         (leading (tessera--render-segments
+                   leading-references definition context))
+         (slot-area (if leading
+                        (cons (tessera--render-segment-group leading)
+                              (tessera--segments-width leading))
+                      slot-area))
+         (minimum (if (functionp leading-width)
+                      (funcall leading-width context)
+                    (or leading-width 0)))
+         (slot-width (max minimum (or (cdr slot-area) 0)))
+         (padding (tessera--space
+                   (- slot-width (or (cdr slot-area) 0))))
+         (slots (if (eq glyph-align 'left)
+                    (concat (car slot-area) padding)
+                  (concat padding (car slot-area))))
          (left
           (tessera--render-segments
            left-references definition context))
@@ -1137,7 +1273,7 @@ GLYPH-ALIGN optionally packs prefix icons within their fixed area."
     (let* ((left-string (tessera--render-segment-group left))
            (right-string (tessera--render-segment-group right))
            (slot-gap
-            (if (and slot-area (> (length left-string) 0))
+            (if (and (> slot-width 0) (> (length left-string) 0))
                 (tessera--space tessera-entry-segment-gap)
               ""))
            (right-offset
@@ -1164,25 +1300,24 @@ GLYPH-ALIGN optionally packs prefix icons within their fixed area."
    (tessera-entry-layout-main-left-segments layout)
    (tessera-entry-layout-main-right-segments layout)
    definition context
-   (tessera-entry-layout-glyph-slots-align layout)))
+   (tessera-entry-layout-glyph-slots-align layout)
+   (tessera-entry-layout-main-leading-segments layout)
+   (tessera-entry-layout-leading-width layout)))
 
 (defun tessera--render-two-line (layout definition context)
   "Render two-line LAYOUT using DEFINITION and CONTEXT."
   (mapconcat
    #'identity
    (list
-    (tessera--render-line
-     (tessera-entry-layout-main-glyph-slots layout)
-     (tessera-entry-layout-main-left-segments layout)
-     (tessera-entry-layout-main-right-segments layout)
-     definition context
-     (tessera-entry-layout-glyph-slots-align layout))
+    (tessera--render-single-line layout definition context)
     (tessera--render-line
      (tessera-entry-layout-extra-glyph-slots layout)
      (tessera-entry-layout-extra-left-segments layout)
      (tessera-entry-layout-extra-right-segments layout)
      definition context
-     (tessera-entry-layout-glyph-slots-align layout)))
+     (tessera-entry-layout-glyph-slots-align layout)
+     (tessera-entry-layout-extra-leading-segments layout)
+     (tessera-entry-layout-leading-width layout)))
    (tessera--visual-line-break)))
 
 (defun tessera--render-entry-lines (layout definition context)
@@ -1396,12 +1531,27 @@ it does not participate in width allocation."
   (when (and window (not (window-live-p window)))
     (error "Cannot render an entry for a dead window"))
   (let* ((definition (tessera--find-entry-backend backend))
-         (layout (tessera--find-entry-layout definition))
          (target-window (or window
                             (get-buffer-window (current-buffer))))
          (context
           (tessera--make-entry-context
-           definition object target-window)))
+           definition object target-window))
+         (layout (tessera--find-entry-layout definition context))
+         (thread (and (tessera--entry-backend-thread-layout
+                       definition)
+                      (tessera-entry-context-thread context)))
+         (tessera-entry-top-padding
+          (if thread
+              (if (tessera-thread-context-first thread)
+                  tessera-thread-outer-top-padding
+                tessera-thread-inner-top-padding)
+            tessera-entry-top-padding))
+         (tessera-entry-bottom-padding
+          (if thread
+              (if (tessera-thread-context-last thread)
+                  tessera-thread-outer-bottom-padding
+                tessera-thread-inner-bottom-padding)
+            tessera-entry-bottom-padding)))
     (tessera--entry-content
      (tessera--render-entry-lines layout definition context)
      prefix)))

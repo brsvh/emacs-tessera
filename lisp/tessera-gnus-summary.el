@@ -31,6 +31,7 @@
 
 (require 'tessera)
 (require 'tessera-gnus-data)
+(require 'tessera-gnus-thread)
 (require 'gnus-sum)
 (require 'gnus-spec)
 (require 'subr-x)
@@ -161,7 +162,8 @@
   (make-tessera-entry-context
    :backend 'gnus-summary :object header
    :buffer buffer :window window
-   :metadata tessera-gnus-summary--metadata))
+   :metadata tessera-gnus-summary--metadata
+   :thread (plist-get tessera-gnus-summary--metadata :thread)))
 
 (defun tessera-gnus-summary--state (slot context)
   "Return the native state of SLOT in CONTEXT."
@@ -327,6 +329,34 @@
      (encryption :encryption "E" "🔒" "nf-md-lock_outline"
                  "Encrypted content"))))
 
+(defun tessera-gnus-summary--thread-layout ()
+  "Return the automatically selected native thread layout."
+  (let* ((slots '(score availability secondary status))
+         (left '((thread-tree :grow t :min-width 0 :truncate head
+                              :priority -2 :optional t)
+                 (author :grow t :min-width 4 :truncate tail)
+                 (:slots (attachment :optional t)
+                         (signature :optional t)
+                         (encryption :optional t))))
+         (right '((labels :grow t :max-width 24 :min-width 0
+                          :truncate tail :priority -1 :optional t)
+                  date))
+         (width #'tessera-gnus-thread-leading-width))
+    (make-tessera-thread-layout
+     :head
+     (make-tessera-entry-layout
+      :glyph-slots-align 'right :leading-width width
+      :main-leading-segments '(thread-count)
+      :main-left-segments
+      '((subject :grow t :min-width 4 :truncate tail))
+      :extra-glyph-slots slots :extra-left-segments left
+      :extra-right-segments right)
+     :child
+     (make-tessera-entry-layout
+      :glyph-slots-align 'right :leading-width width
+      :main-glyph-slots slots :main-left-segments left
+      :main-right-segments right))))
+
 (defun tessera-gnus-summary--register ()
   "Register the Gnus summary entry backend."
   (tessera-entry-register
@@ -335,11 +365,14 @@
    '((subject . tessera-gnus-summary--subject)
      (author . tessera-gnus-summary--author)
      (date . tessera-gnus-summary--date)
-     (labels . tessera-gnus-summary--labels))
+     (labels . tessera-gnus-summary--labels)
+     (thread-tree . tessera-thread-prefix)
+     (thread-count . tessera-thread-count))
    :glyph-slots
    (append (mapcar #'tessera-gnus-summary--slot
                    tessera-gnus-summary--states)
            (tessera-gnus-summary--content-slots))
+   :thread-layout (tessera-gnus-summary--thread-layout)
    :layouts
    (list
     (cons 'single-line
@@ -376,7 +409,9 @@
 
 (defun tessera-gnus-summary--render (header metadata)
   "Render HEADER with its native METADATA."
-  (let* ((tessera-gnus-summary--metadata metadata)
+  (let* ((metadata (plist-put (copy-sequence metadata) :thread
+                              (tessera-gnus-thread-context header)))
+         (tessera-gnus-summary--metadata metadata)
          (prefix (propertize (copy-sequence
                               (plist-get metadata :marks))
                              'display ""))
@@ -417,8 +452,7 @@ mark discovery, in-place updates, and visual-line navigation."
                         gnus-tmp-downloaded gnus-tmp-score-char)
          :author
          (gnus-summary-from-or-to-or-newsgroups
-          header gnus-tmp-from)
-         )))
+          header gnus-tmp-from))))
 
 ;; Gnus user format names are part of its public format protocol.
 (defalias 'gnus-user-format-function-tessera
@@ -429,6 +463,11 @@ mark discovery, in-place updates, and visual-line navigation."
   (list
    (when-let* ((window (get-buffer-window (current-buffer))))
      (window-body-width window))
+   gnus-show-threads
+   tessera-thread-outer-top-padding
+   tessera-thread-outer-bottom-padding
+   tessera-thread-inner-top-padding
+   tessera-thread-inner-bottom-padding
    tessera-entry-layout tessera-glyph-style tessera-glyph-color
    tessera-entry-safe-gap tessera-entry-left-padding
    tessera-entry-right-padding tessera-entry-top-padding
@@ -463,6 +502,10 @@ Gnus applies its native row face before running the update hook."
 (defun tessera-gnus-summary--sync-buffer (&optional force)
   "Synchronize all entries, preserving point within its article.
 FORCE also redraws entries with unchanged marks."
+  (let ((width tessera-gnus-thread--width))
+    (tessera-gnus-thread-build)
+    (when (/= width tessera-gnus-thread--width)
+      (setq force t)))
   (let ((origin (copy-marker (line-beginning-position)))
         (offset (- (point) (line-beginning-position)))
         (tessera-gnus-summary--updating t))
@@ -490,7 +533,10 @@ FORCE also redraws entries whose native marks have not changed."
              (inhibit-read-only t)
              (inhibit-modification-hooks t))
         (when (or force
-                  (not (equal marks (plist-get metadata :marks))))
+                  (not (equal marks (plist-get metadata :marks)))
+                  (not (equal (plist-get metadata :thread)
+                              (tessera-gnus-thread-context
+                               (car entry)))))
           (tessera-entry-clear-current)
           (tessera-entry-clear-layout start (1+ end))
           (let* ((updated (plist-put (copy-sequence metadata)
@@ -508,6 +554,11 @@ FORCE also redraws entries whose native marks have not changed."
               (set-text-properties
                (+ start offset) (+ start offset 1)
                (text-properties-at offset rendered)))
+            ;; Gnus stores integer positions, not markers.  Keep later
+            ;; articles addressable when a visual layout changes size.
+            (when (/= end (point))
+              (gnus-data-update-list
+               (cdr (gnus-data-find-list number)) (- (point) end)))
             (setq end (point))
             (add-text-properties
              start (1+ end)
@@ -552,6 +603,7 @@ FORCE also redraws entries whose native marks have not changed."
   "Synchronize the article just updated by Gnus."
   (when (and tessera-gnus-summary--active
              (not tessera-gnus-summary--updating))
+    (setq tessera-gnus-summary--dirty t)
     (let ((tessera-gnus-summary--updating t))
       (save-excursion (tessera-gnus-summary--sync-line)))))
 
@@ -655,7 +707,9 @@ FORCE also redraws entries whose native marks have not changed."
           tessera-gnus-summary--appearance nil
           tessera-gnus-summary--folds nil
           tessera-gnus-summary--dirty nil
-          tessera-gnus-data--content-cache nil)
+          tessera-gnus-data--content-cache nil
+          tessera-gnus-thread--contexts nil
+          tessera-gnus-thread--width 8)
     (tessera-gnus-summary--refresh)))
 
 (provide 'tessera-gnus-summary)

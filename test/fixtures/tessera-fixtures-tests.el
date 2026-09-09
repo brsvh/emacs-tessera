@@ -78,5 +78,88 @@
           :native-mime 'passed :labels 'passed
           :independent-hover 'passed :regeneration 'passed)))
 
+(defun tessera-fixtures-test-gnus-threads ()
+  "Check native marks, folds, thread selection, and article reading.
+Leave the expanded threaded summary visible for inspection."
+  (interactive)
+  (tessera-gnus-mode 1)
+  (tessera-fixtures-open-gnus-marks)
+  (with-current-buffer "*Summary nnmaildir+fixtures:level-1-critical*"
+    (switch-to-buffer (current-buffer))
+    (delete-other-windows)
+    (gnus-summary-toggle-threads 1)
+    (tessera-gnus-summary--post-command)
+    (let* ((summary (current-buffer))
+           (gnus-summary-buffer summary)
+           (root (cl-loop for node being the hash-values
+                          of tessera-gnus-thread--contexts
+                          when (and (tessera-thread-context-first
+                                     node)
+                                    (> (tessera-thread-context-total
+                                        node) 3))
+                          return (tessera-thread-context-id node)))
+           (child (car (gnus-summary-article-children root)))
+           (total (tessera-thread-context-total
+                   (gethash root tessera-gnus-thread--contexts))))
+      (gnus-summary-goto-subject child)
+      (let ((mark (char-after)))
+        (unwind-protect
+            (progn
+              (gnus-summary-mark-article-as-unread gnus-unread-mark)
+              (tessera-gnus-summary--post-command)
+              (let ((before (tessera-thread-context-unread
+                             (gethash
+                              root tessera-gnus-thread--contexts))))
+                (gnus-summary-mark-article-as-read gnus-read-mark)
+                (tessera-gnus-summary--post-command)
+                (cl-assert
+                 (= (1- before)
+                    (tessera-thread-context-unread
+                     (gethash root tessera-gnus-thread--contexts))))))
+          (if (gnus-read-mark-p mark)
+              (gnus-summary-mark-article-as-read mark)
+            (gnus-summary-mark-article-as-unread mark))
+          (tessera-gnus-summary--post-command)))
+      (gnus-summary-goto-subject root)
+      (gnus-summary-hide-thread)
+      (tessera-gnus-summary--post-command)
+      (let ((node (gethash root tessera-gnus-thread--contexts)))
+        (cl-assert (tessera-thread-context-last node))
+        (cl-assert (= total (tessera-thread-context-total node))))
+      (dolist (overlay (overlays-in (point-min) (point-max)))
+        (when (overlay-get overlay 'tessera-entry-overlay)
+          (cl-assert (not (invisible-p (overlay-start overlay))))))
+      (gnus-summary-show-all-threads)
+      (tessera-gnus-summary--post-command)
+      (gnus-summary-toggle-threads -1)
+      (tessera-gnus-summary--post-command)
+      (cl-assert (= 0 (hash-table-count
+                       tessera-gnus-thread--contexts)))
+      (gnus-summary-goto-subject child)
+      (cl-assert (cl-loop for p from (line-beginning-position)
+                          below (line-end-position)
+                          thereis
+                          (equal (get-text-property p 'display)
+                                 "\n")))
+      (gnus-summary-toggle-threads 1)
+      (tessera-gnus-summary--post-command)
+      (gnus-summary-goto-subject child)
+      (cl-assert (not (cl-loop for p from (line-beginning-position)
+                               below (line-end-position)
+                               thereis
+                               (equal (get-text-property p 'display)
+                                      "\n"))))
+      (call-interactively (key-binding (kbd "RET")))
+      (cl-assert (= gnus-current-article child))
+      (switch-to-buffer summary)
+      (delete-other-windows)
+      (gnus-summary-goto-subject root)
+      (tessera-gnus-summary--post-command)
+      (recenter 0)
+      (redisplay t)
+      (list :root root :child child :total total
+            :mark-count-update 'passed :folding 'passed
+            :native-thread-toggle 'passed :native-ret 'passed))))
+
 (provide 'tessera-fixtures-tests)
 ;;; tessera-fixtures-tests.el ends here

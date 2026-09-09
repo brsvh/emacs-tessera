@@ -787,6 +787,33 @@ Security payloads are intentionally invalid fixture data."
       (tessera-fixtures--date-header 11)
       (tessera-fixtures--person-address "Samira Diallo")
       (tessera-fixtures--lipsum state 2)))
+    ;; Branches, deep replies, and an absent root exercise thread UI.
+    (cl-loop
+     for serial from 2103
+     for (name parents subject flags) in
+     '(("thread-sibling" ("thread-root")
+        "Re: Planning the package release" "")
+       ("thread-sibling-child" ("thread-root" "thread-sibling")
+        "Re: Planning the package release" "S")
+       ("thread-deep"
+        ("thread-root" "thread-child" "thread-grandchild")
+        "Re: Planning the package release" "S")
+       ("thread-orphan" ("missing-root")
+        "Replies with an absent root" "")
+       ("thread-orphan-child" ("missing-root" "thread-orphan")
+        "Re: Replies with an absent root" "S"))
+     for ids = (mapcar (lambda (parent)
+                         (format "<%s.gnus@fixtures.tessera>" parent))
+                       parents)
+     do
+     (tessera-fixtures--write-file
+      (tessera-fixtures--mail-file
+       maildir (format "%d.%s.fixture" serial name) flags)
+      (tessera-fixtures--gnus-message
+       name subject (string-join ids " ") (car (last ids))
+       "Tue, 1 Apr 2025 10:00:00 +0000"
+       (tessera-fixtures--person-address "Priya Nair")
+       "Thread layout fixture: branches and missing ancestors.\n")))
     (let ((serial 0)
           (date-index 11))
       (dolist (scenario tessera-fixtures--gnus-mark-scenarios)
