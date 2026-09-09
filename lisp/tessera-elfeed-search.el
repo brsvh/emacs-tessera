@@ -276,7 +276,7 @@ The value has the same shape as
                       (elfeed-entry-tags
                        (tessera-elfeed-search--entry context))))))
     (concat
-     "("
+     (propertize "(" 'face 'default 'mouse-face 'default)
      (mapconcat
       (lambda (tag)
         (propertize (symbol-name tag)
@@ -285,8 +285,8 @@ The value has the same shape as
                     'elfeed-tag tag
                     'follow-link [elfeed-tag]))
       tags
-      ",")
-     ")")))
+      (propertize "," 'face 'default 'mouse-face 'default))
+     (propertize ")" 'face 'default 'mouse-face 'default))))
 
 (defun tessera-elfeed-search--date (context)
   "Return the interactive date segment for CONTEXT."

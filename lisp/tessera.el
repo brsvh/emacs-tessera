@@ -918,10 +918,41 @@ Return the number of columns still overflowing."
               (tessera--rendered-segment-string segment)
               (tessera--rendered-segment-target-width segment)
               (tessera--rendered-segment-truncate segment)))))
-       (tessera--add-default-property
-        text 'mouse-face 'tessera-entry-hover-face)))
+       (tessera--prepare-hover text)))
    (tessera--visible-segments segments)
    (tessera--space tessera-entry-segment-gap)))
+
+(defun tessera--prepare-hover (text)
+  "Give each mouse-face span in TEXT a private face value.
+Emacs joins adjacent mouse-face regions by identity.  Fresh values
+keep elements separate after layout spaces move into overlays.
+Unstyled spans, including ellipses, inherit neighboring hover faces
+or use `tessera-entry-hover-face'.  Preserve neutral separators."
+  (let ((position 0)
+        (end (length text))
+        previous faces)
+    (while (< position end)
+      (let* ((next (next-single-property-change
+                    position 'mouse-face text end))
+             (neighbor (if (and previous (not (eq previous 'default)))
+                           previous
+                         (and (< next end)
+                              (get-text-property
+                               next 'mouse-face text))))
+             (face (or (get-text-property position 'mouse-face text)
+                       (and (not (eq neighbor 'default)) neighbor)
+                       'tessera-entry-hover-face))
+             (private
+              (if (eq face 'default)
+                  face
+                (or (cdr (assq face faces))
+                    (let ((copy (if (consp face) (copy-tree face)
+                                  (list face))))
+                      (push (cons face copy) faces)
+                      copy)))))
+        (put-text-property position next 'mouse-face private text)
+        (setq previous face position next))))
+  text)
 
 ;;;; Glyph rendering
 
@@ -1078,9 +1109,7 @@ glyph variants."
   (let ((text (copy-sequence (tessera--glyph-text glyph context))))
     (tessera--apply-glyph-color text glyph context)
     (tessera--apply-glyph-interaction text properties glyph)
-    (tessera--add-default-property
-     text 'mouse-face 'tessera-entry-hover-face)
-    text))
+    (tessera--prepare-hover text)))
 
 (defun tessera--glyph-slot-padding
     (slot content-width &optional target-width)

@@ -64,11 +64,11 @@
                        'default)
                (setq found t)
                (cl-assert
-                (eq (get-text-property (- (point) 2) 'mouse-face)
-                    'tessera-entry-hover-face))
+                (equal (get-text-property (- (point) 2) 'mouse-face)
+                       '(tessera-entry-hover-face)))
                (cl-assert
-                (eq (get-text-property (point) 'mouse-face)
-                    'tessera-entry-hover-face))
+                (equal (get-text-property (point) 'mouse-face)
+                       '(tessera-entry-hover-face)))
                (cl-assert
                 (eq (car (get-text-property
                           (1- (point)) 'tessera-gnus-summary-face))
