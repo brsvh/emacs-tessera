@@ -111,14 +111,15 @@ The value has the same shape as
   :group 'tessera-elfeed)
 
 (defface tessera-elfeed-search-feed-face
-  '((t :inherit elfeed-search-feed-face))
-  "Face used for feed titles in Elfeed search buffers."
+  '((t :inherit elfeed-search-feed-face
+       :weight normal :slant italic :extend nil))
+  "Face used for feed titles of read entries."
   :group 'tessera-elfeed)
 
-(defface tessera-elfeed-search-url-face
-  '((t :inherit (elfeed-search-date-face link)
-       :slant italic))
-  "Face used for entry URLs in Elfeed search buffers."
+(defface tessera-elfeed-search-unread-feed-face
+  '((t :inherit (bold tessera-elfeed-search-feed-face)
+       :extend nil))
+  "Face used for feed titles of unread entries."
   :group 'tessera-elfeed)
 
 (defface tessera-elfeed-search-tag-face
@@ -127,8 +128,29 @@ The value has the same shape as
   :group 'tessera-elfeed)
 
 (defface tessera-elfeed-search-date-face
-  '((t :inherit elfeed-search-date-face))
-  "Face used for entry dates in Elfeed search buffers."
+  '((t :inherit (elfeed-search-title-face elfeed-search-date-face)
+       :weight normal :slant normal :extend nil))
+  "Face used for read dates, with the native title color."
+  :group 'tessera-elfeed)
+
+(defface tessera-elfeed-search-unread-date-face
+  '((t :inherit (bold elfeed-search-unread-title-face
+                      tessera-elfeed-search-date-face)
+       :slant normal :extend nil))
+  "Face used for unread dates, with the native unread title color."
+  :group 'tessera-elfeed)
+
+(defface tessera-elfeed-search-url-face
+  '((t :inherit (tessera-elfeed-search-date-face link)
+       :slant italic :underline nil :extend nil))
+  "Face used for read URLs, with the read date color."
+  :group 'tessera-elfeed)
+
+(defface tessera-elfeed-search-unread-url-face
+  '((t :inherit (tessera-elfeed-search-unread-date-face
+                 tessera-elfeed-search-url-face)
+       :slant italic :underline nil :extend nil))
+  "Face used for unread URLs, with unread date color and weight."
   :group 'tessera-elfeed)
 
 (defvar-local tessera-elfeed-search--active nil
@@ -214,7 +236,11 @@ The value has the same shape as
               (feed (elfeed-entry-feed entry))
               (title (elfeed-meta--title feed)))
     (propertize title
-                'face 'tessera-elfeed-search-feed-face
+                'face
+                (if (eq (tessera-elfeed-search--select-status context)
+                        'unread)
+                    'tessera-elfeed-search-unread-feed-face
+                  'tessera-elfeed-search-feed-face)
                 'mouse-face 'highlight
                 'follow-link [elfeed-feed])))
 
@@ -224,7 +250,11 @@ The value has the same shape as
                (elfeed-entry-link
                 (tessera-elfeed-search--entry context))))
     (propertize url
-                'face 'tessera-elfeed-search-url-face
+                'face
+                (if (eq (tessera-elfeed-search--select-status context)
+                        'unread)
+                    'tessera-elfeed-search-unread-url-face
+                  'tessera-elfeed-search-url-face)
                 'mouse-face 'highlight
                 'follow-link [elfeed-entry])))
 
@@ -278,7 +308,10 @@ The value has the same shape as
    (elfeed-search-format-date
     (elfeed-entry-date
      (tessera-elfeed-search--entry context)))
-   'face 'tessera-elfeed-search-date-face
+   'face (if (eq (tessera-elfeed-search--select-status context)
+                 'unread)
+             'tessera-elfeed-search-unread-date-face
+           'tessera-elfeed-search-date-face)
    'mouse-face 'highlight
    'follow-link [elfeed-date]))
 
