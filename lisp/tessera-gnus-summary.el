@@ -33,6 +33,7 @@
 (require 'tessera-gnus-data)
 (require 'tessera-gnus-thread)
 (require 'gnus-sum)
+(require 'gnus-art)
 (require 'gnus-spec)
 (require 'subr-x)
 (require 'seq)
@@ -49,28 +50,133 @@
   :prefix "tessera-gnus-summary-")
 
 (defface tessera-gnus-summary-subject-face
-  '((t :inherit gnus-summary-normal-read :extend nil))
-  "Face for read article subjects."
+  '((t :inherit gnus-header-subject :extend nil))
+  "Base face for article subjects, below the native state face."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-unread-subject-face
-  '((t :inherit gnus-summary-normal-unread :extend nil))
+  '((t :inherit (bold tessera-gnus-summary-subject-face)
+       :extend nil))
   "Face for unread article subjects."
   :group 'tessera-gnus-summary)
 
+(defface tessera-gnus-summary-thread-subject-face
+  '((t :inherit (bold gnus-summary-normal-read) :extend nil))
+  "Face for subjects of threads with no unread articles."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-unread-subject-face
+  '((t :inherit (bold gnus-summary-normal-unread) :extend nil))
+  "Face for subjects of threads containing unread articles."
+  :group 'tessera-gnus-summary)
+
 (defface tessera-gnus-summary-author-face
-  '((t :inherit font-lock-variable-name-face))
+  '((t :inherit (italic gnus-header-from)
+       :weight normal :extend nil))
   "Face for article authors."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-date-face
-  '((t :inherit font-lock-constant-face))
-  "Face for article dates."
+  '((t :inherit gnus-summary-normal-read
+       :weight normal :slant normal :extend nil))
+  "Face for read article dates."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-unread-date-face
+  '((t :inherit (bold gnus-summary-normal-unread)
+       :slant normal :extend nil))
+  "Face for unread article dates."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-label-face
-  '((t :inherit font-lock-keyword-face))
+  '((t :inherit gnus-header-content
+       :weight normal :slant normal :extend nil))
   "Face for article labels from every supported source."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-status-face
+  '((t :inherit (gnus-summary-normal-unread default) :extend nil))
+  "Article status icons."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-muted-face
+  '((t :inherit (gnus-summary-normal-read shadow) :extend nil))
+  "Read and inactive article status icons."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-important-face
+  '((t :inherit (gnus-summary-normal-ticked bold) :extend nil))
+  "Ticked and processing status icons."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-positive-face
+  '((t :inherit success :extend nil))
+  "Completed action and availability icons."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-informational-face
+  '((t :inherit gnus-header-content :extend nil))
+  "Informational article status icons."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-warning-face
+  '((t :inherit warning :extend nil))
+  "Article states requiring attention."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-error-face
+  '((t :inherit error :extend nil))
+  "Failed actions and content processing errors."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-spam-face
+  '((t :inherit error :extend nil))
+  "Spam article state, supplementing the native summary face."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-expirable-face
+  '((t :inherit warning :extend nil))
+  "Expirable article state, supplementing the native summary face."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-high-score-face
+  '((t :inherit (gnus-summary-high-unread bold) :extend nil))
+  "Scores above the native threshold."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-low-score-face
+  '((t :inherit (gnus-summary-low-read shadow) :extend nil))
+  "Scores below the native threshold."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-attachment-face
+  '((t :inherit shadow :extend nil))
+  "Attachment presence, without implying trust."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-signature-face
+  '((t :inherit gnus-header-content :extend nil))
+  "Signature presence, without implying verification."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-encryption-face
+  '((t :inherit gnus-header-content :extend nil))
+  "Encrypted content, without implying decryption."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-tree-face
+  '((t :inherit shadow :extend nil))
+  "Native thread branches."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-count-face
+  '((t :inherit (gnus-summary-normal-read shadow) :extend nil))
+  "Thread counts with no unread articles."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-unread-count-face
+  '((t :inherit (gnus-summary-normal-unread bold) :extend nil))
+  "Thread counts containing unread articles."
   :group 'tessera-gnus-summary)
 
 (defconst tessera-gnus-summary--states
@@ -180,6 +286,79 @@
           ((eq mark gnus-no-mark) nil)
           (t 'unknown))))
 
+(defun tessera-gnus-summary--unread-p (context)
+  "Return non-nil if CONTEXT's article has a native unread mark."
+  (not (gnus-read-mark-p
+        (aref (plist-get (tessera-entry-context-metadata context)
+                         :marks) 0))))
+
+(defun tessera-gnus-summary--glyph-face (slot variant semantic)
+  "Return the Gnus face for SLOT, VARIANT, and SEMANTIC role."
+  (cond
+   ((eq slot 'score)
+    (if (eq variant 'high) 'tessera-gnus-summary-high-score-face
+      'tessera-gnus-summary-low-score-face))
+   ((eq variant 'dormant) 'tessera-gnus-summary-important-face)
+   ((eq variant 'spam) 'tessera-gnus-summary-spam-face)
+   ((eq variant 'expirable) 'tessera-gnus-summary-expirable-face)
+   (t
+    (alist-get
+     semantic
+     '((accent . tessera-gnus-summary-status-face)
+       (attention . tessera-gnus-summary-important-face)
+       (muted . tessera-gnus-summary-muted-face)
+       (positive . tessera-gnus-summary-positive-face)
+       (informational . tessera-gnus-summary-informational-face)
+       (warning . tessera-gnus-summary-warning-face)
+       (negative . tessera-gnus-summary-error-face))))))
+
+(defun tessera-gnus-summary--native-face (header marks)
+  "Return Gnus's configured summary face for HEADER and MARKS.
+Use the native rule evaluator with the same scoring and download
+context as `gnus-summary-highlight-line'."
+  (let* ((article (mail-header-number header))
+         (face
+          (cl-progv
+              '(score default default-high default-low mark uncached)
+              (list (or (cdr (assq article gnus-newsgroup-scored))
+                        gnus-summary-default-score 0)
+                    gnus-summary-default-score
+                    gnus-summary-default-high-score
+                    gnus-summary-default-low-score
+                    (aref marks 0)
+                    (and gnus-summary-use-undownloaded-faces
+                         (memq article gnus-newsgroup-undownloaded)
+                         (not (memq article gnus-newsgroup-cached))))
+            (funcall (gnus-summary-highlight-line-0)))))
+    (if (and (symbolp face) (boundp face)) (symbol-value face) face)))
+
+(defun tessera-gnus-summary--state-face (context base)
+  "Combine CONTEXT's article state with the element BASE face.
+Spam and expirable faces take precedence over native attributes."
+  (let ((native (plist-get (tessera-entry-context-metadata context)
+                           :native-face))
+        (state (pcase (tessera-gnus-summary--state 'status context)
+                 ('spam 'tessera-gnus-summary-spam-face)
+                 ('expirable 'tessera-gnus-summary-expirable-face))))
+    (append '((:extend nil))
+            (and state (list state))
+            (and native (list native)) (list base))))
+
+(defun tessera-gnus-summary--thread-tree (context)
+  "Return CONTEXT's thread branches using the Gnus tree face."
+  (when-let* ((text (tessera-thread-prefix context)))
+    (propertize text 'face 'tessera-gnus-summary-thread-tree-face)))
+
+(defun tessera-gnus-summary--thread-count (context)
+  "Return CONTEXT's thread count using the Gnus count faces."
+  (when-let* ((text (tessera-thread-count context)))
+    (propertize
+     text 'face
+     (if (> (tessera-thread-context-unread
+             (tessera-entry-context-thread context)) 0)
+         'tessera-gnus-summary-thread-unread-count-face
+       'tessera-gnus-summary-thread-count-face))))
+
 (defun tessera-gnus-summary--slot (spec)
   "Build a native status slot from SPEC."
   (make-tessera-glyph-slot
@@ -202,6 +381,8 @@
                              (concat "nf-md-"
                                      (string-replace "-" "_" icon)))
                        :semantic semantic)
+               :face (tessera-gnus-summary--glyph-face
+                      (car spec) id semantic)
                :help-echo help)))
      (cddr spec))
     (list
@@ -211,26 +392,42 @@
             :nerd-icons '(:function nerd-icons-mdicon
                                     :name "nf-md-help_circle")
             :semantic 'warning)
+           :face 'tessera-gnus-summary-warning-face
            :help-echo "Unrecognized Gnus mark")))))
 
 (defun tessera-gnus-summary--subject (context)
   "Return the article subject in CONTEXT."
   (let ((subject (mail-header-subject
-                  (tessera-entry-context-object context))))
+                  (tessera-entry-context-object context)))
+        (thread (tessera-entry-context-thread context)))
     (propertize
      (if (string-empty-p subject) "(no subject)" subject)
      'face
-     (if (memq (tessera-gnus-summary--state 'status context)
-               '(unread ticked dormant))
-         'tessera-gnus-summary-unread-subject-face
-       'tessera-gnus-summary-subject-face)
+     (if thread
+         (if (> (tessera-thread-context-unread thread) 0)
+             'tessera-gnus-summary-thread-unread-subject-face
+           'tessera-gnus-summary-thread-subject-face)
+       (tessera-gnus-summary--state-face
+        context
+        (if (eq (tessera-gnus-summary--state 'status context) 'unread)
+            'tessera-gnus-summary-unread-subject-face
+          'tessera-gnus-summary-subject-face)))
      'mouse-face 'highlight 'help-echo subject)))
 
 (defun tessera-gnus-summary--author (context)
   "Return the native author representation in CONTEXT."
   (propertize
    (plist-get (tessera-entry-context-metadata context) :author)
-   'face 'tessera-gnus-summary-author-face
+   'face
+   ;; Keep italics and unread emphasis above native attributes.
+   (cons 'italic
+         (if (tessera-entry-context-thread context)
+             (append
+              (when (tessera-gnus-summary--unread-p context)
+                '(bold))
+              (tessera-gnus-summary--state-face
+               context 'tessera-gnus-summary-author-face))
+           '(tessera-gnus-summary-author-face)))
    'help-echo (mail-header-from
                (tessera-entry-context-object context))))
 
@@ -241,7 +438,10 @@
     (propertize
      (condition-case nil (gnus-user-date date)
        (error date))
-     'face 'tessera-gnus-summary-date-face 'help-echo date)))
+     'face (if (tessera-gnus-summary--unread-p context)
+               'tessera-gnus-summary-unread-date-face
+             'tessera-gnus-summary-date-face)
+     'help-echo date)))
 
 (defun tessera-gnus-summary--labels (context)
   "Return the labels in CONTEXT as one optional text segment."
@@ -302,6 +502,8 @@
                     :nerd-icons (list :function 'nerd-icons-mdicon
                                       :name icon)
                     :semantic 'informational))
+                  (face (intern (format "tessera-gnus-summary-%s-face"
+                                        name)))
                   (help (apply-partially
                          #'tessera-gnus-summary--content-help
                          key label)))
@@ -311,10 +513,11 @@
                    #'tessera-gnus-summary--content-state key)
         :glyphs
         (append
-         (list (list 'present :glyph glyph :help-echo help))
+         (list (list 'present :glyph glyph :face face
+                     :help-echo help))
          (unless (eq key :attachment)
            (list
-            (list 'processed :glyph glyph :help-echo help)
+            (list 'processed :glyph glyph :face face :help-echo help)
             (list 'error
                   :glyph
                   (make-tessera-glyph
@@ -323,6 +526,7 @@
                    '(:function nerd-icons-mdicon
                                :name "nf-md-alert_circle_outline")
                    :semantic 'negative)
+                  :face 'tessera-gnus-summary-error-face
                   :help-echo help)))))))
    '((attachment :attachment "a" "📎" "nf-md-paperclip" "Attachment")
      (signature :signature "S" "✍" "nf-md-file_sign" "Signature")
@@ -366,8 +570,8 @@
      (author . tessera-gnus-summary--author)
      (date . tessera-gnus-summary--date)
      (labels . tessera-gnus-summary--labels)
-     (thread-tree . tessera-thread-prefix)
-     (thread-count . tessera-thread-count))
+     (thread-tree . tessera-gnus-summary--thread-tree)
+     (thread-count . tessera-gnus-summary--thread-count))
    :glyph-slots
    (append (mapcar #'tessera-gnus-summary--slot
                    tessera-gnus-summary--states)
@@ -411,6 +615,9 @@
   "Render HEADER with its native METADATA."
   (let* ((metadata (plist-put (copy-sequence metadata) :thread
                               (tessera-gnus-thread-context header)))
+         (metadata (plist-put metadata :native-face
+                              (tessera-gnus-summary--native-face
+                               header (plist-get metadata :marks))))
          (tessera-gnus-summary--metadata metadata)
          (prefix (propertize (copy-sequence
                               (plist-get metadata :marks))
@@ -463,7 +670,10 @@ mark discovery, in-place updates, and visual-line navigation."
   (list
    (when-let* ((window (get-buffer-window (current-buffer))))
      (window-body-width window))
-   gnus-show-threads
+   gnus-show-threads custom-enabled-themes
+   gnus-summary-highlight gnus-summary-default-score
+   gnus-summary-default-high-score gnus-summary-default-low-score
+   gnus-summary-use-undownloaded-faces
    tessera-thread-outer-top-padding
    tessera-thread-outer-bottom-padding
    tessera-thread-inner-top-padding
@@ -534,6 +744,9 @@ FORCE also redraws entries whose native marks have not changed."
              (inhibit-modification-hooks t))
         (when (or force
                   (not (equal marks (plist-get metadata :marks)))
+                  (not (equal (plist-get metadata :native-face)
+                              (tessera-gnus-summary--native-face
+                               (car entry) marks)))
                   (not (equal (plist-get metadata :thread)
                               (tessera-gnus-thread-context
                                (car entry)))))

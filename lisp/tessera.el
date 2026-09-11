@@ -303,7 +303,7 @@ returning one, shared by both lines."
   "Properties accepted in a layout glyph slot reference.")
 
 (defvar tessera--glyph-variant-properties
-  '(:glyph :mouse-face :help-echo :keymap :pointer :follow-link)
+  '(:glyph :face :mouse-face :help-echo :keymap :pointer :follow-link)
   "Properties accepted in a glyph variant specification.")
 
 (defun tessera--ensure-list (value description)
@@ -366,6 +366,9 @@ returning one, shared by both lines."
     (tessera--ensure-plist-keys properties
                                 tessera--glyph-variant-properties
                                 description)
+    (when-let* ((face (plist-get properties :face)))
+      (unless (facep face)
+        (error "%s has an invalid face" description)))
     (unless (plist-member properties :glyph)
       (error "%s has no :glyph property" description))
     (let ((glyph (plist-get properties :glyph)))
@@ -1045,12 +1048,13 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
        (error "Unknown Tessera glyph style `%s'"
               tessera-glyph-style)))))
 
-(defun tessera--glyph-color-face (glyph)
-  "Return the configured color face for GLYPH, or nil."
+(defun tessera--glyph-color-face (glyph &optional override)
+  "Return GLYPH color, using OVERRIDE in semantic color mode."
   (cond
    ((eq tessera-glyph-color t)
-    (alist-get (tessera-glyph-semantic glyph)
-               tessera--glyph-semantic-faces))
+    (or override
+        (alist-get (tessera-glyph-semantic glyph)
+                   tessera--glyph-semantic-faces)))
    ((stringp tessera-glyph-color)
     `(:foreground ,tessera-glyph-color))))
 
@@ -1062,9 +1066,10 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
                          (tessera--glyph-frame context) 'default))
     face))
 
-(defun tessera--apply-glyph-color (text glyph context)
-  "Apply GLYPH's configured color and metadata to TEXT in CONTEXT."
-  (let* ((face (tessera--glyph-color-face glyph))
+(defun tessera--apply-glyph-color (text glyph context &optional face)
+  "Apply GLYPH color and metadata to TEXT in CONTEXT.
+Optional FACE overrides its semantic color."
+  (let* ((face (tessera--glyph-color-face glyph face))
          (hover-face (and face
                           (tessera--glyph-hover-color-face
                            face context))))
@@ -1079,7 +1084,8 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
 
 (defun tessera--apply-glyph-interaction (text properties glyph)
   "Apply variant PROPERTIES for GLYPH to TEXT."
-  (let ((color-face (tessera--glyph-color-face glyph)))
+  (let ((color-face (tessera--glyph-color-face
+                     glyph (plist-get properties :face))))
     (dolist (entry tessera--glyph-interaction-properties)
       (let ((keyword (car entry))
             (property (cdr entry)))
@@ -1096,8 +1102,9 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
 (defun tessera-glyph-render (glyph context &optional properties)
   "Render GLYPH for CONTEXT with optional interaction PROPERTIES.
 
-PROPERTIES accepts the interaction keys supported by registered
-glyph variants."
+PROPERTIES accepts the keys supported by registered glyph variants.
+Optional :face names a face used in semantic color mode.  Monochrome
+and uniform color modes retain their normal behavior."
   (tessera--validate-glyph glyph "Glyph")
   (unless (tessera-entry-context-p context)
     (error "Glyph context must be a Tessera entry context"))
@@ -1106,8 +1113,12 @@ glyph variants."
                               "Glyph interaction properties")
   (when (plist-member properties :glyph)
     (error "Glyph interaction properties must not contain :glyph"))
+  (when-let* ((face (plist-get properties :face)))
+    (unless (facep face)
+      (error "Invalid glyph face: %S" face)))
   (let ((text (copy-sequence (tessera--glyph-text glyph context))))
-    (tessera--apply-glyph-color text glyph context)
+    (tessera--apply-glyph-color
+     text glyph context (plist-get properties :face))
     (tessera--apply-glyph-interaction text properties glyph)
     (tessera--prepare-hover text)))
 
