@@ -128,9 +128,8 @@ Each item is (TEXT . SOURCES); equal names share one display label."
 
 (defun tessera-gnus-data--merge-state (old new)
   "Combine independent observations OLD and NEW conservatively."
-  (car (seq-filter
-        (lambda (state) (memq state (list old new)))
-        '(error present processed unknown))))
+  (seq-find (lambda (state) (or (eq state old) (eq state new)))
+            '(error present processed unknown)))
 
 (defun tessera-gnus-data--mime-content (handles)
   "Inspect existing MIME HANDLES without changing or decoding them.
@@ -189,12 +188,9 @@ successful verification.  Never infer trust from a result string."
                                          (get-text-property
                                           0 'gnus-details
                                           (car part))))
-                             "\n"))
-                   (when (and (eq key :encryption)
-                              (or error (not info)))
-                     (setq opaque t)))
-                 (unless (and (eq key :encryption)
-                              (or error (not info)))
+                             "\n")))
+                 (if (and (eq key :encryption) (or error (not info)))
+                     (setq opaque t)
                    (mapc #'walk (cdr part)))))
               ((bufferp (car-safe part))
                (let ((type (mm-handle-media-type part))

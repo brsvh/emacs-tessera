@@ -134,24 +134,8 @@ The value has the same shape as
 (defvar-local tessera-elfeed-search--active nil
   "Non-nil when Tessera renders the current Elfeed search buffer.")
 
-(defvar-local tessera-elfeed-search--saved-printer nil
-  "Printer saved before enabling Tessera in this search buffer.")
-
-(defvar-local tessera-elfeed-search--saved-printer-local-p nil
-  "Whether the saved Elfeed printer was buffer-local.")
-
-(defvar-local tessera-elfeed-search--saved-layout nil
-  "Entry layout saved before enabling Tessera in this search buffer.")
-
-(defvar-local tessera-elfeed-search--saved-layout-local-p nil
-  "Whether the saved entry layout was buffer-local.")
-
-(defvar-local tessera-elfeed-search--saved-separator-format nil
-  "Date separator format saved before enabling Tessera.")
-
-(defvar-local tessera-elfeed-search--saved-separator-format-local-p
-    nil
-  "Whether the saved date separator format was buffer-local.")
+(defvar-local tessera-elfeed-search--saved-settings nil
+  "Original values and locality of settings replaced by Tessera.")
 
 (defun tessera-elfeed-search--entry (context)
   "Return the Elfeed entry stored in CONTEXT."
@@ -402,18 +386,14 @@ The value has the same shape as
 (defun tessera-elfeed-search--enable ()
   "Enable Tessera rendering in the current Elfeed search buffer."
   (unless tessera-elfeed-search--active
-    (setq tessera-elfeed-search--saved-printer-local-p
-          (local-variable-p 'elfeed-search-print-entry-function)
-          tessera-elfeed-search--saved-printer
-          elfeed-search-print-entry-function
-          tessera-elfeed-search--saved-layout-local-p
-          (local-variable-p 'tessera-entry-layout)
-          tessera-elfeed-search--saved-layout
-          tessera-entry-layout
-          tessera-elfeed-search--saved-separator-format-local-p
-          (local-variable-p 'elfeed-search-separator-date-format)
-          tessera-elfeed-search--saved-separator-format
-          elfeed-search-separator-date-format)
+    (setq tessera-elfeed-search--saved-settings
+          (mapcar
+           (lambda (variable)
+             (list variable (local-variable-p variable)
+                   (symbol-value variable)))
+           '(elfeed-search-print-entry-function
+             tessera-entry-layout
+             elfeed-search-separator-date-format)))
     (setq-local elfeed-search-print-entry-function
                 #'tessera-elfeed-search-print-entry)
     (setq-local tessera-entry-layout 'two-line)
@@ -428,18 +408,11 @@ The value has the same shape as
 (defun tessera-elfeed-search--disable ()
   "Disable Tessera rendering in the current Elfeed search buffer."
   (when tessera-elfeed-search--active
-    (if tessera-elfeed-search--saved-printer-local-p
-        (setq-local elfeed-search-print-entry-function
-                    tessera-elfeed-search--saved-printer)
-      (kill-local-variable 'elfeed-search-print-entry-function))
-    (if tessera-elfeed-search--saved-layout-local-p
-        (setq-local tessera-entry-layout
-                    tessera-elfeed-search--saved-layout)
-      (kill-local-variable 'tessera-entry-layout))
-    (if tessera-elfeed-search--saved-separator-format-local-p
-        (setq-local elfeed-search-separator-date-format
-                    tessera-elfeed-search--saved-separator-format)
-      (kill-local-variable 'elfeed-search-separator-date-format))
+    (dolist (setting tessera-elfeed-search--saved-settings)
+      (pcase-let ((`(,variable ,local ,value) setting))
+        (if local
+            (set (make-local-variable variable) value)
+          (kill-local-variable variable))))
     (remove-hook 'elfeed-search-update-hook
                  #'tessera-elfeed-search--apply-layout t)
     (remove-hook 'post-command-hook
@@ -448,12 +421,7 @@ The value has the same shape as
     (tessera-entry-clear-layout)
     (tessera-elfeed-search--restore-separators)
     (setq tessera-elfeed-search--active nil
-          tessera-elfeed-search--saved-printer nil
-          tessera-elfeed-search--saved-printer-local-p nil
-          tessera-elfeed-search--saved-layout nil
-          tessera-elfeed-search--saved-layout-local-p nil
-          tessera-elfeed-search--saved-separator-format nil
-          tessera-elfeed-search--saved-separator-format-local-p nil)
+          tessera-elfeed-search--saved-settings nil)
     (tessera-elfeed-search--refresh)))
 
 (provide 'tessera-elfeed-search)

@@ -402,8 +402,8 @@ returning one, shared by both lines."
           (error "Glyph variant `%s' exceeds slot `%s' width"
                  (car variant) name))))))
 
-(defun tessera--segment-reference-name (reference)
-  "Return the segment name in REFERENCE, or signal an error."
+(defun tessera--reference-name (reference kind)
+  "Return the name in REFERENCE, or report an invalid KIND reference."
   (cond
    ((and reference (symbolp reference))
     reference)
@@ -412,11 +412,11 @@ returning one, shared by both lines."
          (car reference))
     (car reference))
    (t
-    (error "Invalid segment reference `%S'" reference))))
+    (error "Invalid %s reference `%S'" kind reference))))
 
 (defun tessera--validate-segment-reference (reference names)
   "Validate segment REFERENCE against registered NAMES."
-  (let ((name (tessera--segment-reference-name reference)))
+  (let ((name (tessera--reference-name reference "segment")))
     (unless (memq name names)
       (error "Layout references unknown segment `%s'" name))
     (when (consp reference)
@@ -451,18 +451,6 @@ returning one, shared by both lines."
           (error "Segment reference `%s' has invalid :optional"
                  name))))))
 
-(defun tessera--glyph-slot-reference-name (reference)
-  "Return the glyph slot name in REFERENCE, or signal an error."
-  (cond
-   ((and reference (symbolp reference))
-    reference)
-   ((and (consp reference)
-         (symbolp (car reference))
-         (car reference))
-    (car reference))
-   (t
-    (error "Invalid glyph slot reference `%S'" reference))))
-
 (defun tessera--glyph-slot-reference-reserved-p (reference)
   "Return non-nil when glyph slot REFERENCE reserves its space."
   (and (consp reference)
@@ -471,7 +459,7 @@ returning one, shared by both lines."
 (defun tessera--validate-glyph-slot-reference
     (reference names description)
   "Validate glyph slot REFERENCE against NAMES for DESCRIPTION."
-  (let ((name (tessera--glyph-slot-reference-name reference)))
+  (let ((name (tessera--reference-name reference "glyph slot")))
     (unless (memq name names)
       (error "%s references unknown glyph slot `%s'"
              description name))
@@ -730,7 +718,7 @@ Bound indentation by window width.  Spaces become layout overlays."
   "Render segment REFERENCE using DEFINITION and CONTEXT."
   (if (eq (car-safe reference) :slots)
       (tessera--render-slot-group (cdr reference) definition context)
-    (let* ((name (tessera--segment-reference-name reference))
+    (let* ((name (tessera--reference-name reference "segment"))
            (provider
             (cdr (assq name
                        (tessera--entry-backend-segments definition))))
@@ -1193,16 +1181,10 @@ Return nil when the selector returns nil and OMIT-EMPTY is non-nil."
 
 (defun tessera--reserve-glyph-slot (slot rendered context)
   "Return a blank occupying RENDERED SLOT's display width in CONTEXT."
-  (let* ((window (tessera-entry-context-window context))
-         (frame (and (window-live-p window) (window-frame window))))
+  (let ((frame (tessera--glyph-frame context)))
     (if (display-graphic-p frame)
-        (let ((width
-               (if frame
-                   (with-selected-frame frame
-                     (string-pixel-width rendered))
-                 (string-pixel-width rendered))))
-          (propertize " " 'display `(space :width (,width))
-                      'tessera--layout-space t))
+        (with-selected-frame frame
+          (tessera--pixel-space (string-pixel-width rendered)))
       (tessera--space (tessera-glyph-slot-width slot)))))
 
 (defun tessera--render-glyph-slots
@@ -1214,7 +1196,7 @@ With nil ALIGN, empty optional slots are omitted and other slots
 keep their individual positions.  Each selector runs once."
   (let (visible hidden (width 0))
     (dolist (reference references)
-      (let* ((name (tessera--glyph-slot-reference-name reference))
+      (let* ((name (tessera--reference-name reference "glyph slot"))
              (slot
               (cl-find name
                        (tessera--entry-backend-glyph-slots definition)

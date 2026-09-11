@@ -395,6 +395,16 @@ Spam and expirable faces take precedence over native attributes."
            :face 'tessera-gnus-summary-warning-face
            :help-echo "Unrecognized Gnus mark")))))
 
+(defun tessera-gnus-summary--article-subject-face (context)
+  "Return the ordinary article subject face for CONTEXT."
+  (let ((unread (tessera-gnus-summary--unread-p context)))
+    (append
+     (when unread '(bold))
+     (tessera-gnus-summary--state-face
+      context
+      (if unread 'tessera-gnus-summary-unread-subject-face
+        'tessera-gnus-summary-subject-face)))))
+
 (defun tessera-gnus-summary--subject (context)
   "Return the article subject in CONTEXT."
   (let ((subject (mail-header-subject
@@ -407,11 +417,7 @@ Spam and expirable faces take precedence over native attributes."
          (if (> (tessera-thread-context-unread thread) 0)
              'tessera-gnus-summary-thread-unread-subject-face
            'tessera-gnus-summary-thread-subject-face)
-       (tessera-gnus-summary--state-face
-        context
-        (if (eq (tessera-gnus-summary--state 'status context) 'unread)
-            'tessera-gnus-summary-unread-subject-face
-          'tessera-gnus-summary-subject-face)))
+       (tessera-gnus-summary--article-subject-face context))
      'mouse-face 'highlight 'help-echo subject)))
 
 (defun tessera-gnus-summary--author (context)
@@ -420,14 +426,15 @@ Spam and expirable faces take precedence over native attributes."
    (plist-get (tessera-entry-context-metadata context) :author)
    'face
    ;; Keep italics and unread emphasis above native attributes.
-   (cons 'italic
-         (if (tessera-entry-context-thread context)
-             (append
-              (when (tessera-gnus-summary--unread-p context)
-                '(bold))
-              (tessera-gnus-summary--state-face
-               context 'tessera-gnus-summary-author-face))
-           '(tessera-gnus-summary-author-face)))
+   (cons
+    'italic
+    (if (tessera-entry-context-thread context)
+        (append
+         (when (tessera-gnus-summary--unread-p context) '(bold))
+         (tessera-gnus-summary--state-face
+          context 'tessera-gnus-summary-author-face))
+      (append (tessera-gnus-summary--article-subject-face context)
+              '(tessera-gnus-summary-author-face))))
    'help-echo (mail-header-from
                (tessera-entry-context-object context))))
 

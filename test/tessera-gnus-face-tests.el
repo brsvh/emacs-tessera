@@ -112,17 +112,19 @@
                   ('expirable 'tessera-gnus-summary-expirable-face))))
           (should (eq (car face) 'italic))
           (should (eq (and (memq 'bold face) t)
-                      (and node
-                           (not (gnus-read-mark-p (aref marks 0))))))
+                      (not (gnus-read-mark-p (aref marks 0)))))
+          (unless node
+            (let ((subject (get-text-property
+                            0 'face
+                            (tessera-gnus-summary--subject context))))
+              (should (eq (eq (car subject) 'bold)
+                          (not (gnus-read-mark-p (aref marks 0)))))
+              (should
+               (equal face
+                      (append '(italic) subject
+                              '(tessera-gnus-summary-author-face))))))
           (when special
-            (if node
-                (should (memq special face))
-              (should-not (memq special face))
-              (should (memq special
-                            (get-text-property
-                             0 'face
-                             (tessera-gnus-summary--subject
-                              context)))))
+            (should (memq special face))
             (should
              (eq (tessera-gnus-summary--glyph-face
                   'status (car spec) nil) special))))))))
