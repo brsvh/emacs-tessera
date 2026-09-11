@@ -76,6 +76,18 @@
   "Face for article authors."
   :group 'tessera-gnus-summary)
 
+(defface tessera-gnus-summary-read-author-face
+  '((t :inherit gnus-summary-normal-read
+       :weight normal :slant italic :extend nil))
+  "Face for read authors outside thread layouts."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-unread-author-face
+  '((t :inherit (bold gnus-summary-normal-unread)
+       :slant italic :extend nil))
+  "Face for unread authors outside thread layouts."
+  :group 'tessera-gnus-summary)
+
 (defface tessera-gnus-summary-date-face
   '((t :inherit gnus-summary-normal-read
        :weight normal :slant normal :extend nil))
@@ -433,8 +445,9 @@ Spam and expirable faces take precedence over native attributes."
          (when (tessera-gnus-summary--unread-p context) '(bold))
          (tessera-gnus-summary--state-face
           context 'tessera-gnus-summary-author-face))
-      (append (tessera-gnus-summary--article-subject-face context)
-              '(tessera-gnus-summary-author-face))))
+      (list (if (tessera-gnus-summary--unread-p context)
+                'tessera-gnus-summary-unread-author-face
+              'tessera-gnus-summary-read-author-face))))
    'help-echo (mail-header-from
                (tessera-entry-context-object context))))
 
@@ -592,14 +605,14 @@ Spam and expirable faces take precedence over native attributes."
            :main-glyph-slots
            '(score availability secondary status)
            :main-left-segments
-           '((author :max-width 20 :truncate tail :optional t)
-             (subject :grow t :min-width 4 :truncate tail)
+           '((subject :grow t :min-width 4 :truncate tail)
              (:slots (attachment :optional t)
                      (signature :optional t)
                      (encryption :optional t)))
            :main-right-segments
            '((labels :grow t :max-width 24 :min-width 0
                      :truncate tail :priority -1 :optional t)
+             (author :max-width 20 :truncate tail :optional t)
              date)))
     (cons 'two-line
           (make-tessera-entry-layout
