@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; Batch entry point.  Elfeed must be available on `load-path'.
+;; Batch entry point.  Elfeed and mu4e must be on `load-path'.
 
 ;;; Code:
 
