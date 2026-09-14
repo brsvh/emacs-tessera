@@ -32,7 +32,7 @@
 (require 'cl-lib)
 (require 'hl-line)
 (require 'subr-x)
-(require 'tessera-mu4e-vars)
+(require 'tessera-mu4e)
 (require 'tessera-mu4e-thread)
 
 (defvar mu4e-search-threads)

@@ -23,7 +23,7 @@
 
 ;;; Commentary:
 
-;; Public customization and `tessera-elfeed-mode' live here.
+;; Public options, faces, and `tessera-elfeed-mode' live here.
 ;; Search rendering follows the upstream `elfeed-search' feature.
 
 ;;; Code:
@@ -100,6 +100,61 @@ The value has the same shape as
           (string :tag "Nerd Icons name")
           (symbol :tag "Semantic role"))
   :set #'tessera-elfeed--set-search-glyph
+  :group 'tessera-elfeed)
+
+;;;; Public faces
+
+(defface tessera-elfeed-search-title-face
+  '((t :inherit elfeed-search-title-face))
+  "Face used for entry titles in Elfeed search buffers."
+  :group 'tessera-elfeed)
+
+(defface tessera-elfeed-search-unread-title-face
+  '((t :inherit elfeed-search-unread-title-face))
+  "Face used for unread entry titles in Elfeed search buffers."
+  :group 'tessera-elfeed)
+
+(defface tessera-elfeed-search-feed-face
+  '((t :inherit elfeed-search-feed-face
+       :weight normal :slant italic :extend nil))
+  "Face used for feed titles of read entries."
+  :group 'tessera-elfeed)
+
+(defface tessera-elfeed-search-unread-feed-face
+  '((t :inherit (bold tessera-elfeed-search-feed-face)
+       :extend nil))
+  "Face used for feed titles of unread entries."
+  :group 'tessera-elfeed)
+
+(defface tessera-elfeed-search-tag-face
+  '((t :inherit elfeed-search-tag-face))
+  "Face used for entry tags in Elfeed search buffers."
+  :group 'tessera-elfeed)
+
+(defface tessera-elfeed-search-date-face
+  '((t :inherit (elfeed-search-title-face elfeed-search-date-face)
+       :weight normal :slant normal :extend nil))
+  "Face used for read dates, with the native title color."
+  :group 'tessera-elfeed)
+
+(defface tessera-elfeed-search-unread-date-face
+  '((t :inherit (bold elfeed-search-unread-title-face
+                      tessera-elfeed-search-date-face)
+       :slant normal :extend nil))
+  "Face used for unread dates, with the native unread title color."
+  :group 'tessera-elfeed)
+
+(defface tessera-elfeed-search-url-face
+  '((t :inherit (tessera-elfeed-search-date-face link)
+       :slant italic :underline nil :extend nil))
+  "Face used for read URLs, with the read date color."
+  :group 'tessera-elfeed)
+
+(defface tessera-elfeed-search-unread-url-face
+  '((t :inherit (tessera-elfeed-search-unread-date-face
+                 tessera-elfeed-search-url-face)
+       :slant italic :underline nil :extend nil))
+  "Face used for unread URLs, with unread date color and weight."
   :group 'tessera-elfeed)
 
 ;;;; Adapter lifecycle
