@@ -24,11 +24,18 @@
 
 ;;; Commentary:
 
-;; Enable Tessera entry and thread layouts in mu4e headers.
+;; Public customization and `tessera-mu4e-mode' live here.
+;; Internal modules follow `mu4e-vars', `mu4e-headers', and
+;; `mu4e-thread'.
 
 ;;; Code:
 
-(require 'tessera-mu4e-faces)
+(require 'tessera)
+
+(defgroup tessera-mu4e nil
+  "Tessera interfaces for mu4e."
+  :group 'tessera
+  :prefix "tessera-mu4e-")
 
 (declare-function tessera-mu4e-headers--enable "tessera-mu4e-headers")
 (declare-function tessera-mu4e-headers--disable

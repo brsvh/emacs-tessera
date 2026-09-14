@@ -9,9 +9,10 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'mu4e-headers)
-(require 'tessera-mu4e-faces)
+(require 'tessera-mu4e-headers)
 
-(ert-deftest tessera-mu4e-faces-preserve-native-subject-state ()
+(ert-deftest tessera-mu4e-headers-faces-preserve-native-subject-state
+    ()
   (dolist (message '((:flags (seen))
                      (:flags (unread flagged replied))
                      (:flags (new seen))
@@ -24,7 +25,8 @@
     (let* ((input (propertize "Subject" 'help-echo "Details"))
            (native (mu4e~headers-apply-flags
                     message (copy-sequence input)))
-           (text (tessera-mu4e-faces--text 'subject message input))
+           (text (tessera-mu4e-headers--styled-text 'subject message
+                                                    input))
            (faces (get-text-property 0 'face text)))
       (should (eq (cadr faces) (get-text-property 0 'face native)))
       (should (eq (car faces)
@@ -35,14 +37,15 @@
       (should-not (get-text-property 0 'face input))
       (should (equal (get-text-property 0 'help-echo text) "Details"))
       ;; Restyling a previously unread subject must remove old faces.
-      (let ((restyled (tessera-mu4e-faces--text
+      (let ((restyled (tessera-mu4e-headers--styled-text
                        'subject '(:flags (seen)) text)))
         (should
          (equal (get-text-property 0 'face restyled)
                 '(tessera-mu4e-headers-subject-face
                   mu4e-header-face)))))))
 
-(ert-deftest tessera-mu4e-faces-isolate-contact-and-date-state ()
+(ert-deftest
+    tessera-mu4e-headers-faces-isolate-contact-and-date-state ()
   (let* ((attributes '((default :foreground)
                        (mu4e-header-face :foreground)
                        (mu4e-unread-face :foreground :inherit)))
@@ -69,7 +72,7 @@
               (let* ((message (list :flags flags))
                      (unread (or (memq 'unread flags)
                                  (memq 'new flags)))
-                     (text (tessera-mu4e-faces--text
+                     (text (tessera-mu4e-headers--styled-text
                             role message "Text"))
                      (face (get-text-property 0 'face text)))
                 (should (equal (face-attribute face :foreground nil t)
@@ -82,16 +85,17 @@
       (dolist (spec saved)
         (apply #'set-face-attribute (car spec) nil (cdr spec))))))
 
-(ert-deftest tessera-mu4e-faces-thread-separates-aggregate-state ()
+(ert-deftest
+    tessera-mu4e-headers-faces-thread-separates-aggregate-state ()
   (let* ((thread (make-tessera-thread-context :unread 1 :total 4))
          (root '(:flags (seen trashed))))
     (should
      (eq (get-text-property
-          0 'face (tessera-mu4e-faces--text
+          0 'face (tessera-mu4e-headers--styled-text
                    'subject root "Subject" thread))
          'tessera-mu4e-headers-thread-unread-subject-face))
     (setf (tessera-thread-context-unread thread) 0)
-    (let* ((text (tessera-mu4e-faces--text
+    (let* ((text (tessera-mu4e-headers--styled-text
                   'subject root "Subject" thread))
            (face (get-text-property 0 'face text)))
       (should (eq face 'tessera-mu4e-headers-thread-subject-face))
@@ -101,10 +105,10 @@
       (let* ((message (list :flags flags))
              (native (mu4e~headers-apply-flags
                       message (copy-sequence "Contact")))
-             (text (tessera-mu4e-faces--text
+             (text (tessera-mu4e-headers--styled-text
                     'contact message "Contact" thread))
              (faces (get-text-property 0 'face text))
-             (unread (tessera-mu4e-faces--unread-p message)))
+             (unread (tessera-mu4e-headers--unread-p message)))
         (should (eq (cadr faces) (get-text-property 0 'face native)))
         (should (eq (face-attribute (car faces) :slant nil t)
                     'italic))
@@ -114,7 +118,7 @@
         ;; Dates continue to depend on each message, not the thread.
         (should
          (eq (get-text-property
-              0 'face (tessera-mu4e-faces--text
+              0 'face (tessera-mu4e-headers--styled-text
                        'date message "Date" thread))
              (if unread 'tessera-mu4e-headers-unread-date-face
                'tessera-mu4e-headers-date-face)))))))

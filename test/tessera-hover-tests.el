@@ -73,9 +73,9 @@
          (tessera-glyph-color nil)
          (tessera-entry-segment-gap 0))
     (tessera-gnus-summary--register)
-    (cl-letf (((symbol-function 'tessera-gnus-data-labels)
+    (cl-letf (((symbol-function 'tessera-gnus-summary--label-data)
                (lambda (_) '(("foo" "test") ("bar" "test"))))
-              ((symbol-function 'tessera-gnus-data-content)
+              ((symbol-function 'tessera-gnus-summary--content-data)
                (lambda (_) '(:attachment present :signature present
                                          :encryption present)))
               ((symbol-function 'gnus-user-date)
@@ -90,7 +90,7 @@
                         :path (when (eq kind 'child) '(nil)))))
                (text
                 (cl-letf (((symbol-function
-                            'tessera-gnus-thread-context)
+                            'tessera-gnus-summary--thread-context)
                            (lambda (_) node)))
                   (tessera-gnus-summary--render header metadata))))
           (tessera-hover-tests--elements

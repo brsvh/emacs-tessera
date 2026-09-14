@@ -23,20 +23,25 @@
 
 ;;; Commentary:
 
-;; Render Gnus summary articles with Tessera.  Four native marks
+;; Follow `gnus-sum' for labels, cached article properties, native
+;; thread contexts, and summary rendering.  Public faces live in
+;; `tessera-gnus'; parsed MIME observations come from the article
+;; adapter.  Four native marks
 ;; remain at fixed offsets and share the first status glyph.
 ;; The visible entry is refreshed from those marks after changes.
 
 ;;; Code:
 
-(require 'tessera)
-(require 'tessera-gnus-data)
-(require 'tessera-gnus-thread)
+(require 'tessera-gnus)
+(require 'tessera-gnus-article)
 (require 'gnus-sum)
-(require 'gnus-art)
 (require 'gnus-spec)
 (require 'subr-x)
 (require 'seq)
+
+(defvar gnus-registry-db)
+
+(declare-function gnus-registry-get-id-key "gnus-registry")
 
 (defvar gnus-tmp-unread)
 (defvar gnus-tmp-replied)
@@ -44,152 +49,7 @@
 (defvar gnus-tmp-score-char)
 (defvar gnus-tmp-from)
 
-(defgroup tessera-gnus-summary nil
-  "Tessera entries in Gnus summary buffers."
-  :group 'tessera
-  :prefix "tessera-gnus-summary-")
-
-(defface tessera-gnus-summary-subject-face
-  '((t :inherit gnus-header-subject :extend nil))
-  "Base face for article subjects, below the native state face."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-unread-subject-face
-  '((t :inherit (bold tessera-gnus-summary-subject-face)
-       :extend nil))
-  "Face for unread article subjects."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-thread-subject-face
-  '((t :inherit (bold gnus-summary-normal-read) :extend nil))
-  "Face for subjects of threads with no unread articles."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-thread-unread-subject-face
-  '((t :inherit (bold gnus-summary-normal-unread) :extend nil))
-  "Face for subjects of threads containing unread articles."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-author-face
-  '((t :inherit (italic gnus-header-from)
-       :weight normal :extend nil))
-  "Face for article authors."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-read-author-face
-  '((t :inherit gnus-summary-normal-read
-       :weight normal :slant italic :extend nil))
-  "Face for read authors outside thread layouts."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-unread-author-face
-  '((t :inherit (bold gnus-summary-normal-unread)
-       :slant italic :extend nil))
-  "Face for unread authors outside thread layouts."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-date-face
-  '((t :inherit gnus-summary-normal-read
-       :weight normal :slant normal :extend nil))
-  "Face for read article dates."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-unread-date-face
-  '((t :inherit (bold gnus-summary-normal-unread)
-       :slant normal :extend nil))
-  "Face for unread article dates."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-label-face
-  '((t :inherit gnus-header-content
-       :weight normal :slant normal :extend nil))
-  "Face for article labels from every supported source."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-status-face
-  '((t :inherit (gnus-summary-normal-unread default) :extend nil))
-  "Article status icons."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-muted-face
-  '((t :inherit (gnus-summary-normal-read shadow) :extend nil))
-  "Read and inactive article status icons."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-important-face
-  '((t :inherit (gnus-summary-normal-ticked bold) :extend nil))
-  "Ticked and processing status icons."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-positive-face
-  '((t :inherit success :extend nil))
-  "Completed action and availability icons."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-informational-face
-  '((t :inherit gnus-header-content :extend nil))
-  "Informational article status icons."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-warning-face
-  '((t :inherit warning :extend nil))
-  "Article states requiring attention."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-error-face
-  '((t :inherit error :extend nil))
-  "Failed actions and content processing errors."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-spam-face
-  '((t :inherit error :extend nil))
-  "Spam article state, supplementing the native summary face."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-expirable-face
-  '((t :inherit warning :extend nil))
-  "Expirable article state, supplementing the native summary face."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-high-score-face
-  '((t :inherit (gnus-summary-high-unread bold) :extend nil))
-  "Scores above the native threshold."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-low-score-face
-  '((t :inherit (gnus-summary-low-read shadow) :extend nil))
-  "Scores below the native threshold."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-attachment-face
-  '((t :inherit shadow :extend nil))
-  "Attachment presence, without implying trust."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-signature-face
-  '((t :inherit gnus-header-content :extend nil))
-  "Signature presence, without implying verification."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-encryption-face
-  '((t :inherit gnus-header-content :extend nil))
-  "Encrypted content, without implying decryption."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-thread-tree-face
-  '((t :inherit shadow :extend nil))
-  "Native thread branches."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-thread-count-face
-  '((t :inherit (gnus-summary-normal-read shadow) :extend nil))
-  "Thread counts with no unread articles."
-  :group 'tessera-gnus-summary)
-
-(defface tessera-gnus-summary-thread-unread-count-face
-  '((t :inherit (gnus-summary-normal-unread bold) :extend nil))
-  "Thread counts containing unread articles."
-  :group 'tessera-gnus-summary)
+;;;; Native marks and glyphs
 
 (defconst tessera-gnus-summary--states
   '((status 0
@@ -254,6 +114,8 @@
                  attention "Above default score")))
   "Native mark variables and visual variants, grouped by slot.")
 
+;;;; Buffer state
+
 (defvar tessera-gnus-summary--metadata nil
   "Metadata dynamically bound while rendering one article.")
 
@@ -274,6 +136,161 @@
 
 (defvar-local tessera-gnus-summary--appearance nil
   "Appearance used for the last synchronized entry rendering.")
+
+;;;; Summary metadata
+
+(defvar-local tessera-gnus-summary--content-cache nil
+  "Snapshots of observed MIME properties, keyed by article identity.")
+
+(defun tessera-gnus-summary--header-field (name header)
+  "Return extra field NAME from native HEADER, ignoring case."
+  (cdr (seq-find
+        (lambda (pair)
+          (string-equal-ignore-case (format "%s" (car pair)) name))
+        (mail-header-extra header))))
+
+(defun tessera-gnus-summary--label-text (value)
+  "Return VALUE as safe single-line label text."
+  (string-trim
+   (replace-regexp-in-string
+    "[[:cntrl:]]+" " " (format "%s" value))))
+
+(defun tessera-gnus-summary--gmail-labels (value)
+  "Decode Gmail label VALUE without evaluating it."
+  (when (stringp value)
+    (setq value
+          (condition-case nil
+              (let ((read-circle nil)) (car (read-from-string value)))
+            (error nil))))
+  (when (and (proper-list-p value)
+             (seq-every-p (lambda (item)
+                            (or (stringp item) (symbolp item)))
+                          value))
+    value))
+
+(defun tessera-gnus-summary--label-data (header)
+  "Return labels from HEADER and the enabled registry.
+Each item is (TEXT . SOURCES); equal names share one display label."
+  (let* ((id (mail-header-message-id header))
+         (registry
+          (when (and id (bound-and-true-p gnus-registry-db)
+                     (fboundp 'gnus-registry-get-id-key))
+            (gnus-registry-get-id-key id 'mark)))
+         (gmail (tessera-gnus-summary--gmail-labels
+                 (tessera-gnus-summary--header-field "X-GM-LABELS"
+                                                     header)))
+         (keywords (tessera-gnus-summary--header-field "Keywords"
+                                                       header))
+         labels)
+    (when (stringp keywords)
+      (setq keywords (split-string keywords "," t "[[:space:]]+")))
+    (dolist (source (list (cons "Registry" registry)
+                          (cons "Gmail" gmail)
+                          (cons "Keywords" keywords)))
+      (dolist (value (cdr source))
+        (let* ((text (tessera-gnus-summary--label-text value))
+               (existing (assoc text labels)))
+          (unless (string-empty-p text)
+            (if existing
+                (cl-pushnew (car source) (cdr existing) :test #'equal)
+              (push (list text (car source)) labels))))))
+    (nreverse labels)))
+
+(defun tessera-gnus-summary--content-key (header)
+  "Return an identity for HEADER within its summary buffer."
+  (or (mail-header-message-id header) (mail-header-number header)))
+
+(defun tessera-gnus-summary--content-data (header)
+  "Return observed content properties for HEADER, or header hints."
+  (or (and tessera-gnus-summary--content-cache
+           (gethash (tessera-gnus-summary--content-key header)
+                    tessera-gnus-summary--content-cache))
+      (let* ((result (tessera-gnus-article--unknown-content))
+             (value (tessera-gnus-summary--header-field
+                     "Content-Type" header))
+             (type (and (stringp value)
+                        (car (mail-header-parse-content-type
+                              value)))))
+        (pcase type
+          ("multipart/signed" (setq result
+                                    (plist-put result :signature
+                                               'present)))
+          ("multipart/encrypted" (setq result
+                                       (plist-put result :encryption
+                                                  'present))))
+        result)))
+
+(defun tessera-gnus-summary--observe-content (header handles)
+  "Save properties of already parsed HANDLES for HEADER.
+Return non-nil only when the observed properties have changed."
+  (let* ((key (tessera-gnus-summary--content-key header))
+         (content (tessera-gnus-article--mime-content handles)))
+    (unless tessera-gnus-summary--content-cache
+      (setq tessera-gnus-summary--content-cache
+            (make-hash-table :test #'equal)))
+    (unless (equal content
+                   (gethash key tessera-gnus-summary--content-cache))
+      (puthash key content tessera-gnus-summary--content-cache)
+      t)))
+
+;;;; Thread contexts (gnus-sum.el)
+
+(defvar-local tessera-gnus-summary--threads nil
+  "Article numbers mapped to their displayed thread contexts.")
+
+(defvar-local tessera-gnus-summary--thread-width 8
+  "Shared leading width for counts and four native status slots.")
+
+(defun tessera-gnus-summary--thread-leading-width (_context)
+  "Return the leading width for the current summary's thread view."
+  tessera-gnus-summary--thread-width)
+
+(defun tessera-gnus-summary--thread-context (header)
+  "Return the displayed thread context for native HEADER."
+  (when (and gnus-show-threads tessera-gnus-summary--threads)
+    (gethash (mail-header-number header)
+             tessera-gnus-summary--threads)))
+
+(defun tessera-gnus-summary--build-threads ()
+  "Rebuild thread contexts from the completed native summary.
+Use native display levels, including Gnus's treatment of missing
+parents and adopted roots.  Threading follows `gnus-show-threads'."
+  (let (entries stack)
+    (when gnus-show-threads
+      (let ((levels (make-hash-table :test #'eql)))
+        (dolist (data gnus-newsgroup-data)
+          (puthash (gnus-data-number data)
+                   (gnus-data-level data) levels))
+        (save-excursion
+          (goto-char (point-min))
+          (while (< (point) (point-max))
+            (when (get-text-property
+                   (point) 'tessera-gnus-summary-entry)
+              (let* ((id (get-text-property (point) 'gnus-number))
+                     (level (or (gethash id levels) 0)))
+                (while (and stack (>= (caar stack) level))
+                  (pop stack))
+                (push (list id (cdar stack)
+                            (not (gnus-read-mark-p (char-after)))
+                            (not (invisible-p (point))))
+                      entries)
+                (push (cons level id) stack)))
+            (forward-line 1)))))
+    (setq tessera-gnus-summary--threads
+          (tessera-thread-build-contexts (nreverse entries))
+          tessera-gnus-summary--thread-width 8)
+    (maphash
+     (lambda (_id node)
+       (when (tessera-thread-context-first node)
+         (setq tessera-gnus-summary--thread-width
+               (max tessera-gnus-summary--thread-width
+                    (length (format
+                             "%d/%d"
+                             (tessera-thread-context-unread node)
+                             (tessera-thread-context-total node)))))))
+     tessera-gnus-summary--threads)))
+
+;;;; Entry context and state
 
 (defun tessera-gnus-summary--context (header buffer window)
   "Return the entry context for HEADER in BUFFER and WINDOW."
@@ -407,6 +424,8 @@ Spam and expirable faces take precedence over native attributes."
            :face 'tessera-gnus-summary-warning-face
            :help-echo "Unrecognized Gnus mark")))))
 
+;;;; Rendered fields
+
 (defun tessera-gnus-summary--article-subject-face (context)
   "Return the ordinary article subject face for CONTEXT."
   (let ((unread (tessera-gnus-summary--unread-p context)))
@@ -465,7 +484,7 @@ Spam and expirable faces take precedence over native attributes."
 
 (defun tessera-gnus-summary--labels (context)
   "Return the labels in CONTEXT as one optional text segment."
-  (when-let* ((labels (tessera-gnus-data-labels
+  (when-let* ((labels (tessera-gnus-summary--label-data
                        (tessera-entry-context-object context))))
     (let ((all (mapconcat #'car labels ", ")))
       (mapconcat
@@ -481,7 +500,7 @@ Spam and expirable faces take precedence over native attributes."
 (defun tessera-gnus-summary--content-state (key context)
   "Return the visible content state for KEY in CONTEXT."
   (let ((state (plist-get
-                (tessera-gnus-data-content
+                (tessera-gnus-summary--content-data
                  (tessera-entry-context-object context)) key)))
     ;; Unknown and absent remain distinct data, but neither is shown.
     (unless (eq state 'unknown) state)))
@@ -495,7 +514,8 @@ Spam and expirable faces take precedence over native attributes."
     (with-current-buffer buffer
       (when-let* ((entry (get-text-property
                           position 'tessera-gnus-summary-entry)))
-        (let* ((content (tessera-gnus-data-content (car entry)))
+        (let* ((content (tessera-gnus-summary--content-data (car
+                                                             entry)))
                (state (plist-get content key))
                (details
                 (plist-get content
@@ -553,6 +573,8 @@ Spam and expirable faces take precedence over native attributes."
      (encryption :encryption "E" "🔒" "nf-md-lock_outline"
                  "Encrypted content"))))
 
+;;;; Layout registration
+
 (defun tessera-gnus-summary--thread-layout ()
   "Return the automatically selected native thread layout."
   (let* ((slots '(score availability secondary status))
@@ -565,7 +587,7 @@ Spam and expirable faces take precedence over native attributes."
          (right '((labels :grow t :max-width 24 :min-width 0
                           :truncate tail :priority -1 :optional t)
                   date))
-         (width #'tessera-gnus-thread-leading-width))
+         (width #'tessera-gnus-summary--thread-leading-width))
     (make-tessera-thread-layout
      :head
      (make-tessera-entry-layout
@@ -631,6 +653,8 @@ Spam and expirable faces take precedence over native attributes."
                      (encryption :optional t)))
            :extra-right-segments '(date))))))
 
+;;;; Native row rendering
+
 (cl-defun tessera-gnus-summary--render
     (header metadata
             &optional (native-face
@@ -639,7 +663,8 @@ Spam and expirable faces take precedence over native attributes."
   "Render HEADER with its native METADATA.
 Use NATIVE-FACE when supplied, including an explicitly nil face."
   (let* ((metadata (plist-put (copy-sequence metadata) :thread
-                              (tessera-gnus-thread-context header)))
+                              (tessera-gnus-summary--thread-context
+                               header)))
          (metadata (plist-put metadata :native-face native-face))
          (tessera-gnus-summary--metadata metadata)
          (prefix (propertize (copy-sequence
@@ -688,6 +713,8 @@ mark discovery, in-place updates, and visual-line navigation."
 (defalias 'gnus-user-format-function-tessera
   #'tessera-gnus-summary-format-entry)
 
+;;;; Synchronization and lifecycle
+
 (defun tessera-gnus-summary--appearance ()
   "Return the current width and shared appearance settings."
   (list
@@ -735,9 +762,9 @@ Gnus applies its native row face before running the update hook."
 (defun tessera-gnus-summary--sync-buffer (&optional force)
   "Synchronize all entries, preserving point within its article.
 FORCE also redraws entries with unchanged marks."
-  (let ((width tessera-gnus-thread--width))
-    (tessera-gnus-thread-build)
-    (when (/= width tessera-gnus-thread--width)
+  (let ((width tessera-gnus-summary--thread-width))
+    (tessera-gnus-summary--build-threads)
+    (when (/= width tessera-gnus-summary--thread-width)
       (setq force t)))
   (let ((origin (copy-marker (line-beginning-position)))
         (offset (- (point) (line-beginning-position)))
@@ -772,7 +799,7 @@ FORCE also redraws entries whose native marks have not changed."
                   (not (equal (plist-get metadata :native-face)
                               native-face))
                   (not (equal (plist-get metadata :thread)
-                              (tessera-gnus-thread-context
+                              (tessera-gnus-summary--thread-context
                                (car entry)))))
           (tessera-entry-clear-current)
           (tessera-entry-clear-layout start (1+ end))
@@ -804,37 +831,6 @@ FORCE also redraws entries whose native marks have not changed."
         (if (invisible-p start)
             (tessera-entry-clear-layout start (1+ end))
           (tessera-entry-apply-layout start end))))))
-
-(defun tessera-gnus-summary--article-updated ()
-  "Observe the displayed article and refresh its summary entry."
-  ;; Gnus also runs its article preparation hook in the summary.
-  (if (derived-mode-p 'gnus-summary-mode)
-      (when (get-buffer gnus-article-buffer)
-        (with-current-buffer gnus-article-buffer
-          (tessera-gnus-summary--article-updated)))
-    (when (and (derived-mode-p 'gnus-article-mode)
-               gnus-summary-buffer
-               (buffer-live-p (get-buffer gnus-summary-buffer)))
-      (let ((handles gnus-article-mime-handles)
-            (article-buffer (current-buffer)))
-        (with-current-buffer gnus-summary-buffer
-          (when (and tessera-gnus-summary--active
-                     gnus-current-headers)
-            (with-current-buffer article-buffer
-              (add-hook 'post-command-hook
-                        #'tessera-gnus-summary--article-updated t t))
-            (when (tessera-gnus-data-observe
-                   gnus-current-headers handles)
-              (save-excursion
-                (when-let* ((position
-                             (text-property-any
-                              (point-min) (point-max) 'gnus-number
-                              (mail-header-number
-                               gnus-current-headers))))
-                  (goto-char position)
-                  (let ((tessera-gnus-summary--updating t))
-                    (tessera-gnus-summary--sync-line t))))
-              (tessera-entry-highlight-current))))))))
 
 (defun tessera-gnus-summary--update-line ()
   "Synchronize the article just updated by Gnus."
@@ -938,9 +934,9 @@ FORCE also redraws entries whose native marks have not changed."
           tessera-gnus-summary--appearance nil
           tessera-gnus-summary--folds nil
           tessera-gnus-summary--dirty nil
-          tessera-gnus-data--content-cache nil
-          tessera-gnus-thread--contexts nil
-          tessera-gnus-thread--width 8)
+          tessera-gnus-summary--content-cache nil
+          tessera-gnus-summary--threads nil
+          tessera-gnus-summary--thread-width 8)
     (tessera-gnus-summary--refresh)))
 
 (provide 'tessera-gnus-summary)

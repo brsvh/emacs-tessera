@@ -23,7 +23,9 @@
 
 ;;; Commentary:
 
-;; `tessera-gnus-mode' coordinates Tessera UI adapters for Gnus.
+;; Public customization, faces, and `tessera-gnus-mode' live here,
+;; following the public definitions in `gnus'.  Summary and article
+;; adapters follow `gnus-sum' and `gnus-art', respectively.
 
 ;;; Code:
 
@@ -34,6 +36,157 @@
   :group 'tessera
   :prefix "tessera-gnus-")
 
+;;;; Public faces (gnus.el)
+
+(defgroup tessera-gnus-summary nil
+  "Tessera entries in Gnus summary buffers."
+  :group 'tessera-gnus
+  :prefix "tessera-gnus-summary-")
+
+(defface tessera-gnus-summary-subject-face
+  '((t :inherit gnus-header-subject :extend nil))
+  "Base face for article subjects, below the native state face."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-unread-subject-face
+  '((t :inherit (bold tessera-gnus-summary-subject-face)
+       :extend nil))
+  "Face for unread article subjects."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-subject-face
+  '((t :inherit (bold gnus-summary-normal-read) :extend nil))
+  "Face for subjects of threads with no unread articles."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-unread-subject-face
+  '((t :inherit (bold gnus-summary-normal-unread) :extend nil))
+  "Face for subjects of threads containing unread articles."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-author-face
+  '((t :inherit (italic gnus-header-from)
+       :weight normal :extend nil))
+  "Face for article authors."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-read-author-face
+  '((t :inherit gnus-summary-normal-read
+       :weight normal :slant italic :extend nil))
+  "Face for read authors outside thread layouts."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-unread-author-face
+  '((t :inherit (bold gnus-summary-normal-unread)
+       :slant italic :extend nil))
+  "Face for unread authors outside thread layouts."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-date-face
+  '((t :inherit gnus-summary-normal-read
+       :weight normal :slant normal :extend nil))
+  "Face for read article dates."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-unread-date-face
+  '((t :inherit (bold gnus-summary-normal-unread)
+       :slant normal :extend nil))
+  "Face for unread article dates."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-label-face
+  '((t :inherit gnus-header-content
+       :weight normal :slant normal :extend nil))
+  "Face for article labels from every supported source."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-status-face
+  '((t :inherit (gnus-summary-normal-unread default) :extend nil))
+  "Article status icons."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-muted-face
+  '((t :inherit (gnus-summary-normal-read shadow) :extend nil))
+  "Read and inactive article status icons."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-important-face
+  '((t :inherit (gnus-summary-normal-ticked bold) :extend nil))
+  "Ticked and processing status icons."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-positive-face
+  '((t :inherit success :extend nil))
+  "Completed action and availability icons."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-informational-face
+  '((t :inherit gnus-header-content :extend nil))
+  "Informational article status icons."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-warning-face
+  '((t :inherit warning :extend nil))
+  "Article states requiring attention."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-error-face
+  '((t :inherit error :extend nil))
+  "Failed actions and content processing errors."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-spam-face
+  '((t :inherit error :extend nil))
+  "Spam article state, supplementing the native summary face."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-expirable-face
+  '((t :inherit warning :extend nil))
+  "Expirable article state, supplementing the native summary face."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-high-score-face
+  '((t :inherit (gnus-summary-high-unread bold) :extend nil))
+  "Scores above the native threshold."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-low-score-face
+  '((t :inherit (gnus-summary-low-read shadow) :extend nil))
+  "Scores below the native threshold."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-attachment-face
+  '((t :inherit shadow :extend nil))
+  "Attachment presence, without implying trust."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-signature-face
+  '((t :inherit gnus-header-content :extend nil))
+  "Signature presence, without implying verification."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-encryption-face
+  '((t :inherit gnus-header-content :extend nil))
+  "Encrypted content, without implying decryption."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-tree-face
+  '((t :inherit shadow :extend nil))
+  "Native thread branches."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-count-face
+  '((t :inherit (gnus-summary-normal-read shadow) :extend nil))
+  "Thread counts with no unread articles."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-unread-count-face
+  '((t :inherit (gnus-summary-normal-unread bold) :extend nil))
+  "Thread counts containing unread articles."
+  :group 'tessera-gnus-summary)
+
+;;;; Adapter lifecycle
+
 (declare-function tessera-gnus-summary--register
                   "tessera-gnus-summary")
 (declare-function tessera-gnus-summary--enable
@@ -41,8 +194,8 @@
 (declare-function tessera-gnus-summary--disable
                   "tessera-gnus-summary")
 
-(declare-function tessera-gnus-summary--article-updated
-                  "tessera-gnus-summary")
+(declare-function tessera-gnus-article--updated
+                  "tessera-gnus-article")
 
 (defun tessera-gnus--map-summary-buffers (function)
   "Call FUNCTION in each live Gnus summary buffer."
@@ -64,24 +217,25 @@
   :group 'tessera-gnus
   (if tessera-gnus-mode
       (progn
+        (require 'tessera-gnus-article)
         (add-hook 'gnus-summary-mode-hook
                   #'tessera-gnus--enable-summary)
         (add-hook 'gnus-article-prepare-hook
-                  #'tessera-gnus-summary--article-updated t)
+                  #'tessera-gnus-article--updated t)
         (tessera-gnus--map-summary-buffers
          #'tessera-gnus--enable-summary)
         (when (featurep 'tessera-gnus-summary)
           (dolist (buffer (buffer-list))
             (with-current-buffer buffer
-              (tessera-gnus-summary--article-updated)))))
+              (tessera-gnus-article--updated)))))
     (remove-hook 'gnus-summary-mode-hook
                  #'tessera-gnus--enable-summary)
     (remove-hook 'gnus-article-prepare-hook
-                 #'tessera-gnus-summary--article-updated)
+                 #'tessera-gnus-article--updated)
     (dolist (buffer (buffer-list))
       (with-current-buffer buffer
         (remove-hook 'post-command-hook
-                     #'tessera-gnus-summary--article-updated t)))
+                     #'tessera-gnus-article--updated t)))
     (when (featurep 'tessera-gnus-summary)
       (tessera-gnus--map-summary-buffers
        #'tessera-gnus-summary--disable))))

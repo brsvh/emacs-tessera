@@ -1,4 +1,4 @@
-;;; tessera-mu4e-thread.el --- Mu4e thread contexts  -*- lexical-binding: t; -*-
+;;; tessera-mu4e-thread.el --- Mu4e fold presentation  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Bingshan Chang <chang@bingshan.org>
 
@@ -23,20 +23,14 @@
 
 ;;; Commentary:
 
-;; Translate native result order and folding into shared contexts.
-;; Mu4e owns threading, ordering, and fold commands.
+;; Follow `mu4e-thread' for native fold overlays and their spacing.
+;; The headers adapter supplies contexts from native result rows.
+;; Mu4e retains ownership of fold commands and folded summary text.
 
 ;;; Code:
 
 (require 'seq)
-(require 'tessera-mu4e-faces)
-
-(defvar mu4e-search-threads)
-(defvar mu4e~headers-docid-pre)
-(declare-function mu4e~headers-thread-root-p "mu4e-headers")
-
-(defvar-local tessera-mu4e-thread--contexts nil
-  "Native docids mapped to shared thread contexts.")
+(require 'tessera)
 
 (defun tessera-mu4e-thread-folds ()
   "Return native fold overlays in buffer order."
@@ -53,51 +47,13 @@
               (overlay-get overlay 'mu4e-thread-folded))
             (overlays-at position)))
 
-(defun tessera-mu4e-thread-context (message)
-  "Return the shared thread context for native MESSAGE."
-  (when (and mu4e-search-threads tessera-mu4e-thread--contexts)
-    (gethash (plist-get message :docid)
-             tessera-mu4e-thread--contexts)))
-
-(defun tessera-mu4e-thread-build ()
-  "Build contexts using native root boundaries and display levels.
-The first hidden row represents the visible native fold summary
-for padding purposes.  Threading follows `mu4e-search-threads'."
-  (let (entries stack representative)
-    (when mu4e-search-threads
-      (save-excursion
-        (goto-char (point-min))
-        (while (< (point) (point-max))
-          (when-let* ((message (get-text-property (point) 'msg))
-                      (id (plist-get message :docid))
-                      ;; The footer may inherit the preceding msg.
-                      (_ (looking-at
-                          (regexp-quote mu4e~headers-docid-pre))))
-            (let* ((meta (plist-get message :meta))
-                   (level (or (plist-get meta :level) 0))
-                   (fold (tessera-mu4e-thread-fold-at (point))))
-              (when (or (= level 0) (null representative)
-                        (mu4e~headers-thread-root-p message))
-                (setq representative nil stack nil))
-              (while (and stack (>= (caar stack) level))
-                (pop stack))
-              (push (list id (or (cdar stack) representative)
-                          (tessera-mu4e-faces--unread-p message)
-                          (or (null fold)
-                              (= (point) (overlay-start fold))))
-                    entries)
-              (unless representative (setq representative id))
-              (push (cons level id) stack)))
-          (forward-line 1))))
-    (setq tessera-mu4e-thread--contexts
-          (tessera-thread-build-contexts (nreverse entries)))))
-
-(defun tessera-mu4e-thread-pad-folds ()
-  "Add removable spacing around visible native fold summaries."
+(defun tessera-mu4e-thread-pad-folds (contexts)
+  "Space native fold summaries using the supplied thread CONTEXTS."
   (dolist (fold (tessera-mu4e-thread-folds))
-    (when-let* ((node (tessera-mu4e-thread-context
-                       (get-text-property
-                        (overlay-start fold) 'msg))))
+    (when-let* ((node (gethash
+                       (plist-get (get-text-property
+                                   (overlay-start fold) 'msg) :docid)
+                       contexts)))
       (let ((overlay (make-overlay (overlay-start fold)
                                    (overlay-end fold))))
         (overlay-put overlay 'tessera-entry-overlay t)

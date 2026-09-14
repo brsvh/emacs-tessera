@@ -23,7 +23,8 @@
 
 ;;; Commentary:
 
-;; `tessera-elfeed-mode' coordinates Tessera UI adapters for Elfeed.
+;; Public customization and `tessera-elfeed-mode' live here.
+;; Search rendering follows the upstream `elfeed-search' feature.
 
 ;;; Code:
 
@@ -42,6 +43,67 @@
 (declare-function tessera-elfeed-search--register
                   "tessera-elfeed-search")
 
+(declare-function tessera-elfeed-search--refresh-active-buffers
+                  "tessera-elfeed-search")
+
+;;;; Public options
+
+(defun tessera-elfeed--set-search-glyph (symbol value)
+  "Set glyph option SYMBOL to VALUE and refresh active buffers."
+  (set-default symbol value)
+  (when (and (gethash 'elfeed-search tessera--entry-backends)
+             (fboundp 'tessera-elfeed-search--register)
+             (fboundp 'tessera-elfeed-search--refresh-active-buffers))
+    (tessera-elfeed-search--register)
+    (tessera-elfeed-search--refresh-active-buffers)))
+
+(defcustom tessera-elfeed-search-unread-glyph
+  '("*" "●" nerd-icons-mdicon "nf-md-email" accent)
+  "Glyph definition used for unread Elfeed entries.
+
+The value contains the ASCII text, Unicode text, Nerd Icons function,
+Nerd Icons name, and semantic role, in that order."
+  :type '(list
+          (string :tag "ASCII")
+          (string :tag "Unicode")
+          (symbol :tag "Nerd Icons function")
+          (string :tag "Nerd Icons name")
+          (symbol :tag "Semantic role"))
+  :set #'tessera-elfeed--set-search-glyph
+  :group 'tessera-elfeed)
+
+(defcustom tessera-elfeed-search-read-glyph
+  '("o" "○" nerd-icons-mdicon "nf-md-email_open_outline" muted)
+  "Glyph definition used for read Elfeed entries.
+
+The value has the same shape as
+`tessera-elfeed-search-unread-glyph'."
+  :type '(list
+          (string :tag "ASCII")
+          (string :tag "Unicode")
+          (symbol :tag "Nerd Icons function")
+          (string :tag "Nerd Icons name")
+          (symbol :tag "Semantic role"))
+  :set #'tessera-elfeed--set-search-glyph
+  :group 'tessera-elfeed)
+
+(defcustom tessera-elfeed-search-enclosure-glyph
+  '("@" "📎" nerd-icons-mdicon "nf-md-paperclip" informational)
+  "Glyph definition used for entries with enclosures.
+
+The value has the same shape as
+`tessera-elfeed-search-unread-glyph'."
+  :type '(list
+          (string :tag "ASCII")
+          (string :tag "Unicode")
+          (symbol :tag "Nerd Icons function")
+          (string :tag "Nerd Icons name")
+          (symbol :tag "Semantic role"))
+  :set #'tessera-elfeed--set-search-glyph
+  :group 'tessera-elfeed)
+
+;;;; Adapter lifecycle
+
 (defun tessera-elfeed--map-search-buffers (function)
   "Call FUNCTION in every live Elfeed search buffer."
   (dolist (buffer (buffer-list))
@@ -59,7 +121,7 @@
 (define-minor-mode tessera-elfeed-mode
   "Toggle Tessera UI adapters for Elfeed buffers."
   :global t
-  :group 'tessera
+  :group 'tessera-elfeed
   (if tessera-elfeed-mode
       (progn
         (add-hook 'elfeed-search-mode-hook

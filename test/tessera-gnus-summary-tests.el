@@ -9,6 +9,8 @@
 (require 'ert)
 (require 'tessera-gnus-summary)
 
+(defvar gnus-registry-db)
+
 (tessera-gnus-summary--register)
 
 (defun tessera-gnus-tests--find (start end property value
@@ -190,6 +192,50 @@
                       local))
           (should-not (memq #'tessera-gnus-summary--post-command
                             post-command-hook)))))))
+
+(defun tessera-gnus-tests--metadata-header (&optional extra)
+  "Return a native header with EXTRA fields."
+  (let ((header (make-full-mail-header
+                 42 "Subject" "Author" "" "<metadata@test>")))
+    (setf (mail-header-extra header) extra)
+    header))
+
+(ert-deftest tessera-gnus-summary-labels-merge-sources ()
+  (let ((gnus-registry-db t))
+    (cl-letf (((symbol-function 'gnus-registry-get-id-key)
+               (lambda (_id _key) '(Work Later))))
+      (should
+       (equal
+        (tessera-gnus-summary--label-data
+         (tessera-gnus-tests--metadata-header
+          '((X-GM-LABELS . "(\"Work\" \"Two words\")")
+            (Keywords . "Work, release,\n multi line"))))
+        '(("Work" "Keywords" "Gmail" "Registry")
+          ("Later" "Registry") ("Two words" "Gmail")
+          ("release" "Keywords") ("multi line" "Keywords")))))))
+
+(ert-deftest tessera-gnus-summary-unknown-is-not-absent ()
+  (let ((header (tessera-gnus-tests--metadata-header))
+        (tessera-gnus-summary--content-cache nil))
+    (should (eq (plist-get (tessera-gnus-summary--content-data header)
+                           :attachment) 'unknown))
+    (with-temp-buffer
+      (let ((handle (mm-make-handle (current-buffer)
+                                    '("text/plain"))))
+        (should (tessera-gnus-summary--observe-content header handle))
+        (should-not (tessera-gnus-summary--observe-content
+                     header handle))
+        (should-not (plist-get (tessera-gnus-summary--content-data
+                                header)
+                               :attachment))))))
+
+(ert-deftest tessera-gnus-summary-header-hints-preserve-unknowns ()
+  (let ((data (tessera-gnus-summary--content-data
+               (tessera-gnus-tests--metadata-header
+                '((Content-Type . "multipart/signed; boundary=x"))))))
+    (should (eq (plist-get data :signature) 'present))
+    (should (eq (plist-get data :attachment) 'unknown))
+    (should (eq (plist-get data :encryption) 'unknown))))
 
 (provide 'tessera-gnus-summary-tests)
 ;;; tessera-gnus-summary-tests.el ends here

@@ -51,15 +51,15 @@
 
 (ert-deftest tessera-mu4e-thread-native-paths-and-updates ()
   (tessera-mu4e-tests--with-thread
-    (let ((head (gethash 1 tessera-mu4e-thread--contexts)))
+    (let ((head (gethash 1 tessera-mu4e-headers--threads)))
       (should (= 4 (tessera-thread-context-total head)))
       (should (= 1 (tessera-thread-context-unread head)))
       (should (equal '(t nil)
                      (tessera-thread-context-path
-                      (gethash 3 tessera-mu4e-thread--contexts))))
+                      (gethash 3 tessera-mu4e-headers--threads))))
       (should (equal '(nil)
                      (tessera-thread-context-path
-                      (gethash 4 tessera-mu4e-thread--contexts)))))
+                      (gethash 4 tessera-mu4e-headers--threads)))))
     (should (string-match-p "1/4Subject 1" (buffer-string)))
     (should-not (string-match-p "Subject 2" (buffer-string)))
     (should (= 6 (count-lines (point-min) (point-max))))
@@ -71,7 +71,7 @@
       (mu4e~headers-insert-header message start)
       (tessera-mu4e-headers--refresh)
       (should (= 0 (tessera-thread-context-unread
-                    (gethash 1 tessera-mu4e-thread--contexts)))))
+                    (gethash 1 tessera-mu4e-headers--threads)))))
     (mu4e~headers-goto-docid 2)
     (mu4e-mark-at-point 'move "/archive")
     (tessera-mu4e-headers--refresh)
@@ -82,7 +82,7 @@
     (mu4e-mark-at-point 'unmark nil)
     (setq mu4e-search-threads nil)
     (tessera-mu4e-headers--refresh)
-    (should (= 0 (hash-table-count tessera-mu4e-thread--contexts)))
+    (should (= 0 (hash-table-count tessera-mu4e-headers--threads)))
     (should (string-match-p "Subject 2" (buffer-string)))
     (tessera-mu4e-headers--disable)))
 
@@ -95,7 +95,7 @@
       (tessera-mu4e-headers--refresh)
       (should (equal display (overlay-get fold 'display)))
       (should (= 1 (tessera-thread-context-unread
-                    (gethash 1 tessera-mu4e-thread--contexts))))
+                    (gethash 1 tessera-mu4e-headers--threads))))
       ;; Only the fold summary receives padding in the hidden region.
       (let ((padding
              (seq-filter
@@ -150,13 +150,13 @@
         (put-text-property (line-beginning-position)
                            (line-end-position) 'msg message)))
     (tessera-mu4e-headers--refresh)
-    (let ((head (gethash 1 tessera-mu4e-thread--contexts)))
+    (let ((head (gethash 1 tessera-mu4e-headers--threads)))
       (should (tessera-thread-context-first head))
       (should (= 3 (tessera-thread-context-total head)))
       (should (= 1 (tessera-thread-context-parent
-                    (gethash 2 tessera-mu4e-thread--contexts)))))
+                    (gethash 2 tessera-mu4e-headers--threads)))))
     (should (tessera-thread-context-first
-             (gethash 4 tessera-mu4e-thread--contexts)))
+             (gethash 4 tessera-mu4e-headers--threads)))
     (tessera-mu4e-headers--disable)))
 
 (provide 'tessera-mu4e-thread-tests)

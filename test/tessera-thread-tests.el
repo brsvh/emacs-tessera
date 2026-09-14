@@ -80,11 +80,11 @@
   (with-temp-buffer
     (let ((gnus-show-threads t))
       (tessera-tests--gnus-rows)
-      (tessera-gnus-thread-build)
-      (let ((head (gethash 1 tessera-gnus-thread--contexts))
-            (child (gethash 2 tessera-gnus-thread--contexts))
-            (nested (gethash 3 tessera-gnus-thread--contexts))
-            (last (gethash 4 tessera-gnus-thread--contexts)))
+      (tessera-gnus-summary--build-threads)
+      (let ((head (gethash 1 tessera-gnus-summary--threads))
+            (child (gethash 2 tessera-gnus-summary--threads))
+            (nested (gethash 3 tessera-gnus-summary--threads))
+            (last (gethash 4 tessera-gnus-summary--threads)))
         (should (tessera-thread-context-first head))
         (should (= 4 (tessera-thread-context-total head)))
         (should (= 2 (tessera-thread-context-unread head)))
@@ -93,7 +93,7 @@
         (should (equal '(nil) (tessera-thread-context-path last)))
         (should (tessera-thread-context-last last))
         (should (tessera-thread-context-first
-                 (gethash 5 tessera-gnus-thread--contexts)))))))
+                 (gethash 5 tessera-gnus-summary--threads)))))))
 
 (ert-deftest tessera-thread-folding-retains-counts-and-moves-padding
     ()
@@ -106,8 +106,8 @@
                                   (line-end-position)))
              (overlay (make-overlay start end)))
         (overlay-put overlay 'invisible 'gnus-sum)
-        (tessera-gnus-thread-build)
-        (let ((head (gethash 1 tessera-gnus-thread--contexts)))
+        (tessera-gnus-summary--build-threads)
+        (let ((head (gethash 1 tessera-gnus-summary--threads)))
           (should (tessera-thread-context-last head))
           (should (= 4 (tessera-thread-context-total head)))
           (should (= 2 (tessera-thread-context-unread head))))))))
@@ -117,18 +117,18 @@
     (let ((gnus-show-threads t))
       ;; A missing ancestor may leave a nonzero native starting level.
       (tessera-tests--gnus-rows '(2 3 2))
-      (tessera-gnus-thread-build)
+      (tessera-gnus-summary--build-threads)
       (should (tessera-thread-context-first
-               (gethash 1 tessera-gnus-thread--contexts)))
+               (gethash 1 tessera-gnus-summary--threads)))
       (should (equal '(nil) (tessera-thread-context-path
                              (gethash
-                              2 tessera-gnus-thread--contexts))))
+                              2 tessera-gnus-summary--threads))))
       (should (tessera-thread-context-first
-               (gethash 3 tessera-gnus-thread--contexts)))
+               (gethash 3 tessera-gnus-summary--threads)))
       (setq gnus-show-threads nil)
-      (tessera-gnus-thread-build)
+      (tessera-gnus-summary--build-threads)
       (should (= 0 (hash-table-count
-                    tessera-gnus-thread--contexts))))))
+                    tessera-gnus-summary--threads))))))
 
 (ert-deftest tessera-thread-mark-update-refreshes-head-count ()
   (with-temp-buffer

@@ -9,10 +9,8 @@
 
 (require 'cl-lib)
 (require 'seq)
-(require 'tessera-gnus-data)
-(require 'tessera-gnus)
 (require 'tessera-gnus-summary)
-(require 'tessera-gnus-thread)
+(require 'tessera-gnus)
 (require 'tessera-fixtures)
 
 (defun tessera-fixtures-test-gnus-content ()
@@ -33,7 +31,7 @@
                      (lambda (h)
                        (equal (mail-header-subject h) subject))
                      gnus-newsgroup-headers)
-       for data = (tessera-gnus-data-content header)
+       for data = (tessera-gnus-summary--content-data header)
        for expected =
        (pcase name
          ("unknown" '(unknown unknown unknown))
@@ -57,7 +55,8 @@
            (car (plist-get data :signature-details)))))
        (when (equal name "labels")
          (cl-assert
-          (equal (mapcar #'car (tessera-gnus-data-labels header))
+          (equal (mapcar #'car (tessera-gnus-summary--label-data
+                                header))
                  '("Work" "Review" "Two words" "release")))
          (gnus-summary-goto-subject (mail-header-number header))
          (let ((end (line-end-position))
@@ -98,7 +97,7 @@ Leave the expanded threaded summary visible for inspection."
                   "Planning the package release"))
            (child (car (gnus-summary-article-children root)))
            (total (tessera-thread-context-total
-                   (gethash root tessera-gnus-thread--contexts))))
+                   (gethash root tessera-gnus-summary--threads))))
       (gnus-summary-goto-subject child)
       (let ((mark (char-after (line-beginning-position))))
         (unwind-protect
@@ -107,13 +106,13 @@ Leave the expanded threaded summary visible for inspection."
               (tessera-gnus-summary--post-command)
               (let ((before (tessera-thread-context-unread
                              (gethash
-                              root tessera-gnus-thread--contexts))))
+                              root tessera-gnus-summary--threads))))
                 (gnus-summary-mark-article-as-read gnus-read-mark)
                 (tessera-gnus-summary--post-command)
                 (cl-assert
                  (= (1- before)
                     (tessera-thread-context-unread
-                     (gethash root tessera-gnus-thread--contexts))))))
+                     (gethash root tessera-gnus-summary--threads))))))
           (if (gnus-read-mark-p mark)
               (gnus-summary-mark-article-as-read mark)
             (gnus-summary-mark-article-as-unread mark))
@@ -121,7 +120,7 @@ Leave the expanded threaded summary visible for inspection."
       (gnus-summary-goto-subject root)
       (gnus-summary-hide-thread)
       (tessera-gnus-summary--post-command)
-      (let ((node (gethash root tessera-gnus-thread--contexts)))
+      (let ((node (gethash root tessera-gnus-summary--threads)))
         (cl-assert (tessera-thread-context-last node))
         (cl-assert (= total (tessera-thread-context-total node))))
       (dolist (overlay (overlays-in (point-min) (point-max)))
@@ -132,7 +131,7 @@ Leave the expanded threaded summary visible for inspection."
       (gnus-summary-toggle-threads -1)
       (tessera-gnus-summary--post-command)
       (cl-assert (= 0 (hash-table-count
-                       tessera-gnus-thread--contexts)))
+                       tessera-gnus-summary--threads)))
       (gnus-summary-goto-subject child)
       (cl-assert (cl-loop for p from (line-beginning-position)
                           below (line-end-position)

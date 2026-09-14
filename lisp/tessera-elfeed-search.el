@@ -29,7 +29,7 @@
 ;;; Code:
 
 (require 'subr-x)
-(require 'tessera)
+(require 'tessera-elfeed)
 
 (declare-function elfeed-add-properties "elfeed-lib")
 (declare-function elfeed-entry-date "elfeed-db")
@@ -46,59 +46,7 @@
 (defvar elfeed-search-update-hook)
 (defvar elfeed-search-separator-date-format)
 
-(defun tessera-elfeed-search--set-glyph (symbol value)
-  "Set glyph option SYMBOL to VALUE and refresh active buffers."
-  (set-default symbol value)
-  (when (and (gethash 'elfeed-search tessera--entry-backends)
-             (fboundp 'tessera-elfeed-search--register)
-             (fboundp 'tessera-elfeed-search--refresh-active-buffers))
-    (tessera-elfeed-search--register)
-    (tessera-elfeed-search--refresh-active-buffers)))
-
-(defcustom tessera-elfeed-search-unread-glyph
-  '("*" "●" nerd-icons-mdicon "nf-md-email" accent)
-  "Glyph definition used for unread Elfeed entries.
-
-The value contains the ASCII text, Unicode text, Nerd Icons function,
-Nerd Icons name, and semantic role, in that order."
-  :type '(list
-          (string :tag "ASCII")
-          (string :tag "Unicode")
-          (symbol :tag "Nerd Icons function")
-          (string :tag "Nerd Icons name")
-          (symbol :tag "Semantic role"))
-  :set #'tessera-elfeed-search--set-glyph
-  :group 'tessera-elfeed)
-
-(defcustom tessera-elfeed-search-read-glyph
-  '("o" "○" nerd-icons-mdicon "nf-md-email_open_outline" muted)
-  "Glyph definition used for read Elfeed entries.
-
-The value has the same shape as
-`tessera-elfeed-search-unread-glyph'."
-  :type '(list
-          (string :tag "ASCII")
-          (string :tag "Unicode")
-          (symbol :tag "Nerd Icons function")
-          (string :tag "Nerd Icons name")
-          (symbol :tag "Semantic role"))
-  :set #'tessera-elfeed-search--set-glyph
-  :group 'tessera-elfeed)
-
-(defcustom tessera-elfeed-search-enclosure-glyph
-  '("@" "📎" nerd-icons-mdicon "nf-md-paperclip" informational)
-  "Glyph definition used for entries with enclosures.
-
-The value has the same shape as
-`tessera-elfeed-search-unread-glyph'."
-  :type '(list
-          (string :tag "ASCII")
-          (string :tag "Unicode")
-          (symbol :tag "Nerd Icons function")
-          (string :tag "Nerd Icons name")
-          (symbol :tag "Semantic role"))
-  :set #'tessera-elfeed-search--set-glyph
-  :group 'tessera-elfeed)
+;;;; Search faces
 
 (defface tessera-elfeed-search-title-face
   '((t :inherit elfeed-search-title-face))
@@ -152,6 +100,8 @@ The value has the same shape as
        :slant italic :underline nil :extend nil))
   "Face used for unread URLs, with unread date color and weight."
   :group 'tessera-elfeed)
+
+;;;; Buffer state and fields
 
 (defvar-local tessera-elfeed-search--active nil
   "Non-nil when Tessera renders the current Elfeed search buffer.")
@@ -315,6 +265,8 @@ The value has the same shape as
    'mouse-face 'highlight
    'follow-link [elfeed-date]))
 
+;;;; Layout registration
+
 (defun tessera-elfeed-search--single-line-layout ()
   "Return the single-line layout for Elfeed search entries."
   (make-tessera-entry-layout
@@ -356,6 +308,8 @@ The value has the same shape as
       . ,(tessera-elfeed-search--single-line-layout))
      (two-line
       . ,(tessera-elfeed-search--two-line-layout)))))
+
+;;;; Rendering and lifecycle
 
 (defun tessera-elfeed-search-print-entry (entry)
   "Insert a Tessera rendering of Elfeed ENTRY."

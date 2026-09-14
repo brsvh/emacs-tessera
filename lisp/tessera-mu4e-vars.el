@@ -1,4 +1,4 @@
-;;; tessera-mu4e-faces.el --- Mu4e entry faces  -*- lexical-binding: t; -*-
+;;; tessera-mu4e-vars.el --- Mu4e shared faces  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Bingshan Chang <chang@bingshan.org>
 
@@ -23,19 +23,13 @@
 
 ;;; Commentary:
 
-;; Native mu4e faces composed for individual Tessera header elements.
-;; This module does not enable an adapter or change native mu4e faces.
+;; Follow `mu4e-vars' for shared face declarations.
+;; Public options and the mode live in `tessera-mu4e'.
+;; Message-state composition belongs to the headers adapter.
 
 ;;; Code:
 
-(require 'tessera)
-
-(declare-function mu4e~headers-apply-flags "mu4e-headers")
-
-(defgroup tessera-mu4e nil
-  "Tessera interfaces for mu4e."
-  :group 'tessera
-  :prefix "tessera-mu4e-")
+(require 'tessera-mu4e)
 
 (defgroup tessera-mu4e-headers nil
   "Tessera message headers for mu4e."
@@ -209,69 +203,5 @@
   "Calendar invitation icons."
   :group 'tessera-mu4e-headers)
 
-(defun tessera-mu4e-faces--unread-p (message)
-  "Return non-nil when native MESSAGE flags indicate unread or new."
-  (let ((flags (plist-get message :flags)))
-    (or (memq 'unread flags) (memq 'new flags))))
-
-(defun tessera-mu4e-faces--text (role message text &optional thread)
-  "Return TEXT styled for ROLE and native MESSAGE without mutation.
-ROLE is subject, contact, date, or label.  Subject styling preserves
-mu4e's native state evaluator, including theme-supplied attributes.
-Contacts and dates depend only on unread state outside THREAD.
-THREAD is an optional shared thread context; its subject uses the
-aggregate unread state, while contacts retain native message state."
-  (let* ((result (copy-sequence text))
-         (unread (tessera-mu4e-faces--unread-p message))
-         (face
-          (pcase role
-            ('subject
-             (if thread
-                 (if (> (tessera-thread-context-unread thread) 0)
-                     'tessera-mu4e-headers-thread-unread-subject-face
-                   'tessera-mu4e-headers-thread-subject-face)
-               (if unread 'tessera-mu4e-headers-unread-subject-face
-                 'tessera-mu4e-headers-subject-face)))
-            ('contact
-             (if thread
-                 (if unread
-                     'tessera-mu4e-headers-thread-unread-contact-face
-                   'tessera-mu4e-headers-thread-contact-face)
-               (if unread 'tessera-mu4e-headers-unread-contact-face
-                 'tessera-mu4e-headers-read-contact-face)))
-            ('date (if unread
-                       'tessera-mu4e-headers-unread-date-face
-                     'tessera-mu4e-headers-date-face))
-            ('label 'tessera-mu4e-headers-label-face)
-            (_ (error "Unknown mu4e face role: %S" role)))))
-    ;; A previously styled string must not carry an old state forward.
-    (remove-text-properties 0 (length result) '(face nil) result)
-    (when (or (and (eq role 'subject) (null thread))
-              (and (eq role 'contact) thread))
-      (require 'mu4e-headers)
-      (mu4e~headers-apply-flags message result))
-    (add-face-text-property 0 (length result) face nil result)
-    result))
-
-(defun tessera-mu4e-faces--glyph (slot variant)
-  "Return the face for glyph VARIANT in SLOT.
-Pending operation marks take precedence over matching flag names."
-  (let ((role
-         (if (eq slot 'operation)
-             'operation
-           (pcase variant
-             ('seen 'read)
-             ('passed 'forwarded)
-             ('high 'high-priority)
-             ('low 'low-priority)
-             ('attach 'attachment)
-             ('signed 'signature)
-             ('encrypted 'encryption)
-             ((or 'new 'unread 'draft 'trashed 'flagged 'replied
-                  'list 'personal 'calendar)
-              variant)
-             (_ (error "Unknown mu4e glyph variant: %S" variant))))))
-    (intern (format "tessera-mu4e-headers-%s-face" role))))
-
-(provide 'tessera-mu4e-faces)
-;;; tessera-mu4e-faces.el ends here
+(provide 'tessera-mu4e-vars)
+;;; tessera-mu4e-vars.el ends here

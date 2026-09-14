@@ -164,13 +164,13 @@
         (tessera-glyph-style 'ascii))
     (unwind-protect
         (progn
-          (tessera-elfeed-search--set-glyph
+          (tessera-elfeed--set-search-glyph
            'tessera-elfeed-search-unread-glyph
            '("U" "◉" nerd-icons-mdicon "nf-md-email" accent))
           (should (string-match-p
                    "U"
                    (tessera-entry-render 'elfeed-search entry))))
-      (tessera-elfeed-search--set-glyph
+      (tessera-elfeed--set-search-glyph
        'tessera-elfeed-search-unread-glyph original))))
 
 (ert-deftest tessera-elfeed-search-omits-missing-enclosure ()

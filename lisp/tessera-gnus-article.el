@@ -1,4 +1,4 @@
-;;; tessera-gnus-data.el --- Gnus entry metadata  -*- lexical-binding: t; -*-
+;;; tessera-gnus-article.el --- Gnus article observations  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Bingshan Chang <chang@bingshan.org>
 
@@ -23,120 +23,49 @@
 
 ;;; Commentary:
 
-;; Read native labels and already dissected MIME data.  This module
-;; never fetches articles, verifies signatures, or decrypts content.
-;; Unknown content properties remain distinct from absent ones.
+;; Follow `gnus-art' for prepared-article hooks and MIME handles.
+;; Inspect existing handles without fetching, verifying or decrypting.
+;; The summary adapter owns per-article caches and row rendering.
 
 ;;; Code:
 
+(require 'tessera)
 (require 'cl-lib)
+(require 'gnus-art)
+(require 'mm-decode)
 (require 'seq)
 (require 'subr-x)
-(require 'nnheader)
-(require 'mm-decode)
 
-(defconst tessera-gnus-data--control-types
+(defvar tessera-gnus-summary--active)
+(defvar tessera-gnus-summary--updating)
+(declare-function tessera-gnus-summary--observe-content
+                  "tessera-gnus-summary")
+(declare-function tessera-gnus-summary--sync-line
+                  "tessera-gnus-summary")
+
+;;;; Observed MIME properties
+
+(defconst tessera-gnus-article--control-types
   '("application/pgp-signature" "application/pgp-encrypted"
     "application/pkcs7-signature" "application/x-pkcs7-signature")
   "MIME control parts that do not count as attachments.")
 
-(defvar gnus-registry-db)
-(declare-function gnus-registry-get-id-key "gnus-registry")
-
-(defvar-local tessera-gnus-data--content-cache nil
-  "Snapshots of observed MIME properties, keyed by article identity.")
-
-(defun tessera-gnus-data--header (name header)
-  "Return extra field NAME from native HEADER, ignoring case."
-  (cdr (seq-find
-        (lambda (pair)
-          (string-equal-ignore-case (format "%s" (car pair)) name))
-        (mail-header-extra header))))
-
-(defun tessera-gnus-data--text (value)
-  "Return VALUE as safe single-line label text."
-  (string-trim
-   (replace-regexp-in-string
-    "[[:cntrl:]]+" " " (format "%s" value))))
-
-(defun tessera-gnus-data--gmail-labels (value)
-  "Decode Gmail label VALUE without evaluating it."
-  (when (stringp value)
-    (setq value
-          (condition-case nil
-              (let ((read-circle nil)) (car (read-from-string value)))
-            (error nil))))
-  (when (and (proper-list-p value)
-             (seq-every-p (lambda (item)
-                            (or (stringp item) (symbolp item)))
-                          value))
-    value))
-
-(defun tessera-gnus-data-labels (header)
-  "Return labels from HEADER and the enabled registry.
-Each item is (TEXT . SOURCES); equal names share one display label."
-  (let* ((id (mail-header-message-id header))
-         (registry
-          (when (and id (bound-and-true-p gnus-registry-db)
-                     (fboundp 'gnus-registry-get-id-key))
-            (gnus-registry-get-id-key id 'mark)))
-         (gmail (tessera-gnus-data--gmail-labels
-                 (tessera-gnus-data--header "X-GM-LABELS" header)))
-         (keywords (tessera-gnus-data--header "Keywords" header))
-         labels)
-    (when (stringp keywords)
-      (setq keywords (split-string keywords "," t "[[:space:]]+")))
-    (dolist (source (list (cons "Registry" registry)
-                          (cons "Gmail" gmail)
-                          (cons "Keywords" keywords)))
-      (dolist (value (cdr source))
-        (let* ((text (tessera-gnus-data--text value))
-               (existing (assoc text labels)))
-          (unless (string-empty-p text)
-            (if existing
-                (cl-pushnew (car source) (cdr existing) :test #'equal)
-              (push (list text (car source)) labels))))))
-    (nreverse labels)))
-
-(defun tessera-gnus-data--unknown ()
+(defun tessera-gnus-article--unknown-content ()
   "Return a fresh set of unknown content properties."
   (list :attachment 'unknown :signature 'unknown
         :encryption 'unknown))
 
-(defun tessera-gnus-data--key (header)
-  "Return an identity for HEADER within its summary buffer."
-  (or (mail-header-message-id header) (mail-header-number header)))
-
-(defun tessera-gnus-data-content (header)
-  "Return observed content properties for HEADER, or header hints."
-  (or (and tessera-gnus-data--content-cache
-           (gethash (tessera-gnus-data--key header)
-                    tessera-gnus-data--content-cache))
-      (let* ((result (tessera-gnus-data--unknown))
-             (value (tessera-gnus-data--header "Content-Type" header))
-             (type (and (stringp value)
-                        (car (mail-header-parse-content-type
-                              value)))))
-        (pcase type
-          ("multipart/signed" (setq result
-                                    (plist-put result :signature
-                                               'present)))
-          ("multipart/encrypted" (setq result
-                                       (plist-put result :encryption
-                                                  'present))))
-        result)))
-
-(defun tessera-gnus-data--merge-state (old new)
+(defun tessera-gnus-article--merge-state (old new)
   "Combine independent observations OLD and NEW conservatively."
   (seq-find (lambda (state) (or (eq state old) (eq state new)))
             '(error present processed unknown)))
 
-(defun tessera-gnus-data--mime-content (handles)
+(defun tessera-gnus-article--mime-content (handles)
   "Inspect existing MIME HANDLES without changing or decoding them.
 A processed security part has native result details, not necessarily
 successful verification.  Never infer trust from a result string."
   (if (null handles)
-      (tessera-gnus-data--unknown)
+      (tessera-gnus-article--unknown-content)
     (let ((result (list :attachment nil :signature nil
                         :encryption nil))
           opaque)
@@ -145,7 +74,7 @@ successful verification.  Never infer trust from a result string."
              (key state details)
              (setq result
                    (plist-put result key
-                              (tessera-gnus-data--merge-state
+                              (tessera-gnus-article--merge-state
                                (plist-get result key) state)))
              (when details
                (let ((field (if (eq key :signature)
@@ -196,7 +125,7 @@ successful verification.  Never infer trust from a result string."
                (let ((type (mm-handle-media-type part))
                      (disposition (mm-handle-disposition part)))
                  (unless (member
-                          type tessera-gnus-data--control-types)
+                          type tessera-gnus-article--control-types)
                    (when (or (equal (car disposition) "attachment")
                              (and (mm-handle-filename part)
                                   (not (equal (car disposition)
@@ -211,18 +140,38 @@ successful verification.  Never infer trust from a result string."
             (setq result (plist-put result key 'unknown)))))
       result)))
 
-(defun tessera-gnus-data-observe (header handles)
-  "Save properties of already parsed HANDLES for HEADER.
-Return non-nil only when the observed properties have changed."
-  (let* ((key (tessera-gnus-data--key header))
-         (content (tessera-gnus-data--mime-content handles)))
-    (unless tessera-gnus-data--content-cache
-      (setq tessera-gnus-data--content-cache
-            (make-hash-table :test #'equal)))
-    (unless (equal content
-                   (gethash key tessera-gnus-data--content-cache))
-      (puthash key content tessera-gnus-data--content-cache)
-      t)))
+;;;; Prepared article lifecycle
 
-(provide 'tessera-gnus-data)
-;;; tessera-gnus-data.el ends here
+(defun tessera-gnus-article--updated ()
+  "Observe the displayed article and refresh its summary entry."
+  ;; Gnus also runs its article preparation hook in the summary.
+  (if (derived-mode-p 'gnus-summary-mode)
+      (when (get-buffer gnus-article-buffer)
+        (with-current-buffer gnus-article-buffer
+          (tessera-gnus-article--updated)))
+    (when (and (derived-mode-p 'gnus-article-mode)
+               gnus-summary-buffer
+               (buffer-live-p (get-buffer gnus-summary-buffer)))
+      (let ((handles gnus-article-mime-handles)
+            (article-buffer (current-buffer)))
+        (with-current-buffer gnus-summary-buffer
+          (when (and tessera-gnus-summary--active
+                     gnus-current-headers)
+            (with-current-buffer article-buffer
+              (add-hook 'post-command-hook
+                        #'tessera-gnus-article--updated t t))
+            (when (tessera-gnus-summary--observe-content
+                   gnus-current-headers handles)
+              (save-excursion
+                (when-let* ((position
+                             (text-property-any
+                              (point-min) (point-max) 'gnus-number
+                              (mail-header-number
+                               gnus-current-headers))))
+                  (goto-char position)
+                  (let ((tessera-gnus-summary--updating t))
+                    (tessera-gnus-summary--sync-line t))))
+              (tessera-entry-highlight-current))))))))
+
+(provide 'tessera-gnus-article)
+;;; tessera-gnus-article.el ends here

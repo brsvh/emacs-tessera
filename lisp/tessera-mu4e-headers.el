@@ -32,7 +32,7 @@
 (require 'cl-lib)
 (require 'hl-line)
 (require 'subr-x)
-(require 'tessera-mu4e-faces)
+(require 'tessera-mu4e-vars)
 (require 'tessera-mu4e-thread)
 
 (defvar mu4e-search-threads)
@@ -50,6 +50,77 @@
 (declare-function mu4e~headers-from-or-to "mu4e-headers")
 (declare-function mu4e~headers-human-date "mu4e-headers")
 (declare-function mu4e-mark-at-point "mu4e-mark")
+(declare-function mu4e~headers-apply-flags "mu4e-headers")
+(declare-function mu4e~headers-thread-root-p "mu4e-headers")
+
+;;;; Message state and face composition
+
+(defun tessera-mu4e-headers--unread-p (message)
+  "Return non-nil when native MESSAGE flags indicate unread or new."
+  (let ((flags (plist-get message :flags)))
+    (or (memq 'unread flags) (memq 'new flags))))
+
+(defun tessera-mu4e-headers--styled-text (role message text &optional
+                                               thread)
+  "Return TEXT styled for ROLE and native MESSAGE without mutation.
+ROLE is subject, contact, date, or label.  Subject styling preserves
+mu4e's native state evaluator, including theme-supplied attributes.
+Contacts and dates depend only on unread state outside THREAD.
+THREAD is an optional shared thread context; its subject uses the
+aggregate unread state, while contacts retain native message state."
+  (let* ((result (copy-sequence text))
+         (unread (tessera-mu4e-headers--unread-p message))
+         (face
+          (pcase role
+            ('subject
+             (if thread
+                 (if (> (tessera-thread-context-unread thread) 0)
+                     'tessera-mu4e-headers-thread-unread-subject-face
+                   'tessera-mu4e-headers-thread-subject-face)
+               (if unread 'tessera-mu4e-headers-unread-subject-face
+                 'tessera-mu4e-headers-subject-face)))
+            ('contact
+             (if thread
+                 (if unread
+                     'tessera-mu4e-headers-thread-unread-contact-face
+                   'tessera-mu4e-headers-thread-contact-face)
+               (if unread 'tessera-mu4e-headers-unread-contact-face
+                 'tessera-mu4e-headers-read-contact-face)))
+            ('date (if unread
+                       'tessera-mu4e-headers-unread-date-face
+                     'tessera-mu4e-headers-date-face))
+            ('label 'tessera-mu4e-headers-label-face)
+            (_ (error "Unknown mu4e face role: %S" role)))))
+    ;; A previously styled string must not carry an old state forward.
+    (remove-text-properties 0 (length result) '(face nil) result)
+    (when (or (and (eq role 'subject) (null thread))
+              (and (eq role 'contact) thread))
+      (require 'mu4e-headers)
+      (mu4e~headers-apply-flags message result))
+    (add-face-text-property 0 (length result) face nil result)
+    result))
+
+(defun tessera-mu4e-headers--glyph-face (slot variant)
+  "Return the face for glyph VARIANT in SLOT.
+Pending operation marks take precedence over matching flag names."
+  (let ((role
+         (if (eq slot 'operation)
+             'operation
+           (pcase variant
+             ('seen 'read)
+             ('passed 'forwarded)
+             ('high 'high-priority)
+             ('low 'low-priority)
+             ('attach 'attachment)
+             ('signed 'signature)
+             ('encrypted 'encryption)
+             ((or 'new 'unread 'draft 'trashed 'flagged 'replied
+                  'list 'personal 'calendar)
+              variant)
+             (_ (error "Unknown mu4e glyph variant: %S" variant))))))
+    (intern (format "tessera-mu4e-headers-%s-face" role))))
+
+;;;; Glyphs and header fields
 
 (defconst tessera-mu4e-headers--icons
   '((status
@@ -118,12 +189,59 @@
 (defvar-local tessera-mu4e-headers--saved-hl-line nil
   "Whether native line highlighting was enabled.")
 
+;;;; Thread contexts from native result rows
+
+(defvar-local tessera-mu4e-headers--threads nil
+  "Native docids mapped to shared thread contexts.")
+
+(defun tessera-mu4e-headers--thread-context (message)
+  "Return the shared thread context for native MESSAGE."
+  (when (and mu4e-search-threads
+             tessera-mu4e-headers--threads)
+    (gethash (plist-get message :docid)
+             tessera-mu4e-headers--threads)))
+
+(defun tessera-mu4e-headers--build-threads ()
+  "Build contexts using native root boundaries and display levels.
+The first hidden row represents the visible native fold summary
+for padding purposes.  Threading follows `mu4e-search-threads'."
+  (let (entries stack representative)
+    (when mu4e-search-threads
+      (save-excursion
+        (goto-char (point-min))
+        (while (< (point) (point-max))
+          (when-let* ((message (get-text-property (point) 'msg))
+                      (id (plist-get message :docid))
+                      ;; The footer may inherit the preceding msg.
+                      (_ (looking-at
+                          (regexp-quote mu4e~headers-docid-pre))))
+            (let* ((meta (plist-get message :meta))
+                   (level (or (plist-get meta :level) 0))
+                   (fold (tessera-mu4e-thread-fold-at (point))))
+              (when (or (= level 0) (null representative)
+                        (mu4e~headers-thread-root-p message))
+                (setq representative nil stack nil))
+              (while (and stack (>= (caar stack) level))
+                (pop stack))
+              (push (list id (or (cdar stack) representative)
+                          (tessera-mu4e-headers--unread-p message)
+                          (or (null fold)
+                              (= (point) (overlay-start fold))))
+                    entries)
+              (unless representative (setq representative id))
+              (push (cons level id) stack)))
+          (forward-line 1))))
+    (setq tessera-mu4e-headers--threads
+          (tessera-thread-build-contexts (nreverse entries)))))
+
+;;;; Header elements
+
 (defun tessera-mu4e-headers--context (object buffer window)
   "Build a context for native OBJECT in BUFFER and WINDOW."
   (make-tessera-entry-context
    :backend 'mu4e-headers :object object
    :buffer buffer :window window
-   :thread (tessera-mu4e-thread-context object)))
+   :thread (tessera-mu4e-headers--thread-context object)))
 
 (defun tessera-mu4e-headers--mark (message)
   "Return the native pending mark and target for MESSAGE."
@@ -180,7 +298,7 @@ Include the native pending mark target when available."
    (mapcar
     (lambda (spec)
       (list (car spec) :glyph (tessera-mu4e-headers--glyph spec)
-            :face (tessera-mu4e-faces--glyph name (car spec))
+            :face (tessera-mu4e-headers--glyph-face name (car spec))
             :help-echo
             (if (eq name 'operation)
                 (apply-partially #'tessera-mu4e-headers--help
@@ -209,7 +327,7 @@ Include the native pending mark target when available."
        (mapconcat
         (lambda (label)
           (propertize
-           (tessera-mu4e-faces--text 'label message label)
+           (tessera-mu4e-headers--styled-text 'label message label)
            'help-echo
            (format "%s (%s)" label
                    (string-join
@@ -245,10 +363,12 @@ Include the native pending mark target when available."
                                 (plist-get message :from)
                                 (plist-get message :to))
                       text)))
-         (propertize (tessera-mu4e-faces--text
+         (propertize (tessera-mu4e-headers--styled-text
                       role message text thread)
                      'help-echo help
                      'mouse-face 'tessera-entry-hover-face))))))
+
+;;;; Layout registration
 
 (defun tessera-mu4e-headers--prefix (kind extra)
   "Return packed icon references for KIND and EXTRA line."
@@ -344,6 +464,8 @@ Include the native pending mark target when available."
              (list '(contact :grow t :min-width 4 :truncate tail)
                    content)
              :extra-right-segments '(date)))))))
+
+;;;; Native row synchronization
 
 (defun tessera-mu4e-headers--body-start ()
   "Return the native body start on this logical line, or nil."
@@ -445,7 +567,7 @@ Include the native pending mark target when available."
           (tessera-entry-clear-layout)
           (remove-overlays nil nil 'tessera-mu4e-footer t)
           (unless native
-            (tessera-mu4e-thread-build)
+            (tessera-mu4e-headers--build-threads)
             (setq tessera-mu4e-headers--leading-width
                   (tessera-mu4e-headers--measure)))
           (goto-char (point-min))
@@ -453,7 +575,8 @@ Include the native pending mark target when available."
             (tessera-mu4e-headers--sync-line native)
             (forward-line 1))
           (when tessera-mu4e-headers--active
-            (tessera-mu4e-thread-pad-folds)
+            (tessera-mu4e-thread-pad-folds
+             tessera-mu4e-headers--threads)
             (tessera-mu4e-headers--hide-footer)))
       (goto-char origin)
       (goto-char (min (+ (point) offset) (line-end-position)))
@@ -503,6 +626,8 @@ Include the native pending mark target when available."
       (if (tessera-mu4e-thread-fold-at (point))
           (tessera-entry-clear-current)
         (tessera-entry-highlight-current)))))
+
+;;;; Adapter lifecycle
 
 (defun tessera-mu4e-headers--enable ()
   "Enable reversible layout synchronization in this headers buffer."
