@@ -44,6 +44,42 @@
       (put-text-property start (point) 'gnus-number (+ 42 index))))
   (goto-char (point-min)))
 
+(ert-deftest tessera-gnus-authors-use-names-with-address-fallback ()
+  (with-temp-buffer
+    (let ((gnus-summary-buffer (current-buffer))
+          (gnus-summary-to-prefix "Recipient: ")
+          (gnus-ignored-from-addresses "self@example.test"))
+      (dolist (spec
+               '(("Alex Jr. <alex@example.test>" nil "Alex Jr.")
+                 ("<alex@example.test>" nil "alex@example.test")
+                 ("Self <self@example.test>"
+                  "=?UTF-8?B?5p2O5piO?= <li@example.test>" "李明")
+                 ("Self <self@example.test>"
+                  "<li@example.test>" "li@example.test")
+                 ("Self <self@example.test>" nil "Self")))
+        (let* ((header (tessera-gnus-tests--header))
+               (from (car spec)))
+          (setf (mail-header-from header) from
+                (mail-header-extra header)
+                (append (when (cadr spec) `((To . ,(cadr spec))))
+                        '((Newsgroups . "example.news"))))
+          (let* ((metadata
+                  (plist-put (tessera-gnus-tests--metadata t) :author
+                             (tessera-gnus-summary--author-name
+                              header from)))
+                 (rendered (tessera-gnus-summary--render
+                            header metadata)))
+            (should (equal (plist-get metadata :author) (nth 2 spec)))
+            (should (string-match-p
+                     (regexp-quote (nth 2 spec)) rendered))
+            (when (cadr spec)
+              (let ((help (tessera-gnus-tests--find
+                           0 (length rendered) 'help-echo
+                           (concat "From: " from
+                                   "\nTo: " (cadr spec)) rendered)))
+                (should help))))))
+      (should (equal gnus-summary-to-prefix "Recipient: ")))))
+
 (ert-deftest tessera-gnus-prefix-preserves-native-marks ()
   (let* ((tessera-glyph-style 'ascii)
          (tessera-entry-layout 'two-line)

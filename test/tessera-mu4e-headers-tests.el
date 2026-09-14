@@ -11,6 +11,40 @@
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-headers)
 
+(ert-deftest tessera-mu4e-contacts-use-names-with-address-fallback ()
+  (let ((mu4e-headers-from-or-to-prefix '("From: " . "To: ")))
+    (cl-letf (((symbol-function 'mu4e-server-properties)
+               (lambda () '(:personal-addresses
+                            ("self@example.test")))))
+      (dolist (spec
+               '(((:name "Alex Jr." :email "alex@example.test")
+                  nil "Alex Jr.")
+                 ((:email "alex@example.test")
+                  nil "alex@example.test")
+                 ((:name "" :email "alex@example.test")
+                  nil "alex@example.test")
+                 ((:name "Self" :email "self@example.test")
+                  ((:name "李明" :email "li@example.test")
+                   (:name "José" :email "jose@example.test"))
+                  "李明, José")
+                 ((:name "Self" :email "self@example.test")
+                  ((:email "li@example.test")) "li@example.test")))
+        (let* ((message (list :from (list (car spec)) :to (cadr spec)
+                              :flags '(unread)))
+               (context (tessera-mu4e-headers--context
+                         message nil nil))
+               (text (tessera-mu4e-headers--field 'contact context)))
+          (should (equal text (nth 2 spec)))
+          (should (equal (get-text-property 0 'face text)
+                         'tessera-mu4e-headers-unread-contact-face))
+          (should (string-match-p
+                   (regexp-quote (plist-get (car spec) :email))
+                   (get-text-property 0 'help-echo text)))
+          (should (eq (get-text-property 0 'mouse-face text)
+                      'tessera-entry-hover-face))))
+      (should (equal mu4e-headers-from-or-to-prefix
+                     '("From: " . "To: "))))))
+
 (ert-deftest tessera-mu4e-headers-preserve-native-operations ()
   (let ((mu4e-search-threads nil)
         (mu4e-headers-mode-hook nil)

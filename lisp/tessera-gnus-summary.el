@@ -452,7 +452,7 @@ Spam and expirable faces take precedence over native attributes."
      'mouse-face 'highlight 'help-echo subject)))
 
 (defun tessera-gnus-summary--author (context)
-  "Return the native author representation in CONTEXT."
+  "Return the contact name in CONTEXT, with full address help."
   (propertize
    (plist-get (tessera-entry-context-metadata context) :author)
    'face
@@ -467,8 +467,11 @@ Spam and expirable faces take precedence over native attributes."
       (list (if (tessera-gnus-summary--unread-p context)
                 'tessera-gnus-summary-unread-author-face
               'tessera-gnus-summary-read-author-face))))
-   'help-echo (mail-header-from
-               (tessera-entry-context-object context))))
+   'help-echo
+   (let* ((header (tessera-entry-context-object context))
+          (to (tessera-gnus-summary--header-field "To" header)))
+     (concat "From: " (mail-header-from header)
+             (when to (concat "\nTo: " to))))))
 
 (defun tessera-gnus-summary--date (context)
   "Return the native formatted date in CONTEXT."
@@ -696,6 +699,24 @@ Use NATIVE-FACE when supplied, including an explicitly nil face."
           (setq position next))))
     result))
 
+(defun tessera-gnus-summary--author-name (header from)
+  "Return the contact name from HEADER and decoded FROM.
+Keep native recipient selection, omit prefixes, and use an email
+address when no name is available.  News posts retain their author."
+  (let* ((gnus-summary-to-prefix "")
+         (gnus-ignored-from-addresses
+          (and (assq 'To (mail-header-extra header))
+               gnus-ignored-from-addresses))
+         (extract gnus-extract-address-components)
+         (gnus-extract-address-components
+          (lambda (address)
+            (let* ((parts (funcall extract address))
+                   (name (car parts)))
+              (cons (or (and name (not (string-empty-p name)) name)
+                        (cadr parts) "?")
+                    (cdr parts))))))
+    (gnus-summary-from-or-to-or-newsgroups header from)))
+
 (defun tessera-gnus-summary-format-entry (header)
   "Return a Tessera Gnus summary representation of HEADER.
 The first four characters retain Gnus's native status marks.
@@ -706,8 +727,7 @@ mark discovery, in-place updates, and visual-line navigation."
    (list :marks (string gnus-tmp-unread gnus-tmp-replied
                         gnus-tmp-downloaded gnus-tmp-score-char)
          :author
-         (gnus-summary-from-or-to-or-newsgroups
-          header gnus-tmp-from))))
+         (tessera-gnus-summary--author-name header gnus-tmp-from))))
 
 ;; Gnus user format names are part of its public format protocol.
 (defalias 'gnus-user-format-function-tessera

@@ -38,7 +38,6 @@
 (defvar mu4e-search-threads)
 (defvar mu4e-headers-visible-flags)
 (defvar mu4e-headers-show-target)
-(defvar mu4e-headers-from-or-to-prefix)
 (defvar mu4e-headers-date-format)
 (defvar mu4e-headers-time-format)
 (defvar mu4e--mark-map)
@@ -47,7 +46,7 @@
 (defvar mu4e~headers-docid-post)
 (defvar mu4e~end-of-results)
 
-(declare-function mu4e~headers-from-or-to "mu4e-headers")
+(declare-function mu4e-personal-address-p "mu4e-contacts")
 (declare-function mu4e~headers-human-date "mu4e-headers")
 (declare-function mu4e-mark-at-point "mu4e-mark")
 (declare-function mu4e~headers-apply-flags "mu4e-headers")
@@ -306,6 +305,23 @@ Include the native pending mark target when available."
               (nth 4 spec))))
     (cdr (assq name tessera-mu4e-headers--icons)))))
 
+(defun tessera-mu4e-headers--contact (message)
+  "Return contact names for MESSAGE, falling back to email addresses.
+Use recipients for personal outgoing mail, as native mu4e does."
+  (let* ((from (plist-get message :from))
+         (address (plist-get (car from) :email))
+         (contacts (if (and address (mu4e-personal-address-p address))
+                       (plist-get message :to)
+                     from)))
+    (if contacts
+        (mapconcat
+         (lambda (contact)
+           (let ((name (plist-get contact :name)))
+             (or (and name (not (string-empty-p name)) name)
+                 (plist-get contact :email) "?")))
+         contacts ", ")
+      "?")))
+
 (defun tessera-mu4e-headers--field (role context)
   "Return a native message element for ROLE in CONTEXT."
   (let* ((message (tessera-entry-context-object context))
@@ -356,7 +372,7 @@ Include the native pending mark target when available."
                              (if (or (null subject)
                                      (string-empty-p subject))
                                  "(no subject)" subject)))
-                 ('contact (mu4e~headers-from-or-to message))
+                 ('contact (tessera-mu4e-headers--contact message))
                  ('date (mu4e~headers-human-date message))))
               (help (if (eq role 'contact)
                         (format "From: %S\nTo: %S"
@@ -592,7 +608,7 @@ Include the native pending mark target when available."
         tessera-thread-inner-top-padding
         tessera-thread-inner-bottom-padding
         mu4e-headers-visible-flags
-        mu4e-headers-show-target mu4e-headers-from-or-to-prefix
+        mu4e-headers-show-target
         mu4e-headers-date-format mu4e-headers-time-format
         custom-enabled-themes tessera-entry-layout
         tessera-glyph-style tessera-glyph-color
