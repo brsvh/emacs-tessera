@@ -70,6 +70,41 @@
               (should (eq (overlay-get overlay 'face)
                           hl-line-face)))))))))
 
+(ert-deftest tessera-mu4e-headers-navigate-logical-entries ()
+  (let ((mu4e-search-threads nil)
+        (mu4e-headers-mode-hook nil)
+        (mu4e-headers-fields '((:subject)))
+        (mu4e-search-hide-enabled nil)
+        (mu4e-headers-open-after-move nil))
+    (with-temp-buffer
+      (mu4e-headers-mode)
+      (let ((inhibit-read-only t)
+            (buffer (current-buffer)))
+        (cl-letf (((symbol-function 'mu4e-get-headers-buffer)
+                   (lambda (&rest _) buffer)))
+          (dotimes (index 3)
+            (mu4e~headers-insert-header
+             (list :docid (1+ index) :subject "Subject"
+                   :from '((:name "Author" :email "a@example.test"))
+                   :date '(27000 0) :flags '(seen))
+             (point-max)))
+          (dolist (local '(nil t))
+            (when local
+              (setq-local line-move-ignore-invisible t))
+            (let ((before line-move-ignore-invisible))
+              (tessera-mu4e--enable-headers)
+              (dolist (tessera-entry-layout '(single-line two-line))
+                (tessera-mu4e-headers--refresh)
+                (mu4e~headers-goto-docid 2)
+                (should (= 1 (call-interactively (key-binding "p"))))
+                (should (= 2 (call-interactively (key-binding "n"))))
+                (should (= 3 (mu4e-headers-next)))
+                (should (= 1 (mu4e-headers-prev 2))))
+              (tessera-mu4e-headers--disable)
+              (should (eq before line-move-ignore-invisible))
+              (should (eq local (local-variable-p
+                                 'line-move-ignore-invisible))))))))))
+
 (ert-deftest tessera-mu4e-headers-labels-keep-neutral-separators ()
   (let* ((mu4e--mark-map (make-hash-table))
          (message '(:flags (seen) :labels ("foo" "bar")

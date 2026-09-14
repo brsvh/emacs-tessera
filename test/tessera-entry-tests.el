@@ -702,6 +702,36 @@
                        display)))))
       (remhash backend tessera--entry-backends))))
 
+(ert-deftest tessera-entry-aligns-mixed-font-text-by-pixels ()
+  (let ((tessera--entry-backends (make-hash-table :test #'eq))
+        (tessera-entry-safe-gap 1)
+        (tessera-entry-right-padding 1))
+    (dolist (tessera-entry-layout '(single-line two-line))
+      (if (eq tessera-entry-layout 'single-line)
+          (tessera-entry-tests--register 'tessera-entry-tests)
+        (tessera-entry-tests--register-two-line 'tessera-entry-tests))
+      (cl-letf (((symbol-function 'display-graphic-p)
+                 (lambda (&optional _) t))
+                ((symbol-function 'frame-char-width)
+                 (lambda (&optional _) 10))
+                ((symbol-function 'string-pixel-width)
+                 (lambda (text)
+                   (if (equal text "日本語,café") 73
+                     (* 10 (string-width text))))))
+        (let ((rendered
+               (tessera-entry-render
+                'tessera-entry-tests
+                '(:title "Subject" :date "日本語,café"
+                         :author "Author" :count "12")
+                (selected-window))))
+          (should (tessera-entry-tests--overlay-property-p
+                   'display '(space :align-to (- right (93)))
+                   rendered))
+          (when (eq tessera-entry-layout 'two-line)
+            (should (tessera-entry-tests--overlay-property-p
+                     'display '(space :align-to (- right (40)))
+                     rendered))))))))
+
 (ert-deftest tessera-entry-reserves-glyph-slot-pixel-width ()
   (let ((backend 'tessera-entry-tests)
         (tessera-entry-layout 'two-line)
@@ -714,7 +744,7 @@
                      (lambda (&optional _) t))
                     ((symbol-function 'string-pixel-width)
                      (lambda (string)
-                       (setq measured string)
+                       (push string measured)
                        41)))
             (let ((display
                    (tessera-entry-render
@@ -724,7 +754,9 @@
                              :author "Author"
                              :count "12"
                              :status unread))))
-              (should (string-match-p (regexp-quote "*") measured))
+              (should (seq-some
+                       (lambda (text) (string-match-p "\\*" text))
+                       measured))
               (should
                (tessera-entry-tests--overlay-property-p
                 'display '(space :width (41)) display)))))

@@ -113,8 +113,8 @@
   "Common icon prefix width for the current result set.")
 (defvar-local tessera-mu4e-headers--native-header-line nil
   "Native column header to restore when disabling Tessera.")
-(defvar-local tessera-mu4e-headers--saved-layout nil
-  "Snapshot of the shared entry layout setting.")
+(defvar-local tessera-mu4e-headers--saved-settings nil
+  "Snapshot of layout and logical navigation settings.")
 (defvar-local tessera-mu4e-headers--saved-hl-line nil
   "Whether native line highlighting was enabled.")
 
@@ -511,9 +511,13 @@ Include the native pending mark target when available."
           tessera-mu4e-headers--dirty t
           tessera-mu4e-headers--native-header-line header-line-format
           tessera-mu4e-headers--saved-hl-line hl-line-mode
-          tessera-mu4e-headers--saved-layout
-          (tessera--save-settings '(tessera-entry-layout)))
+          tessera-mu4e-headers--saved-settings
+          (tessera--save-settings
+           '(tessera-entry-layout line-move-ignore-invisible)))
     (setq-local tessera-entry-layout 'two-line)
+    ;; Mu4e skips folded messages itself.  Its logical line motion
+    ;; must not stop at the visual newlines in padding overlays.
+    (setq-local line-move-ignore-invisible nil)
     (add-hook 'after-change-functions
               #'tessera-mu4e-headers--changed nil t)
     (add-hook 'post-command-hook
@@ -539,7 +543,7 @@ Include the native pending mark target when available."
     (tessera-mu4e-headers--sync t)
     (setq header-line-format tessera-mu4e-headers--native-header-line)
     (hl-line-mode (if tessera-mu4e-headers--saved-hl-line 1 -1))
-    (tessera--restore-settings tessera-mu4e-headers--saved-layout)))
+    (tessera--restore-settings tessera-mu4e-headers--saved-settings)))
 
 (provide 'tessera-mu4e-headers)
 ;;; tessera-mu4e-headers.el ends here

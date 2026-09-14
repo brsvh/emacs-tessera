@@ -106,6 +106,9 @@
         (should (equal (overlay-get (car padding) 'after-string)
                        (tessera--padding-string
                         tessera-thread-outer-bottom-padding))))
+      (mu4e~headers-goto-docid 1)
+      (should (= 5 (mu4e-headers-next)))
+      (should (= 1 (mu4e-headers-prev)))
       (tessera-mu4e-headers--disable)
       (should (overlay-buffer fold))
       (should (equal display (overlay-get fold 'display)))

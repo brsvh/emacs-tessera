@@ -746,7 +746,8 @@ Bound indentation by window width.  Spaces become layout overlays."
     ""))
 
 (defun tessera--align-space (right-offset)
-  "Return a display space aligned RIGHT-OFFSET from the right edge."
+  "Return a display space aligned RIGHT-OFFSET from the right edge.
+RIGHT-OFFSET is a column count or a one-element pixel count list."
   (propertize
    " " 'display `(space :align-to (- right ,right-offset))
    'tessera--layout-space t))
@@ -1364,10 +1365,16 @@ LEADING-WIDTH supplies the shared minimum width of that area."
             (if (and (> slot-width 0) (> (length left-string) 0))
                 (tessera--space tessera-entry-segment-gap)
               ""))
+           (margin (+ tessera-entry-safe-gap
+                      tessera-entry-right-padding))
            (right-offset
-            (+ tessera-entry-safe-gap
-               tessera-entry-right-padding
-               (tessera--segments-width right)))
+            (if (and (window-live-p window)
+                     (display-graphic-p (window-frame window)))
+                (with-selected-window window
+                  ;; Fallback fonts need not occupy whole columns.
+                  (list (+ (* margin (frame-char-width))
+                           (string-pixel-width right-string))))
+              (+ margin (tessera--segments-width right))))
            (surface
             (concat
              (tessera--space tessera-entry-left-padding)
