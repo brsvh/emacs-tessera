@@ -1,12 +1,14 @@
 ;;; tessera-thread-tests.el --- Thread layout tests -*- lexical-binding: t; -*-
 
 ;;; Commentary:
+
 ;; Exercise generic layout selection and native summary snapshots.
 
 ;;; Code:
 
 (require 'ert)
 (require 'tessera-gnus-summary)
+(require 'tessera-test-support)
 
 (ert-deftest tessera-thread-selects-layout-from-context ()
   (let* ((plain (make-tessera-entry-layout))
@@ -74,37 +76,10 @@
                        (string-width
                         (substring child 0 branch))))))))))
 
-(defun tessera-thread-tests--rows (&optional levels)
-  "Insert native article rows with optional LEVELS and mixed marks."
-  (setq-local gnus-newsgroup-data nil)
-  (cl-loop
-   for id from 1
-   for level in (or levels '(0 1 2 1 0))
-   for mark = (if (memq id '(1 3 5)) gnus-unread-mark gnus-read-mark)
-   do
-   (let* ((header (make-full-mail-header
-                   id (format "Subject %d" id) "Author"
-                   "Tue, 8 Sep 2026 12:00:00 +0800"
-                   (format "<thread-%d@test.invalid>" id)))
-          (start (point))
-          (metadata (list :marks
-                          (string mark gnus-no-mark
-                                  gnus-no-mark gnus-no-mark)
-                          :author "Author")))
-     (insert (plist-get metadata :marks) "Author\n")
-     (add-text-properties
-      start (point) (list 'gnus-number id
-                          'tessera-gnus-summary-entry
-                          (cons header metadata)))
-     (push (gnus-data-make id mark (1+ start) header level)
-           gnus-newsgroup-data)))
-  (setq gnus-newsgroup-data (nreverse gnus-newsgroup-data))
-  (goto-char (point-min)))
-
 (ert-deftest tessera-thread-native-order-counts-and-paths ()
   (with-temp-buffer
     (let ((gnus-show-threads t))
-      (tessera-thread-tests--rows)
+      (tessera-tests--gnus-rows)
       (tessera-gnus-thread-build)
       (let ((head (gethash 1 tessera-gnus-thread--contexts))
             (child (gethash 2 tessera-gnus-thread--contexts))
@@ -124,7 +99,7 @@
     ()
   (with-temp-buffer
     (let ((gnus-show-threads t))
-      (tessera-thread-tests--rows)
+      (tessera-tests--gnus-rows)
       (add-to-invisibility-spec 'gnus-sum)
       (let* ((start (line-end-position))
              (end (save-excursion (forward-line 3)
@@ -141,7 +116,7 @@
   (with-temp-buffer
     (let ((gnus-show-threads t))
       ;; A missing ancestor may leave a nonzero native starting level.
-      (tessera-thread-tests--rows '(2 3 2))
+      (tessera-tests--gnus-rows '(2 3 2))
       (tessera-gnus-thread-build)
       (should (tessera-thread-context-first
                (gethash 1 tessera-gnus-thread--contexts)))
@@ -161,7 +136,7 @@
           (tessera-entry-layout 'two-line)
           (tessera-glyph-style 'ascii))
       (tessera-gnus-summary--register)
-      (tessera-thread-tests--rows)
+      (tessera-tests--gnus-rows)
       (tessera-gnus-summary--sync-buffer)
       (should (string-match-p
                "2/4" (buffer-substring-no-properties
@@ -197,7 +172,7 @@
           (tessera-thread-inner-top-padding 0.05)
           (tessera-thread-inner-bottom-padding 0.07))
       (tessera-gnus-summary--register)
-      (tessera-thread-tests--rows)
+      (tessera-tests--gnus-rows)
       (tessera-gnus-summary--sync-buffer)
       (cl-loop
        for (top bottom) in

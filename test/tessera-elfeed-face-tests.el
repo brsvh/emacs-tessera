@@ -1,6 +1,7 @@
 ;;; tessera-elfeed-face-tests.el --- Elfeed face states -*- lexical-binding: t; -*-
 
 ;;; Commentary:
+
 ;; Check native colors and independent unread emphasis.
 
 ;;; Code:

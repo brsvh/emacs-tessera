@@ -72,7 +72,7 @@
   "Mu flags covered by the fixture messages.")
 
 (defvar tessera-fixtures-entry-count 240
-  "Number of entries generated for each fixture application.")
+  "Number of base entries before additional named mail scenarios.")
 
 (defvar tessera-fixtures--start-time
   (encode-time 0 0 0 1 1 2025 t)
@@ -184,6 +184,32 @@
     "level-8-zombie"
     "level-9-killed")
   "Fixture groups covering all Gnus group levels.")
+
+(defconst tessera-fixtures--layout-cases
+  `(("read" :title "Interface review: read reference"
+     :author "Mina Park" :tags (foo bar))
+    ("unread" :title "Interface review: unread reference"
+     :author "Mina Park" :tags (foo bar) :unread t)
+    ("long" :title
+     ,(concat "Review the complete internationalization and "
+              "accessibility report before the next release "
+              "candidate")
+     :author "Alexandria Catherine Montgomery-Wellington"
+     :tags (release-planning-with-a-long-label review foo)
+     :unread t)
+    ("wide" :title "界面布局与可访问性：日本語のレビュー・café"
+     :author "李明 / José Álvarez"
+     :tags (设计 日本語 révision) :unread t)
+    ("minimal" :title "OK" :author "Al" :tags nil)
+    ("untitled" :title "" :author "Anonymous" :tags nil :unread t)
+    ("no-url" :title "A saved entry without a public URL"
+     :author "Mina Park" :tags (saved) :link nil)
+    ("attachments" :title "Release notes and audio summary"
+     :author "Akira Sato" :tags (release foo)
+     :attachments t :unread t))
+  "Named layout boundaries, shared by all three clients.
+Only `unread' controls emphasis; ordinary tags are independent.
+A missing :link uses the normal URL; an explicit nil omits it.")
 
 (defun tessera-fixtures--ensure-maildir (directory)
   "Create a Maildir at DIRECTORY."
@@ -714,6 +740,43 @@ Security payloads are intentionally invalid fixture data."
      (list "error" "Content 11: Unsupported signature protocol"
            "Keywords: error, review\n" broken))))
 
+(defun tessera-fixtures--create-layout-mail (backend)
+  "Write shared layout cases for mail BACKEND, `gnus' or `mu4e'."
+  (let ((directory
+         (if (eq backend 'gnus)
+             (expand-file-name "level-1-critical/"
+                               tessera-fixtures--gnus-root)
+           (expand-file-name "work/Inbox/"
+                             tessera-fixtures--mail-root))))
+    (tessera-fixtures--ensure-maildir directory)
+    (cl-loop
+     for (name . properties) in tessera-fixtures--layout-cases
+     for index from (- tessera-fixtures-entry-count
+                       (length tessera-fixtures--layout-cases))
+     for mime =
+     (when (plist-get properties :attachments)
+       (nth 3 (assoc "attachment"
+                     (tessera-fixtures--gnus-content-scenarios))))
+     do
+     (tessera-fixtures--write-file
+      (tessera-fixtures--mail-file
+       directory (format "2600.layout-%s.fixture" name)
+       (if (plist-get properties :unread) "" "S"))
+      (tessera-fixtures--message
+       :id (format "layout-%s.%s" name backend)
+       :subject (plist-get properties :title)
+       :from (format "%s <layout-%s@example.test>"
+                     (plist-get properties :author) name)
+       :to "Layout Review <layout@fixtures.test>"
+       :date (tessera-fixtures--date-header index)
+       :extra-headers
+       (when-let* ((tags (plist-get properties :tags)))
+         (concat "Keywords: " (mapconcat #'symbol-name tags ", ")
+                 "\n"))
+       :content-type (car mime)
+       :body (or (cdr mime)
+                 (format "Named layout case: %s.\n" name)))))))
+
 (defun tessera-fixtures--create-gnus-content ()
   "Write label and MIME samples into the level-1 fixture group."
   (let ((maildir (expand-file-name "level-1-critical/"
@@ -760,20 +823,20 @@ Security payloads are intentionally invalid fixture data."
         (state (tessera-fixtures--random-state 20250102)))
     (tessera-fixtures--write-file
      (tessera-fixtures--mail-file
-      maildir "2100.thread-root.fixture" "")
+      maildir "2100.thread-root.fixture" "S")
      (tessera-fixtures--gnus-message
       "thread-root" "Planning the package release"
-      nil nil (tessera-fixtures--date-header 9)
+      nil nil "Fri, 31 Jan 2025 23:55:00 +0000"
       (tessera-fixtures--person-address "Priya Nair")
       (tessera-fixtures--lipsum state 2)))
     (tessera-fixtures--write-file
      (tessera-fixtures--mail-file
-      maildir "2101.thread-child.fixture" "S")
+      maildir "2101.thread-child.fixture" "")
      (tessera-fixtures--gnus-message
       "thread-child" "Re: Planning the package release"
       "<thread-root.gnus@fixtures.tessera>"
       "<thread-root.gnus@fixtures.tessera>"
-      (tessera-fixtures--date-header 10)
+      "Sat, 1 Feb 2025 00:05:00 +0000"
       (tessera-fixtures--person-address "Akira Sato")
       (tessera-fixtures--lipsum state 1)))
     (tessera-fixtures--write-file
@@ -784,7 +847,7 @@ Security payloads are intentionally invalid fixture data."
       (concat "<thread-root.gnus@fixtures.tessera> "
               "<thread-child.gnus@fixtures.tessera>")
       "<thread-child.gnus@fixtures.tessera>"
-      (tessera-fixtures--date-header 11)
+      "Sun, 2 Feb 2025 08:00:00 +0000"
       (tessera-fixtures--person-address "Samira Diallo")
       (tessera-fixtures--lipsum state 2)))
     ;; Branches, deep replies, and an absent root exercise thread UI.
@@ -928,32 +991,50 @@ Security payloads are intentionally invalid fixture data."
 
 Use BASE-TAGS, zero-based INDEX, and random STATE to populate it."
   (let* ((id (format "entry-%03d" (1+ index)))
-         (subject (tessera-fixtures--subject state))
+         (case-start (- tessera-fixtures-entry-count
+                        (length tessera-fixtures--layout-cases)))
+         (case (and (>= index case-start)
+                    (nth (- index case-start)
+                         tessera-fixtures--layout-cases)))
+         (cycle (/ index (length tessera-fixtures--feed-catalog)))
+         (properties (cdr case))
+         (subject (if case (plist-get properties :title)
+                    (tessera-fixtures--subject state)))
          (paragraphs
           (split-string
            (tessera-fixtures--lipsum
             state (1+ (cl-random 3 state)))
            "\n\n" t))
          (tags
-          (append base-tags
-                  (unless (zerop (mod index 3)) '(unread))
-                  (when (zerop (mod index 11)) '(starred))
-                  (when (zerop (mod index 13)) '(archive))
-                  (when (zerop (mod index 17)) '(important))
-                  (when (zerop (mod index 19)) '(later)))))
+          (if case
+              (append (plist-get properties :tags)
+                      (when (plist-get properties :unread) '(unread)))
+            (append base-tags
+                    (unless (zerop (mod (+ index cycle) 3))
+                      '(unread))
+                    (when (zerop (mod index 11)) '(starred))
+                    (when (zerop (mod index 13)) '(archive))
+                    (when (zerop (mod index 17)) '(important))
+                    (when (zerop (mod index 19)) '(later))))))
     (elfeed-entry--create
      :id (cons feed-id id)
      :title subject
-     :link (format "%s/%s" feed-id id)
+     :link (unless (and case (plist-member properties :link)
+                        (null (plist-get properties :link)))
+             (format "%s/%s" feed-id id))
      :date (float-time (tessera-fixtures--time index))
      :content
      (format "<p>%s</p>" (string-join paragraphs "</p><p>"))
      :content-type 'html
      :enclosures
-     (when (zerop (mod index 23))
-       (list
-        (list (format "%s/%s/notes.pdf" feed-id id)
-              "application/pdf" 4096)))
+     (if (plist-get properties :attachments)
+         (list (list (format "%s/%s/notes.pdf" feed-id id)
+                     "application/pdf" 4096)
+               (list (format "%s/%s/summary.ogg" feed-id id)
+                     "audio/ogg" 8192))
+       (when (and (null case) (zerop (mod index 23)))
+         (list (list (format "%s/%s/notes.pdf" feed-id id)
+                     "application/pdf" 4096))))
      :tags (elfeed-normalize-tags tags)
      :feed-id feed-id)))
 
@@ -978,10 +1059,12 @@ Use BASE-TAGS, zero-based INDEX, and random STATE to populate it."
     (elfeed-db-delete stale)
     (cl-loop
      for index below tessera-fixtures-entry-count
-     for feed-spec = (nth (mod index
-                               (length
-                                tessera-fixtures--feed-catalog))
-                          tessera-fixtures--feed-catalog)
+     for feed-spec =
+     (if (>= index (- tessera-fixtures-entry-count
+                      (length tessera-fixtures--layout-cases)))
+         (car tessera-fixtures--feed-catalog)
+       (nth (mod index (length tessera-fixtures--feed-catalog))
+            tessera-fixtures--feed-catalog))
      do
      (pcase-let ((`(,slug ,title ,base-tags) feed-spec))
        (let* ((feed-id (format "fixture://%s" slug))
@@ -1164,14 +1247,44 @@ ordinary Gnus summary variables."
                    (nth 2 scenario))
                   (error "Missing Gnus fixture state: %s"
                          status)))))
-         (unread (funcall article 'unread))
+         (controlled
+          (delq nil
+                (mapcar (lambda (scenario)
+                          (tessera-fixtures--gnus-article-number
+                           (nth 2 scenario)))
+                        tessera-fixtures--gnus-mark-scenarios)))
+         (unread (cons (funcall article 'unread)
+                       (cl-set-difference gnus-newsgroup-unreads
+                                          controlled)))
          (ticked (funcall article 'ticked))
          (dormant (funcall article 'dormant))
          (expirable (funcall article 'expirable))
          (spam (funcall article 'spam))
          (downloadable (funcall article 'downloadable))
          (unsendable (funcall article 'unsendable)))
-    (setq gnus-newsgroup-unreads (list unread)
+    (dolist (header gnus-newsgroup-headers)
+      (let* ((id (mail-header-message-id header))
+             (number (mail-header-number header))
+             (case
+              (seq-find
+               (lambda (item)
+                 (equal id (format "<layout-%s.gnus@fixtures.tessera>"
+                                   (car item))))
+               tessera-fixtures--layout-cases))
+             (thread
+              (member id
+                      '("<thread-root.gnus@fixtures.tessera>"
+                        "<thread-child.gnus@fixtures.tessera>"
+                        "<thread-grandchild.gnus@fixtures.tessera>"
+                        "<thread-sibling.gnus@fixtures.tessera>"))))
+        (when (or case thread)
+          (setq unread (delq number unread))
+          (when (or (and case (plist-get (cdr case) :unread))
+                    (member
+                     id '("<thread-child.gnus@fixtures.tessera>"
+                          "<thread-sibling.gnus@fixtures.tessera>")))
+            (push number unread)))))
+    (setq gnus-newsgroup-unreads unread
           gnus-newsgroup-marked (list ticked)
           gnus-newsgroup-dormant (list dormant)
           gnus-newsgroup-expirable (list expirable)
@@ -1251,6 +1364,7 @@ ordinary Gnus summary variables."
   (interactive)
   (make-directory tessera-fixtures-state-directory t)
   (tessera-fixtures--create-mu4e-fixtures)
+  (tessera-fixtures--create-layout-mail 'mu4e)
   (tessera-fixtures--prepare-mu-index)
   (tessera-fixtures--configure-mu4e)
   (message "Prepared mu4e fixtures in %s"
@@ -1263,6 +1377,7 @@ ordinary Gnus summary variables."
   (make-directory tessera-fixtures-state-directory t)
   (tessera-fixtures--create-gnus-fixtures)
   (tessera-fixtures--create-gnus-content)
+  (tessera-fixtures--create-layout-mail 'gnus)
   (tessera-fixtures--configure-gnus)
   (message "Prepared Gnus fixtures in %s"
            tessera-fixtures--gnus-root))

@@ -1,6 +1,7 @@
 ;;; tessera-slot-tests.el --- Optional slot tests -*- lexical-binding: t; -*-
 
 ;;; Commentary:
+
 ;; Batch tests for optional glyph references and empty inline groups.
 
 ;;; Code:

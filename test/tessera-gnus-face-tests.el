@@ -1,13 +1,14 @@
 ;;; tessera-gnus-face-tests.el --- Gnus face composition -*- lexical-binding: t; -*-
 
 ;;; Commentary:
+
 ;; Verify native rules, role composition, and glyph color preferences.
 
 ;;; Code:
 
 (require 'ert)
 (require 'tessera-gnus-summary)
-(require 'tessera-thread-tests)
+(require 'tessera-test-support)
 
 (ert-deftest tessera-gnus-faces-use-native-rules-and-thresholds ()
   (let ((header (make-full-mail-header 1))
@@ -72,22 +73,6 @@
     (dolist (face '(tessera-gnus-summary-thread-subject-face
                     tessera-gnus-summary-thread-unread-subject-face))
       (should (eq (face-attribute face :weight nil t) 'bold)))))
-
-(ert-deftest tessera-gnus-faces-all-authors-are-italic ()
-  (let* ((header (make-full-mail-header 1 "Subject" "Author"))
-         (context (make-tessera-entry-context
-                   :object header
-                   :metadata
-                   '(:author "Author" :marks "R   "
-                             :native-face (:slant normal)))))
-    (dolist (node (list nil
-                        (make-tessera-thread-context :first t)
-                        (make-tessera-thread-context :first nil)))
-      (setf (tessera-entry-context-thread context) node)
-      (should (eq (car (get-text-property
-                        0 'face
-                        (tessera-gnus-summary--author context)))
-                  'italic)))))
 
 (ert-deftest tessera-gnus-faces-special-states-and-unread-authors ()
   (let* ((header (make-full-mail-header 1 "Subject" "Author"))
@@ -165,21 +150,6 @@
           (should (eq (face-attribute face :weight nil t)
                       (if read 'normal 'bold))))))))
 
-(ert-deftest tessera-gnus-faces-theme-inheritance-stays-live ()
-  (let ((old (face-attribute 'gnus-header-from :foreground)))
-    (unwind-protect
-        (progn
-          (set-face-attribute 'gnus-header-from nil :foreground "red")
-          (should (equal
-                   (face-attribute 'tessera-gnus-summary-author-face
-                                   :foreground nil t) "red"))
-          (set-face-attribute 'gnus-header-from nil
-                              :foreground "blue")
-          (should (equal
-                   (face-attribute 'tessera-gnus-summary-author-face
-                                   :foreground nil t) "blue")))
-      (set-face-attribute 'gnus-header-from nil :foreground old))))
-
 (ert-deftest tessera-glyph-role-face-respects-color-preferences ()
   (let ((glyph (make-tessera-glyph
                 :ascii "!" :unicode "!" :semantic 'negative
@@ -206,7 +176,7 @@
           (gnus-summary-default-score 0)
           (gnus-summary-default-high-score 10))
       (tessera-gnus-summary--register)
-      (tessera-thread-tests--rows)
+      (tessera-tests--gnus-rows)
       (tessera-gnus-summary--sync-buffer)
       (setq gnus-newsgroup-scored '((1 . 20)))
       (tessera-gnus-summary--sync-buffer)

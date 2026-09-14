@@ -1,15 +1,18 @@
 ;;; tessera-fixtures-tests.el --- Native Gnus fixture tests -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Run `tessera-fixtures-test-gnus-content' in the project
-;; application.
-;; These checks read fixture messages and leave their summary visible.
+
+;; Run the interactive checks in the project application.
+;; They prepare fixture messages and leave their summary visible.
 
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 (require 'tessera-gnus-data)
 (require 'tessera-gnus)
+(require 'tessera-gnus-summary)
+(require 'tessera-gnus-thread)
 (require 'tessera-fixtures)
 
 (defun tessera-fixtures-test-gnus-content ()
@@ -91,18 +94,13 @@ Leave the expanded threaded summary visible for inspection."
     (tessera-gnus-summary--post-command)
     (let* ((summary (current-buffer))
            (gnus-summary-buffer summary)
-           (root (cl-loop for node being the hash-values
-                          of tessera-gnus-thread--contexts
-                          when (and (tessera-thread-context-first
-                                     node)
-                                    (> (tessera-thread-context-total
-                                        node) 3))
-                          return (tessera-thread-context-id node)))
+           (root (tessera-fixtures--gnus-article-number
+                  "Planning the package release"))
            (child (car (gnus-summary-article-children root)))
            (total (tessera-thread-context-total
                    (gethash root tessera-gnus-thread--contexts))))
       (gnus-summary-goto-subject child)
-      (let ((mark (char-after)))
+      (let ((mark (char-after (line-beginning-position))))
         (unwind-protect
             (progn
               (gnus-summary-mark-article-as-unread gnus-unread-mark)
@@ -160,6 +158,120 @@ Leave the expanded threaded summary visible for inspection."
       (list :root root :child child :total total
             :mark-count-update 'passed :folding 'passed
             :native-thread-toggle 'passed :native-ret 'passed))))
+
+(defun tessera-fixtures-tests--elfeed-snapshot ()
+  "Return sorted fixture entry values for repeatability checks."
+  (let (entries)
+    (maphash
+     (lambda (_ entry)
+       (when (string-prefix-p "fixture://"
+                              (elfeed-entry-feed-id entry))
+         (push (list (elfeed-entry-id entry)
+                     (elfeed-entry-title entry)
+                     (elfeed-entry-tags entry)
+                     (elfeed-entry-date entry)
+                     (elfeed-entry-link entry)
+                     (elfeed-entry-enclosures entry)) entries)))
+     elfeed-db-entries)
+    (sort entries (lambda (a b)
+                    (string< (prin1-to-string (car a))
+                             (prin1-to-string (car b)))))))
+
+(defun tessera-fixtures-test-layout-cases ()
+  "Check fixture diversity, stable identity, and mixed thread states.
+Prepare isolated fixture data and leave the named Gnus cases visible."
+  (interactive)
+  (tessera-fixtures-prepare-elfeed)
+  (let ((before (tessera-fixtures-tests--elfeed-snapshot))
+        (feeds (make-hash-table :test #'equal)))
+    (cl-assert (= (length before) tessera-fixtures-entry-count))
+    (dolist (row before)
+      (let* ((feed (caar row))
+             (state (if (memq 'unread (nth 2 row)) 'unread 'read)))
+        (puthash feed (cons state (gethash feed feeds)) feeds)))
+    (maphash (lambda (_ states)
+               (cl-assert (memq 'read states))
+               (cl-assert (memq 'unread states))) feeds)
+    (cl-loop
+     for (name . properties) in tessera-fixtures--layout-cases
+     for index from (- tessera-fixtures-entry-count
+                       (length tessera-fixtures--layout-cases))
+     for id = (cons "fixture://engineering"
+                    (format "entry-%03d" (1+ index)))
+     for entry = (elfeed-db-get-entry id)
+     do
+     (cl-assert entry)
+     (cl-assert (equal (elfeed-entry-title entry)
+                       (plist-get properties :title)))
+     (cl-assert (eq (and (memq 'unread (elfeed-entry-tags entry)) t)
+                    (plist-get properties :unread)))
+     (when (equal name "no-url")
+       (cl-assert (null (elfeed-entry-link entry))))
+     (when (equal name "untitled")
+       (cl-assert (elfeed-entry-link entry)))
+     (when (equal name "minimal")
+       (cl-assert (null (elfeed-entry-tags entry))))
+     (when (plist-get properties :attachments)
+       (cl-assert (= 2 (length (elfeed-entry-enclosures entry))))))
+    (tessera-fixtures-prepare-elfeed)
+    (cl-assert (equal before
+                      (tessera-fixtures-tests--elfeed-snapshot))))
+  (tessera-gnus-mode 1)
+  (tessera-fixtures-open-gnus-marks)
+  (let ((ids (mapcar #'mail-header-message-id
+                     gnus-newsgroup-headers)))
+    (cl-assert (= (length ids)
+                  (length (delete-dups (copy-sequence ids)))))
+    (dolist (case tessera-fixtures--layout-cases)
+      (let* ((id (format "<layout-%s.gnus@fixtures.tessera>"
+                         (car case)))
+             (header (seq-find
+                      (lambda (header)
+                        (equal id (mail-header-message-id header)))
+                      gnus-newsgroup-headers)))
+        (cl-assert header)
+        (gnus-summary-goto-subject (mail-header-number header))
+        (cl-assert (eq (not (gnus-read-mark-p
+                             (char-after (line-beginning-position))))
+                       (plist-get (cdr case) :unread)))))
+    (let (months)
+      (dolist (name '("thread-root" "thread-child"))
+        (let* ((id (format "<%s.gnus@fixtures.tessera>" name))
+               (header
+                (seq-find
+                 (lambda (h) (equal id (mail-header-message-id h)))
+                 gnus-newsgroup-headers)))
+          (cl-assert header)
+          (gnus-summary-goto-subject (mail-header-number header))
+          (cl-assert
+           (eq (not (gnus-read-mark-p
+                     (char-after (line-beginning-position))))
+               (equal name "thread-child")))
+          (push (format-time-string
+                 "%Y-%m" (date-to-time (mail-header-date header)) t)
+                months)))
+      (cl-assert (equal (nreverse months) '("2025-01" "2025-02")))))
+  (tessera-fixtures--create-layout-mail 'mu4e)
+  (dolist (case tessera-fixtures--layout-cases)
+    (let* ((directory (expand-file-name
+                       "work/Inbox/" tessera-fixtures--mail-root))
+           (file (tessera-fixtures--mail-file
+                  directory (format "2600.layout-%s.fixture"
+                                    (car case)))))
+      (cl-assert (file-regular-p file))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (cl-assert (search-forward
+                    (format "<layout-%s.mu4e@fixtures.tessera>"
+                            (car case)) nil t)))))
+  (gnus-summary-goto-subject
+   (tessera-fixtures--gnus-article-number
+    "Interface review: unread reference"))
+  (recenter 1)
+  (list :cases (length tessera-fixtures--layout-cases)
+        :elfeed-distribution 'passed :repeatability 'passed
+        :gnus-read-root-unread-reply 'passed :cross-month 'passed
+        :mail-identities 'passed))
 
 (provide 'tessera-fixtures-tests)
 ;;; tessera-fixtures-tests.el ends here

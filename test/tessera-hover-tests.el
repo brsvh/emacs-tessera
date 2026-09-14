@@ -1,6 +1,7 @@
 ;;; tessera-hover-tests.el --- Element hover boundaries -*- lexical-binding: t; -*-
 
 ;;; Commentary:
+
 ;; Check element boundaries after decorative spaces leave buffer text.
 
 ;;; Code:
