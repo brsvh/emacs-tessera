@@ -56,8 +56,8 @@
             (tessera-mu4e--enable-headers)
             (let ((mu4e-search-threads t))
               (tessera-mu4e-headers--refresh)
-              (should (equal-including-properties
-                       native (buffer-string))))
+              (should (string-match-p "1/1Native subject"
+                                      (buffer-string))))
             (tessera-mu4e-headers--refresh)
             (mu4e~headers-remove-header 42)
             (setq message (plist-put message :flags '(seen)))

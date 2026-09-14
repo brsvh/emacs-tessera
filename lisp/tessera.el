@@ -199,6 +199,21 @@ to every glyph."
   "Face used for warning Tessera glyphs."
   :group 'tessera)
 
+(defun tessera--save-settings (variables)
+  "Snapshot current values and buffer locality of VARIABLES."
+  (mapcar (lambda (variable)
+            (list variable (local-variable-p variable)
+                  (symbol-value variable)))
+          variables))
+
+(defun tessera--restore-settings (settings)
+  "Restore a SETTINGS snapshot in the current buffer."
+  (dolist (setting settings)
+    (pcase-let ((`(,variable ,local ,value) setting))
+      (if local
+          (set (make-local-variable variable) value)
+        (kill-local-variable variable)))))
+
 ;;;; Data model
 
 (defvar tessera-glyph-semantics
@@ -591,6 +606,57 @@ Return BACKEND."
             :layouts layouts :thread-layout thread-layout)))
       (puthash backend definition tessera--entry-backends)))
   backend)
+
+(defun tessera-thread-build-contexts (entries)
+  "Build shared thread contexts from ordered native ENTRIES.
+Each entry is (ID PARENT UNREAD VISIBLE).  IDs are compared with
+`equal'; PARENT is nil for a displayed root, or names an earlier
+entry.  Backends determine parentage and visibility, including any
+visible representative of folded messages.  Return a hash table
+from IDs to contexts with counts, branch paths, and boundaries."
+  (let ((contexts (make-hash-table :test #'equal))
+        (last-child (make-hash-table :test #'equal))
+        (totals (make-hash-table :test #'equal))
+        (unreads (make-hash-table :test #'equal))
+        (last-visible (make-hash-table :test #'equal))
+        nodes)
+    (dolist (entry entries)
+      (pcase-let* ((`(,id ,parent-id ,unread ,visible) entry)
+                   (parent (gethash parent-id contexts))
+                   (root (if parent
+                             (tessera-thread-context-root parent)
+                           id)))
+        (when (and parent-id (null parent))
+          (error "Thread parent %S must precede child %S"
+                 parent-id id))
+        (let ((node (make-tessera-thread-context
+                     :id id :parent parent-id :root root
+                     :first (null parent))))
+          (puthash id node contexts)
+          (push node nodes))
+        (puthash root (1+ (gethash root totals 0)) totals)
+        (when unread
+          (puthash root (1+ (gethash root unreads 0)) unreads))
+        (when parent (puthash parent-id id last-child))
+        (when visible (puthash root id last-visible))))
+    (dolist (node (nreverse nodes))
+      (let* ((id (tessera-thread-context-id node))
+             (root (tessera-thread-context-root node))
+             (parent-id (tessera-thread-context-parent node))
+             (parent (gethash parent-id contexts)))
+        (setf (tessera-thread-context-total node)
+              (gethash root totals)
+              (tessera-thread-context-unread node)
+              (gethash root unreads 0)
+              (tessera-thread-context-last node)
+              (equal id (gethash root last-visible)))
+        (when parent
+          (setf (tessera-thread-context-path node)
+                (append (tessera-thread-context-path parent)
+                        (list (not (equal id
+                                          (gethash parent-id
+                                                   last-child)))))))))
+    contexts))
 
 ;;;; Rendering support
 

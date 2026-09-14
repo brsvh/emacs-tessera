@@ -15,6 +15,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'tessera-test-support)
 (require 'tessera)
 
 (defun tessera-entry-tests--context (object buffer window)
@@ -140,13 +141,6 @@
    :glyph-slots (list (tessera-entry-tests--slot))
    :layouts `((two-line . ,(tessera-entry-tests--two-line-layout)))))
 
-(defun tessera-entry-tests--property-position (property value string)
-  "Return the position where PROPERTY equals VALUE in STRING."
-  (cl-loop for position below (length string)
-           when (equal (get-text-property position property string)
-                       value)
-           return position))
-
 (defun tessera-entry-tests--property-count (property value string)
   "Count positions where PROPERTY equals VALUE in STRING."
   (cl-loop for position below (length string)
@@ -252,7 +246,7 @@
        (cl-some
         (lambda (name)
           (when-let* ((string (overlay-get overlay name)))
-            (tessera-entry-tests--property-position
+            (tessera-tests--property-position
              property value string)))
         '(before-string after-string)))
      (overlays-in (point-min) (point-max)))))
@@ -680,7 +674,7 @@
                               :status unread)
                      (selected-window)))
                    (break
-                    (tessera-entry-tests--property-position
+                    (tessera-tests--property-position
                      'display "\n" display))
                    (title-position (string-match "A very …" display))
                    (author-position

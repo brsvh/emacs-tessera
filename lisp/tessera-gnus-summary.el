@@ -631,13 +631,16 @@ Spam and expirable faces take precedence over native attributes."
                      (encryption :optional t)))
            :extra-right-segments '(date))))))
 
-(defun tessera-gnus-summary--render (header metadata)
-  "Render HEADER with its native METADATA."
+(cl-defun tessera-gnus-summary--render
+    (header metadata
+            &optional (native-face
+                       (tessera-gnus-summary--native-face
+                        header (plist-get metadata :marks))))
+  "Render HEADER with its native METADATA.
+Use NATIVE-FACE when supplied, including an explicitly nil face."
   (let* ((metadata (plist-put (copy-sequence metadata) :thread
                               (tessera-gnus-thread-context header)))
-         (metadata (plist-put metadata :native-face
-                              (tessera-gnus-summary--native-face
-                               header (plist-get metadata :marks))))
+         (metadata (plist-put metadata :native-face native-face))
          (tessera-gnus-summary--metadata metadata)
          (prefix (propertize (copy-sequence
                               (plist-get metadata :marks))
@@ -760,13 +763,14 @@ FORCE also redraws entries whose native marks have not changed."
       (let* ((marks (buffer-substring-no-properties
                      start (+ start 4)))
              (metadata (cdr entry))
+             (native-face (tessera-gnus-summary--native-face
+                           (car entry) marks))
              (inhibit-read-only t)
              (inhibit-modification-hooks t))
         (when (or force
                   (not (equal marks (plist-get metadata :marks)))
                   (not (equal (plist-get metadata :native-face)
-                              (tessera-gnus-summary--native-face
-                               (car entry) marks)))
+                              native-face))
                   (not (equal (plist-get metadata :thread)
                               (tessera-gnus-thread-context
                                (car entry)))))
@@ -775,7 +779,7 @@ FORCE also redraws entries whose native marks have not changed."
           (let* ((updated (plist-put (copy-sequence metadata)
                                      :marks marks))
                  (rendered (tessera-gnus-summary--render
-                            (car entry) updated))
+                            (car entry) updated native-face))
                  (number (get-text-property start 'gnus-number))
                  (intangible
                   (get-text-property start 'gnus-intangible)))
@@ -895,10 +899,7 @@ FORCE also redraws entries whose native marks have not changed."
   "Enable Tessera in the current Gnus summary buffer."
   (unless tessera-gnus-summary--active
     (setq tessera-gnus-summary--saved-settings
-          (mapcar
-           (lambda (variable)
-             (list variable (local-variable-p variable)
-                   (symbol-value variable)))
+          (tessera--save-settings
            '(gnus-summary-line-format tessera-entry-layout)))
     (setq-local gnus-summary-line-format "%u&tessera;\n")
     (setq-local tessera-entry-layout 'two-line)
@@ -931,11 +932,8 @@ FORCE also redraws entries whose native marks have not changed."
                  #'tessera-gnus-summary--resize t)
     (tessera-entry-clear-current)
     (tessera-entry-clear-layout)
-    (dolist (setting tessera-gnus-summary--saved-settings)
-      (pcase-let ((`(,variable ,local ,value) setting))
-        (if local
-            (set (make-local-variable variable) value)
-          (kill-local-variable variable))))
+    (tessera--restore-settings
+     tessera-gnus-summary--saved-settings)
     (setq tessera-gnus-summary--saved-settings nil
           tessera-gnus-summary--appearance nil
           tessera-gnus-summary--folds nil

@@ -50,75 +50,41 @@
 (defun tessera-gnus-thread-build ()
   "Rebuild thread contexts from the completed native summary.
 Use native display levels, including Gnus's treatment of missing
-parents and adopted roots.  Count all article rows, even when folded.
-Threading is enabled solely by `gnus-show-threads'."
-  (setq tessera-gnus-thread--contexts (make-hash-table :test #'eql)
-        tessera-gnus-thread--width 8)
-  (when gnus-show-threads
-    (let ((levels (make-hash-table :test #'eql))
-          (last-child (make-hash-table :test #'eql))
-          (totals (make-hash-table :test #'eql))
-          (unreads (make-hash-table :test #'eql))
-          (last-visible (make-hash-table :test #'eql))
-          nodes stack)
-      (dolist (data gnus-newsgroup-data)
-        (puthash (gnus-data-number data)
-                 (gnus-data-level data) levels))
-      (save-excursion
-        (goto-char (point-min))
-        (while (< (point) (point-max))
-          (when (get-text-property
-                 (point) 'tessera-gnus-summary-entry)
-            (let* ((id (get-text-property (point) 'gnus-number))
-                   (level (or (gethash id levels) 0)))
-              (while (and stack (>= (caar stack) level))
-                (pop stack))
-              (let* ((parent (cdar stack))
-                     (root (if parent
-                               (tessera-thread-context-root parent)
-                             id))
-                     (node (make-tessera-thread-context
-                            :id id :root root
-                            :parent (and parent
-                                         (tessera-thread-context-id
-                                          parent))
-                            :first (null parent))))
-                (push node nodes)
-                (push (cons level node) stack)
-                (puthash root (1+ (gethash root totals 0)) totals)
-                (when parent
-                  (puthash (tessera-thread-context-id parent)
-                           id last-child))
-                (unless (gnus-read-mark-p (char-after))
-                  (puthash root (1+ (gethash root unreads 0))
-                           unreads))
-                (unless (invisible-p (point))
-                  (puthash root id last-visible))
-                (puthash id node tessera-gnus-thread--contexts))))
-          (forward-line 1)))
-      (dolist (node (nreverse nodes))
-        (let* ((root (tessera-thread-context-root node))
-               (parent-id (tessera-thread-context-parent node))
-               (parent (gethash parent-id
-                                tessera-gnus-thread--contexts))
-               (total (gethash root totals))
-               (unread (gethash root unreads 0)))
-          (setf (tessera-thread-context-total node) total
-                (tessera-thread-context-unread node) unread
-                (tessera-thread-context-last node)
-                (eql (tessera-thread-context-id node)
-                     (gethash root last-visible)))
-          (when parent
-            (setf (tessera-thread-context-path node)
-                  (append
-                   (tessera-thread-context-path parent)
-                   (list (not (eql (tessera-thread-context-id node)
-                                   (gethash parent-id
-                                            last-child)))))))
-          (when (tessera-thread-context-first node)
-            (setq tessera-gnus-thread--width
-                  (max tessera-gnus-thread--width
-                       (length (format "%d/%d" unread total))))))))))
+parents and adopted roots.  Threading follows `gnus-show-threads'."
+  (let (entries stack)
+    (when gnus-show-threads
+      (let ((levels (make-hash-table :test #'eql)))
+        (dolist (data gnus-newsgroup-data)
+          (puthash (gnus-data-number data)
+                   (gnus-data-level data) levels))
+        (save-excursion
+          (goto-char (point-min))
+          (while (< (point) (point-max))
+            (when (get-text-property
+                   (point) 'tessera-gnus-summary-entry)
+              (let* ((id (get-text-property (point) 'gnus-number))
+                     (level (or (gethash id levels) 0)))
+                (while (and stack (>= (caar stack) level))
+                  (pop stack))
+                (push (list id (cdar stack)
+                            (not (gnus-read-mark-p (char-after)))
+                            (not (invisible-p (point))))
+                      entries)
+                (push (cons level id) stack)))
+            (forward-line 1)))))
+    (setq tessera-gnus-thread--contexts
+          (tessera-thread-build-contexts (nreverse entries))
+          tessera-gnus-thread--width 8)
+    (maphash
+     (lambda (_id node)
+       (when (tessera-thread-context-first node)
+         (setq tessera-gnus-thread--width
+               (max tessera-gnus-thread--width
+                    (length (format
+                             "%d/%d"
+                             (tessera-thread-context-unread node)
+                             (tessera-thread-context-total node)))))))
+     tessera-gnus-thread--contexts)))
 
 (provide 'tessera-gnus-thread)
 ;;; tessera-gnus-thread.el ends here

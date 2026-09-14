@@ -24,7 +24,7 @@
 
 ;;; Commentary:
 
-;; Enable non-thread Tessera layouts in native mu4e headers buffers.
+;; Enable Tessera entry and thread layouts in mu4e headers.
 
 ;;; Code:
 
@@ -46,8 +46,8 @@
 ;;;###autoload
 (define-minor-mode tessera-mu4e-mode
   "Toggle Tessera layouts in mu4e headers.
-Non-thread results use `tessera-entry-layout'.  Threaded results
-retain their native presentation."
+Non-thread results use `tessera-entry-layout'.  Native threading
+automatically selects the shared thread layout."
   :global t
   :group 'tessera-mu4e
   (if tessera-mu4e-mode

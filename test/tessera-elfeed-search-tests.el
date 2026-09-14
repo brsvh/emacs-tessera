@@ -14,6 +14,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'tessera-test-support)
 (require 'tessera-elfeed)
 
 (require 'elfeed-search)
@@ -38,14 +39,6 @@
    :tags tags
    :feed-id "https://example.invalid/feed"))
 
-(defun tessera-elfeed-search-tests--property-position
-    (property value string)
-  "Return the position where PROPERTY equals VALUE in STRING."
-  (cl-loop for position below (length string)
-           when (equal (get-text-property position property string)
-                       value)
-           return position))
-
 (ert-deftest tessera-elfeed-search-renders-two-line-layout ()
   (let* ((entry
           (tessera-elfeed-search-tests--entry
@@ -69,7 +62,7 @@
       (let ((rendered
              (buffer-substring (point-min) (point-max))))
         (should
-         (tessera-elfeed-search-tests--property-position
+         (tessera-tests--property-position
           'display "\n" rendered))
         (should (string-match-p "\\*" rendered))
         (should (string-match-p "Example Feed" rendered))
@@ -79,7 +72,7 @@
         (should (string-match-p "(emacs)" rendered))
         (should-not (string-match-p "unread" rendered))
         (should
-         (tessera-elfeed-search-tests--property-position
+         (tessera-tests--property-position
           'help-echo "Enclosure: application/pdf" rendered)))
       (goto-char (point-min))
       (search-forward "A useful Elfeed entry")

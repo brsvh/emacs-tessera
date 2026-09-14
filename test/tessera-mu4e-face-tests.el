@@ -82,5 +82,42 @@
       (dolist (spec saved)
         (apply #'set-face-attribute (car spec) nil (cdr spec))))))
 
+(ert-deftest tessera-mu4e-faces-thread-separates-aggregate-state ()
+  (let* ((thread (make-tessera-thread-context :unread 1 :total 4))
+         (root '(:flags (seen trashed))))
+    (should
+     (eq (get-text-property
+          0 'face (tessera-mu4e-faces--text
+                   'subject root "Subject" thread))
+         'tessera-mu4e-headers-thread-unread-subject-face))
+    (setf (tessera-thread-context-unread thread) 0)
+    (let* ((text (tessera-mu4e-faces--text
+                  'subject root "Subject" thread))
+           (face (get-text-property 0 'face text)))
+      (should (eq face 'tessera-mu4e-headers-thread-subject-face))
+      (should (eq (face-attribute face :weight nil t) 'bold)))
+    (dolist (flags '((seen trashed) (unread draft) (new flagged)
+                     (seen replied) (unread passed)))
+      (let* ((message (list :flags flags))
+             (native (mu4e~headers-apply-flags
+                      message (copy-sequence "Contact")))
+             (text (tessera-mu4e-faces--text
+                    'contact message "Contact" thread))
+             (faces (get-text-property 0 'face text))
+             (unread (tessera-mu4e-faces--unread-p message)))
+        (should (eq (cadr faces) (get-text-property 0 'face native)))
+        (should (eq (face-attribute (car faces) :slant nil t)
+                    'italic))
+        (when unread
+          (should (eq (face-attribute (car faces) :weight nil t)
+                      'bold)))
+        ;; Dates continue to depend on each message, not the thread.
+        (should
+         (eq (get-text-property
+              0 'face (tessera-mu4e-faces--text
+                       'date message "Date" thread))
+             (if unread 'tessera-mu4e-headers-unread-date-face
+               'tessera-mu4e-headers-date-face)))))))
+
 (provide 'tessera-mu4e-face-tests)
 ;;; tessera-mu4e-face-tests.el ends here

@@ -24,7 +24,7 @@
 
 ;;; Commentary:
 
-;; Reversible non-thread presentation over native mu4e result rows.
+;; Reversible thread and entry layouts over native mu4e rows.
 ;; The native docid cookie, mark fringe, and message identity remain.
 
 ;;; Code:
@@ -33,6 +33,7 @@
 (require 'hl-line)
 (require 'subr-x)
 (require 'tessera-mu4e-faces)
+(require 'tessera-mu4e-thread)
 
 (defvar mu4e-search-threads)
 (defvar mu4e-headers-visible-flags)
@@ -51,36 +52,50 @@
 (declare-function mu4e-mark-at-point "mu4e-mark")
 
 (defconst tessera-mu4e-headers--icons
-  '((new "N" "✦" "new-box" "New")
-    (unread "u" "●" "email" "Unread")
-    (seen "S" "○" "email-open-outline" "Read")
-    (draft "D" "✎" "email-edit-outline" "Draft")
-    (trashed "T" "⌫" "trash-can-outline" "Trashed")
-    (flagged "F" "★" "star" "Flagged")
-    (replied "R" "↩" "reply" "Replied")
-    (passed "P" "↪" "forward" "Forwarded")
-    (list "l" "≡" "format-list-bulleted" "Mailing list")
-    (personal "p" "♙" "account-outline" "Personal")
-    (attach "a" "📎" "paperclip" "Attachment present")
-    (signed "S" "✍" "file-sign" "Signed; not verified")
-    (encrypted "E" "🔒" "lock-outline" "Encrypted")
-    (calendar "c" "▦" "calendar" "Calendar invitation")
-    (high "H" "↑" "arrow-up-bold" "High priority")
-    (low "L" "↓" "arrow-down-bold" "Low priority")
-    (move "m" "→" "folder-move-outline" "Move")
-    (refile "r" "↧" "archive-arrow-down-outline" "Refile")
-    (trash "d" "⌫" "trash-can-outline" "Trash action")
-    (untrash "=" "↶" "restore" "Untrash action")
-    (delete "D" "×" "delete-forever-outline" "Delete action")
-    (flag "+" "☆" "star-plus-outline" "Flag action")
-    (unflag "-" "⊖" "star-minus-outline" "Unflag action")
-    (read "!" "○" "email-open-outline" "Read action")
-    (mark-unread "?" "●" "email" "Unread action")
-    (label "l" "+" "tag-plus-outline" "Add/remove labels")
-    (unlabel "L" "−" "tag-remove-outline" "Clear labels")
-    (action "a" "▶" "play-circle-outline" "Custom action")
-    (something "*" "◆" "clipboard-clock-outline" "Deferred"))
-  "Glyphs for native message flags and pending operations.")
+  '((status
+     (new "N" "✦" "new-box" "New")
+     (unread "u" "●" "email" "Unread")
+     (seen "S" "○" "email-open-outline" "Read"))
+    (priority
+     (high "H" "↑" "arrow-up-bold" "High priority")
+     (low "L" "↓" "arrow-down-bold" "Low priority"))
+    (operation
+     (move "m" "→" "folder-move-outline" "Move")
+     (refile "r" "↧" "archive-arrow-down-outline" "Refile")
+     (trash "d" "⌫" "trash-can-outline" "Trash action")
+     (untrash "=" "↶" "restore" "Untrash action")
+     (delete "D" "×" "delete-forever-outline" "Delete action")
+     (flag "+" "☆" "star-plus-outline" "Flag action")
+     (unflag "-" "⊖" "star-minus-outline" "Unflag action")
+     (read "!" "○" "email-open-outline" "Read action")
+     (mark-unread "?" "●" "email" "Unread action")
+     (label "l" "+" "tag-plus-outline" "Add/remove labels")
+     (unlabel "L" "−" "tag-remove-outline" "Clear labels")
+     (action "a" "▶" "play-circle-outline" "Custom action")
+     (something "*" "◆" "clipboard-clock-outline" "Deferred"))
+    (draft
+     (draft "D" "✎" "email-edit-outline" "Draft"))
+    (trashed
+     (trashed "T" "⌫" "trash-can-outline" "Trashed"))
+    (flagged
+     (flagged "F" "★" "star" "Flagged"))
+    (replied
+     (replied "R" "↩" "reply" "Replied"))
+    (passed
+     (passed "P" "↪" "forward" "Forwarded"))
+    (list
+     (list "l" "≡" "format-list-bulleted" "Mailing list"))
+    (personal
+     (personal "p" "♙" "account-outline" "Personal"))
+    (attach
+     (attach "a" "📎" "paperclip" "Attachment present"))
+    (signed
+     (signed "S" "✍" "file-sign" "Signed; not verified"))
+    (encrypted
+     (encrypted "E" "🔒" "lock-outline" "Encrypted"))
+    (calendar
+     (calendar "c" "▦" "calendar" "Calendar invitation")))
+  "Glyph variants grouped by their native message or action slot.")
 
 (defconst tessera-mu4e-headers--auxiliary
   '(draft trashed flagged replied passed list personal)
@@ -99,7 +114,7 @@
 (defvar-local tessera-mu4e-headers--native-header-line nil
   "Native column header to restore when disabling Tessera.")
 (defvar-local tessera-mu4e-headers--saved-layout nil
-  "Previous locality and value of the shared entry layout.")
+  "Snapshot of the shared entry layout setting.")
 (defvar-local tessera-mu4e-headers--saved-hl-line nil
   "Whether native line highlighting was enabled.")
 
@@ -107,7 +122,8 @@
   "Build a context for native OBJECT in BUFFER and WINDOW."
   (make-tessera-entry-context
    :backend 'mu4e-headers :object object
-   :buffer buffer :window window))
+   :buffer buffer :window window
+   :thread (tessera-mu4e-thread-context object)))
 
 (defun tessera-mu4e-headers--mark (message)
   "Return the native pending mark and target for MESSAGE."
@@ -131,13 +147,13 @@
               (memq slot mu4e-headers-visible-flags) slot)))))
 
 (defun tessera-mu4e-headers--help
-    (label operation window object position)
-  "Describe LABEL at POSITION in OBJECT or WINDOW.
-For OPERATION icons, include the native pending mark target."
+    (label window object position)
+  "Describe operation LABEL at POSITION in OBJECT or WINDOW.
+Include the native pending mark target when available."
   (let ((buffer (if (bufferp object) object
                   (and (window-live-p window)
                        (window-buffer window)))))
-    (if (and operation (buffer-live-p buffer))
+    (if (buffer-live-p buffer)
         (with-current-buffer buffer
           (let* ((message (get-text-property position 'msg))
                  (mark (tessera-mu4e-headers--mark message)))
@@ -166,25 +182,29 @@ For OPERATION icons, include the native pending mark target."
       (list (car spec) :glyph (tessera-mu4e-headers--glyph spec)
             :face (tessera-mu4e-faces--glyph name (car spec))
             :help-echo
-            (apply-partially #'tessera-mu4e-headers--help
-                             (nth 4 spec) (eq name 'operation))))
-    (cl-remove-if-not
-     (lambda (spec)
-       (pcase name
-         ('operation
-          (memq (car spec)
-                '(move refile trash untrash delete flag unflag read
-                       mark-unread label unlabel action something)))
-         ('priority (memq (car spec) '(high low)))
-         ('status (memq (car spec) '(new unread seen)))
-         (_ (eq name (car spec)))))
-     tessera-mu4e-headers--icons))))
+            (if (eq name 'operation)
+                (apply-partially #'tessera-mu4e-headers--help
+                                 (nth 4 spec))
+              (nth 4 spec))))
+    (cdr (assq name tessera-mu4e-headers--icons)))))
 
 (defun tessera-mu4e-headers--field (role context)
   "Return a native message element for ROLE in CONTEXT."
   (let* ((message (tessera-entry-context-object context))
-         (mark (tessera-mu4e-headers--mark message)))
+         (thread (tessera-entry-context-thread context)))
     (pcase role
+      ('thread-tree
+       (when-let* ((text (tessera-thread-prefix context)))
+         (propertize text
+                     'face 'tessera-mu4e-headers-thread-tree-face
+                     'mouse-face 'tessera-entry-hover-face)))
+      ('thread-count
+       (when-let* ((text (tessera-thread-count context)))
+         (propertize
+          text 'mouse-face 'tessera-entry-hover-face
+          'face (if (> (tessera-thread-context-unread thread) 0)
+                    'tessera-mu4e-headers-thread-unread-count-face
+                  'tessera-mu4e-headers-thread-count-face))))
       ('labels
        (mapconcat
         (lambda (label)
@@ -203,12 +223,13 @@ For OPERATION icons, include the native pending mark target."
                              (plist-get message :tags) nil))
         (propertize "," 'face 'default 'mouse-face 'default)))
       ('target
-       (when (and mu4e-headers-show-target (cdr mark))
-         (propertize (format "→ %s" (cdr mark))
-                     'face 'tessera-mu4e-headers-operation-face
-                     'help-echo
-                     (format "%s: %s" (car mark) (cdr mark))
-                     'mouse-face 'tessera-entry-hover-face)))
+       (let ((mark (tessera-mu4e-headers--mark message)))
+         (when (and mu4e-headers-show-target (cdr mark))
+           (propertize (format "→ %s" (cdr mark))
+                       'face 'tessera-mu4e-headers-operation-face
+                       'help-echo
+                       (format "%s: %s" (car mark) (cdr mark))
+                       'mouse-face 'tessera-entry-hover-face))))
       (_
        (let* ((text
                (pcase role
@@ -224,7 +245,8 @@ For OPERATION icons, include the native pending mark target."
                                 (plist-get message :from)
                                 (plist-get message :to))
                       text)))
-         (propertize (tessera-mu4e-faces--text role message text)
+         (propertize (tessera-mu4e-faces--text
+                      role message text thread)
                      'help-echo help
                      'mouse-face 'tessera-entry-hover-face))))))
 
@@ -233,6 +255,9 @@ For OPERATION icons, include the native pending mark target."
   (mapcar
    (lambda (name) (list name :optional t))
    (cond
+    ((eq kind 'thread)
+     (append '(priority operation) tessera-mu4e-headers--auxiliary
+             '(status)))
     ((eq kind 'single-line)
      (append '(operation priority) tessera-mu4e-headers--auxiliary
              '(status)))
@@ -259,12 +284,37 @@ For OPERATION icons, include the native pending mark target."
      (mapcar (lambda (role)
                (cons role (apply-partially
                            #'tessera-mu4e-headers--field role)))
-             '(subject contact date labels target))
+             '(subject contact date labels target
+                       thread-tree thread-count))
      :glyph-slots
-     (mapcar #'tessera-mu4e-headers--slot
-             (append '(operation priority status)
-                     tessera-mu4e-headers--auxiliary
-                     '(attach signed encrypted calendar)))
+     (mapcar (lambda (spec)
+               (tessera-mu4e-headers--slot (car spec)))
+             tessera-mu4e-headers--icons)
+     :thread-layout
+     (let ((leading (list (cons :slots
+                                (tessera-mu4e-headers--prefix
+                                 'thread nil))))
+           (left (list '(thread-tree :grow t :min-width 0
+                                     :truncate head :priority -2
+                                     :optional t)
+                       '(contact :grow t :min-width 4 :truncate tail)
+                       content target))
+           (right (list labels 'date)))
+       (make-tessera-thread-layout
+        :head
+        (make-tessera-entry-layout
+         :glyph-slots-align 'right
+         :leading-width #'tessera-mu4e-headers--width
+         :main-leading-segments '(thread-count)
+         :main-left-segments (list subject)
+         :extra-leading-segments leading
+         :extra-left-segments left :extra-right-segments right)
+        :child
+        (make-tessera-entry-layout
+         :glyph-slots-align 'right
+         :leading-width #'tessera-mu4e-headers--width
+         :main-leading-segments leading
+         :main-left-segments left :main-right-segments right)))
      :layouts
      (list
       (cons 'single-line
@@ -306,7 +356,8 @@ For OPERATION icons, include the native pending mark target."
 
 (defun tessera-mu4e-headers--measure ()
   "Measure the maximum visible prefix width for this result set."
-  (let ((width 0))
+  (let ((width 0)
+        (kind (if mu4e-search-threads 'thread tessera-entry-layout)))
     (save-excursion
       (goto-char (point-min))
       (while (< (point) (point-max))
@@ -314,7 +365,9 @@ For OPERATION icons, include the native pending mark target."
           (let ((context (tessera-mu4e-headers--context
                           (get-text-property (point) 'msg)
                           (current-buffer) nil)))
-            (dolist (extra (if (eq tessera-entry-layout 'two-line)
+            (when-let* ((count (tessera-thread-count context)))
+              (setq width (max width (string-width count))))
+            (dolist (extra (if (eq kind 'two-line)
                                '(nil t) '(nil)))
               (setq width
                     (max width
@@ -323,7 +376,7 @@ For OPERATION icons, include the native pending mark target."
                                  (tessera-mu4e-headers--state
                                   (car reference) context))
                                (tessera-mu4e-headers--prefix
-                                tessera-entry-layout extra))))))))
+                                kind extra))))))))
         (forward-line 1)))
     width))
 
@@ -363,7 +416,8 @@ For OPERATION icons, include the native pending mark target."
             (when-let* ((mark (tessera-mu4e-headers--mark message)))
               (goto-char start)
               (mu4e-mark-at-point (car mark) (cdr mark)))
-          (tessera-entry-apply-layout body (point)))))))
+          (unless (tessera-mu4e-thread-fold-at start)
+            (tessera-entry-apply-layout body (point))))))))
 
 (defun tessera-mu4e-headers--hide-footer ()
   "Hide the native end-of-results notice with a removable overlay."
@@ -391,6 +445,7 @@ For OPERATION icons, include the native pending mark target."
           (tessera-entry-clear-layout)
           (remove-overlays nil nil 'tessera-mu4e-footer t)
           (unless native
+            (tessera-mu4e-thread-build)
             (setq tessera-mu4e-headers--leading-width
                   (tessera-mu4e-headers--measure)))
           (goto-char (point-min))
@@ -398,6 +453,7 @@ For OPERATION icons, include the native pending mark target."
             (tessera-mu4e-headers--sync-line native)
             (forward-line 1))
           (when tessera-mu4e-headers--active
+            (tessera-mu4e-thread-pad-folds)
             (tessera-mu4e-headers--hide-footer)))
       (goto-char origin)
       (goto-char (min (+ (point) offset) (line-end-position)))
@@ -407,7 +463,12 @@ For OPERATION icons, include the native pending mark target."
   "Return native and shared options affecting the presentation."
   (list (when-let* ((window (get-buffer-window (current-buffer))))
           (window-body-width window))
-        mu4e-search-threads mu4e-headers-visible-flags
+        mu4e-search-threads (tessera-mu4e-thread-folds)
+        tessera-thread-outer-top-padding
+        tessera-thread-outer-bottom-padding
+        tessera-thread-inner-top-padding
+        tessera-thread-inner-bottom-padding
+        mu4e-headers-visible-flags
         mu4e-headers-show-target mu4e-headers-from-or-to-prefix
         mu4e-headers-date-format mu4e-headers-time-format
         custom-enabled-themes tessera-entry-layout
@@ -431,23 +492,16 @@ For OPERATION icons, include the native pending mark target."
       (when (or tessera-mu4e-headers--dirty
                 (not (equal appearance
                             tessera-mu4e-headers--appearance)))
-        (tessera-mu4e-headers--sync mu4e-search-threads)
+        (tessera-mu4e-headers--sync nil)
         (setq tessera-mu4e-headers--dirty nil
               tessera-mu4e-headers--appearance appearance))
-      (if mu4e-search-threads
-          (progn
-            (if header-line-format
-                (setq tessera-mu4e-headers--native-header-line
-                      header-line-format)
-              (setq header-line-format
-                    tessera-mu4e-headers--native-header-line))
-            (hl-line-mode
-             (if tessera-mu4e-headers--saved-hl-line 1 -1)))
-        (when header-line-format
-          (setq tessera-mu4e-headers--native-header-line
-                header-line-format))
-        (setq header-line-format nil)
-        (hl-line-mode -1)
+      (when header-line-format
+        (setq tessera-mu4e-headers--native-header-line
+              header-line-format))
+      (setq header-line-format nil)
+      (hl-line-mode -1)
+      (if (tessera-mu4e-thread-fold-at (point))
+          (tessera-entry-clear-current)
         (tessera-entry-highlight-current)))))
 
 (defun tessera-mu4e-headers--enable ()
@@ -458,8 +512,7 @@ For OPERATION icons, include the native pending mark target."
           tessera-mu4e-headers--native-header-line header-line-format
           tessera-mu4e-headers--saved-hl-line hl-line-mode
           tessera-mu4e-headers--saved-layout
-          (list (local-variable-p 'tessera-entry-layout)
-                tessera-entry-layout))
+          (tessera--save-settings '(tessera-entry-layout)))
     (setq-local tessera-entry-layout 'two-line)
     (add-hook 'after-change-functions
               #'tessera-mu4e-headers--changed nil t)
@@ -486,10 +539,7 @@ For OPERATION icons, include the native pending mark target."
     (tessera-mu4e-headers--sync t)
     (setq header-line-format tessera-mu4e-headers--native-header-line)
     (hl-line-mode (if tessera-mu4e-headers--saved-hl-line 1 -1))
-    (if (car tessera-mu4e-headers--saved-layout)
-        (setq-local tessera-entry-layout
-                    (cadr tessera-mu4e-headers--saved-layout))
-      (kill-local-variable 'tessera-entry-layout))))
+    (tessera--restore-settings tessera-mu4e-headers--saved-layout)))
 
 (provide 'tessera-mu4e-headers)
 ;;; tessera-mu4e-headers.el ends here

@@ -65,6 +65,45 @@
   "Unread contacts, independent of special message states."
   :group 'tessera-mu4e-headers)
 
+(defface tessera-mu4e-headers-thread-subject-face
+  '((t :inherit (mu4e-header-face default)
+       :weight bold :slant normal :extend nil))
+  "Subjects of threads with no unread messages."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-unread-subject-face
+  '((t :inherit (mu4e-unread-face default)
+       :weight bold :slant normal :extend nil))
+  "Subjects of threads containing unread messages."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-contact-face
+  '((t :slant italic :extend nil))
+  "Contact adjustments over each message's native state."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-unread-contact-face
+  '((t :inherit tessera-mu4e-headers-thread-contact-face
+       :weight bold :extend nil))
+  "Unread contacts retaining their native state and italics."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-tree-face
+  '((t :inherit mu4e-header-face :extend nil))
+  "Thread branches."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-count-face
+  '((t :inherit (mu4e-header-face default) :extend nil))
+  "Counts of threads with no unread messages."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-unread-count-face
+  '((t :inherit (mu4e-unread-face default)
+       :weight bold :extend nil))
+  "Counts of threads containing unread messages."
+  :group 'tessera-mu4e-headers)
+
 (defface tessera-mu4e-headers-date-face
   '((t :inherit (mu4e-header-face default)
        :weight normal :slant normal :extend nil))
@@ -170,31 +209,36 @@
   "Calendar invitation icons."
   :group 'tessera-mu4e-headers)
 
-(defface tessera-mu4e-headers-error-face
-  '((t :inherit error :extend nil))
-  "Reported content processing or verification errors."
-  :group 'tessera-mu4e-headers)
-
 (defun tessera-mu4e-faces--unread-p (message)
   "Return non-nil when native MESSAGE flags indicate unread or new."
   (let ((flags (plist-get message :flags)))
     (or (memq 'unread flags) (memq 'new flags))))
 
-(defun tessera-mu4e-faces--text (role message text)
+(defun tessera-mu4e-faces--text (role message text &optional thread)
   "Return TEXT styled for ROLE and native MESSAGE without mutation.
 ROLE is subject, contact, date, or label.  Subject styling preserves
 mu4e's native state evaluator, including theme-supplied attributes.
-Contacts and dates depend only on unread state."
+Contacts and dates depend only on unread state outside THREAD.
+THREAD is an optional shared thread context; its subject uses the
+aggregate unread state, while contacts retain native message state."
   (let* ((result (copy-sequence text))
          (unread (tessera-mu4e-faces--unread-p message))
          (face
           (pcase role
-            ('subject (if unread
-                          'tessera-mu4e-headers-unread-subject-face
-                        'tessera-mu4e-headers-subject-face))
-            ('contact (if unread
-                          'tessera-mu4e-headers-unread-contact-face
-                        'tessera-mu4e-headers-read-contact-face))
+            ('subject
+             (if thread
+                 (if (> (tessera-thread-context-unread thread) 0)
+                     'tessera-mu4e-headers-thread-unread-subject-face
+                   'tessera-mu4e-headers-thread-subject-face)
+               (if unread 'tessera-mu4e-headers-unread-subject-face
+                 'tessera-mu4e-headers-subject-face)))
+            ('contact
+             (if thread
+                 (if unread
+                     'tessera-mu4e-headers-thread-unread-contact-face
+                   'tessera-mu4e-headers-thread-contact-face)
+               (if unread 'tessera-mu4e-headers-unread-contact-face
+                 'tessera-mu4e-headers-read-contact-face)))
             ('date (if unread
                        'tessera-mu4e-headers-unread-date-face
                      'tessera-mu4e-headers-date-face))
@@ -202,7 +246,8 @@ Contacts and dates depend only on unread state."
             (_ (error "Unknown mu4e face role: %S" role)))))
     ;; A previously styled string must not carry an old state forward.
     (remove-text-properties 0 (length result) '(face nil) result)
-    (when (eq role 'subject)
+    (when (or (and (eq role 'subject) (null thread))
+              (and (eq role 'contact) thread))
       (require 'mu4e-headers)
       (mu4e~headers-apply-flags message result))
     (add-face-text-property 0 (length result) face nil result)
@@ -223,7 +268,7 @@ Pending operation marks take precedence over matching flag names."
              ('signed 'signature)
              ('encrypted 'encryption)
              ((or 'new 'unread 'draft 'trashed 'flagged 'replied
-                  'list 'personal 'calendar 'error)
+                  'list 'personal 'calendar)
               variant)
              (_ (error "Unknown mu4e glyph variant: %S" variant))))))
     (intern (format "tessera-mu4e-headers-%s-face" role))))

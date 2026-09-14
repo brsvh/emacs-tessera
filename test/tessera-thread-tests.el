@@ -8,7 +8,7 @@
 
 (require 'ert)
 (require 'tessera-gnus-summary)
-(require 'tessera-test-support)
+(require 'tessera-gnus-test-support)
 
 (ert-deftest tessera-thread-selects-layout-from-context ()
   (let* ((plain (make-tessera-entry-layout))

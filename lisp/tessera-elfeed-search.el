@@ -420,10 +420,7 @@ The value has the same shape as
   "Enable Tessera rendering in the current Elfeed search buffer."
   (unless tessera-elfeed-search--active
     (setq tessera-elfeed-search--saved-settings
-          (mapcar
-           (lambda (variable)
-             (list variable (local-variable-p variable)
-                   (symbol-value variable)))
+          (tessera--save-settings
            '(elfeed-search-print-entry-function
              tessera-entry-layout
              elfeed-search-separator-date-format)))
@@ -441,11 +438,8 @@ The value has the same shape as
 (defun tessera-elfeed-search--disable ()
   "Disable Tessera rendering in the current Elfeed search buffer."
   (when tessera-elfeed-search--active
-    (dolist (setting tessera-elfeed-search--saved-settings)
-      (pcase-let ((`(,variable ,local ,value) setting))
-        (if local
-            (set (make-local-variable variable) value)
-          (kill-local-variable variable))))
+    (tessera--restore-settings
+     tessera-elfeed-search--saved-settings)
     (remove-hook 'elfeed-search-update-hook
                  #'tessera-elfeed-search--apply-layout t)
     (remove-hook 'post-command-hook

@@ -8,7 +8,7 @@
 
 (require 'ert)
 (require 'tessera-gnus-summary)
-(require 'tessera-test-support)
+(require 'tessera-gnus-test-support)
 
 (ert-deftest tessera-gnus-faces-use-native-rules-and-thresholds ()
   (let ((header (make-full-mail-header 1))
@@ -179,7 +179,19 @@
       (tessera-tests--gnus-rows)
       (tessera-gnus-summary--sync-buffer)
       (setq gnus-newsgroup-scored '((1 . 20)))
-      (tessera-gnus-summary--sync-buffer)
+      (let ((native-face (symbol-function
+                          'tessera-gnus-summary--native-face))
+            (calls (make-hash-table)))
+        (cl-letf (((symbol-function
+                    'tessera-gnus-summary--native-face)
+                   (lambda (header marks)
+                     (cl-incf (gethash (mail-header-number header)
+                                       calls 0))
+                     (funcall native-face header marks))))
+          (tessera-gnus-summary--sync-buffer))
+        ;; User highlight rules run once even when a row is redrawn.
+        (dotimes (index 5)
+          (should (= (gethash (1+ index) calls) 1))))
       (should
        (eq (plist-get (cdr (get-text-property
                             (point) 'tessera-gnus-summary-entry))
