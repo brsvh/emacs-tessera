@@ -209,9 +209,9 @@
         (should (= offset (- (point) (line-beginning-position)))))
       (setq mu4e-search-threads nil)
       (tessera-mu4e-headers--refresh)
-      (should-not (tessera-entry-point))
+      (should (tessera-entry-point))
       (should (= 2 (mu4e-headers-next)))
-      (should (= 2 (current-column)))
+      (should (looking-at "Subject 2"))
       (tessera-mu4e-headers--disable)
       (should-not (advice-member-p
                    #'tessera-mu4e-headers--moved

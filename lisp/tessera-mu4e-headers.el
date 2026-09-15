@@ -412,6 +412,7 @@ Use recipients for personal outgoing mail, as native mu4e does."
                            (encrypted :optional t)
                            (calendar :optional t)))
          (subject '(subject :grow t :min-width 4 :truncate tail))
+         (entry-subject (append subject '(:point t)))
          (target '(target :grow t :max-width 24 :min-width 0
                           :truncate tail :optional t))
          (labels '(labels :grow t :max-width 24 :min-width 0
@@ -463,7 +464,7 @@ Use recipients for personal outgoing mail, as native mu4e does."
              :main-leading-segments
              (list (cons :slots (tessera-mu4e-headers--prefix
                                  'single-line nil)))
-             :main-left-segments (list subject target content)
+             :main-left-segments (list entry-subject target content)
              :main-right-segments
              (list labels '(contact :max-width 20 :truncate tail
                                     :optional t) 'date)))
@@ -477,7 +478,7 @@ Use recipients for personal outgoing mail, as native mu4e does."
              :extra-leading-segments
              (list (cons :slots (tessera-mu4e-headers--prefix
                                  'two-line t)))
-             :main-left-segments (list subject target)
+             :main-left-segments (list entry-subject target)
              :main-right-segments (list labels)
              :extra-left-segments
              (list '(contact :grow t :min-width 4 :truncate tail)
@@ -646,12 +647,13 @@ Use recipients for personal outgoing mail, as native mu4e does."
 ;;;; Native navigation
 
 (defun tessera-mu4e-headers--position-point ()
-  "Place point at the selected thread member's visible contact.
+  "Place point at the selected message's layout anchor.
+Use the subject in flat layouts and the contact in thread layouts.
 Resolve the related headers buffer when called from a message view
 or a native search hook.  Preserve folded rows and native selection."
   (when-let* ((buffer (mu4e-get-headers-buffer)))
     (with-current-buffer buffer
-      (when (and tessera-mu4e-headers--active mu4e-search-threads)
+      (when tessera-mu4e-headers--active
         (tessera-mu4e-headers--refresh)
         (when-let* ((_ (not (tessera-mu4e-thread-fold-at (point))))
                     (position (tessera-entry-point)))
@@ -660,7 +662,7 @@ or a native search hook.  Preserve folded rows and native selection."
             (set-window-point window position)))))))
 
 (defun tessera-mu4e-headers--moved (result)
-  "Normalize a successful native navigation RESULT's contact point.
+  "Normalize a successful native navigation RESULT's layout anchor.
 Return RESULT unchanged, including native docids and positions."
   (when (numberp result)
     (tessera-mu4e-headers--position-point))
@@ -675,7 +677,7 @@ those noninteractive calls must retain their original positions."
       (when interactive (tessera-mu4e-headers--position-point)))))
 
 (defun tessera-mu4e-headers--update (function &rest arguments)
-  "Preserve a contact anchor across native FUNCTION with ARGUMENTS.
+  "Preserve a layout anchor across native FUNCTION with ARGUMENTS.
 Native updates replace rows and restore a column.  Follow the old
 message only while it remains selected after the native update."
   (let* ((buffer (mu4e-get-headers-buffer))
@@ -683,7 +685,6 @@ message only while it remains selected after the native update."
           (when (buffer-live-p buffer)
             (with-current-buffer buffer
               (when (and tessera-mu4e-headers--active
-                         mu4e-search-threads
                          (get-text-property
                           (point) 'tessera-entry-point))
                 (mu4e~headers-docid-at-point))))))

@@ -131,10 +131,27 @@
                 (tessera-mu4e-headers--refresh)
                 (mu4e~headers-goto-docid 2)
                 (should (= 1 (call-interactively (key-binding "p"))))
+                (should (looking-at "Subject"))
                 (should (= 2 (call-interactively (key-binding "n"))))
+                (should (looking-at "Subject"))
                 (should (= 3 (mu4e-headers-next)))
-                (should (= 1 (mu4e-headers-prev 2))))
+                (should (looking-at "Subject"))
+                (should (= 1 (mu4e-headers-prev 2)))
+                (should (looking-at "Subject"))
+                (let* ((message (copy-sequence
+                                 (mu4e-message-at-point)))
+                       (flags (if (memq 'seen
+                                        (plist-get message :flags))
+                                  '(unread replied flagged)
+                                '(seen))))
+                  (mu4e~headers-update-handler
+                   (plist-put message :flags flags) nil nil)
+                  (should (= 1 (mu4e~headers-docid-at-point)))
+                  (should (looking-at "Subject"))
+                  (should (= (point) (tessera-entry-point)))))
               (tessera-mu4e-headers--disable)
+              (should (= 2 (mu4e-headers-next)))
+              (should (= 2 (current-column)))
               (should (eq before line-move-ignore-invisible))
               (should (eq local (local-variable-p
                                  'line-move-ignore-invisible))))))))))
