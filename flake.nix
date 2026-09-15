@@ -60,8 +60,10 @@
                 emacs-tessera =
                   {
                     alert,
+                    elfeed,
                     lib,
                     melpaBuild,
+                    mu4e,
                     projectRoot,
                     ...
                   }:
@@ -76,6 +78,8 @@
 
                     packageRequires = [
                       alert
+                      elfeed
+                      mu4e
                     ];
 
                     meta = {

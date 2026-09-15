@@ -22,11 +22,6 @@
 
 (tessera-elfeed-search--register)
 
-(defvar tessera-elfeed-search-tests--root
-  (expand-file-name ".."
-                    (file-name-directory load-file-name))
-  "Repository root for integration tests.")
-
 (defun tessera-elfeed-search-tests--entry
     (&optional tags enclosures)
   "Return an Elfeed entry with TAGS and ENCLOSURES for tests."
@@ -230,9 +225,7 @@
 
 (ert-deftest tessera-elfeed-registers-only-when-enabled ()
   (let ((tessera--entry-backends (make-hash-table :test #'eq)))
-    (load-file
-     (expand-file-name "lisp/tessera-elfeed-search.el"
-                       tessera-elfeed-search-tests--root))
+    (load-file (locate-library "tessera-elfeed-search"))
     (should-not (gethash 'elfeed-search tessera--entry-backends))
     (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
       (with-temp-buffer

@@ -388,6 +388,17 @@ Spam and expirable faces take precedence over native attributes."
          'tessera-gnus-summary-thread-unread-count-face
        'tessera-gnus-summary-thread-count-face))))
 
+(defun tessera-gnus-summary--ascii-mark (mark)
+  "Return an ASCII fallback for the native Gnus variable MARK.
+Use its current value when ASCII, otherwise its declared standard
+value.  Signal an error if neither value is an ASCII character."
+  (let ((character (symbol-value mark)))
+    (unless (and (characterp character) (<= 0 character 127))
+      (setq character (eval (car (get mark 'standard-value)) t)))
+    (unless (and (characterp character) (<= 0 character 127))
+      (error "Gnus mark `%s' has no valid ASCII fallback" mark))
+    (char-to-string character)))
+
 (defun tessera-gnus-summary--slot (spec)
   "Build a native status slot from SPEC."
   (make-tessera-glyph-slot
@@ -402,7 +413,7 @@ Spam and expirable faces take precedence over native attributes."
                     entry))
          (list id
                :glyph (make-tessera-glyph
-                       :ascii (char-to-string (symbol-value mark))
+                       :ascii (tessera-gnus-summary--ascii-mark mark)
                        :unicode unicode
                        :nerd-icons
                        (list :function 'nerd-icons-mdicon

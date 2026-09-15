@@ -123,6 +123,160 @@
                 'undownloaded))
     (should (eq (tessera-gnus-summary--state 'score context) 'high))))
 
+(ert-deftest tessera-gnus-custom-marks-register-all-native-slots ()
+  (dolist (spec tessera-gnus-summary--states)
+    (dolist (entry (cddr spec))
+      (dolist (character '(?~ ?•))
+        (let* ((mark (cadr entry))
+               (tessera--entry-backends (make-hash-table :test #'eq))
+               (marks (apply #'string
+                             (cl-loop for index below 4
+                                      collect (if (eq index
+                                                      (cadr spec))
+                                                  character
+                                                gnus-no-mark))))
+               (context (make-tessera-entry-context
+                         :metadata (list :marks marks))))
+          (cl-progv (list mark) (list character)
+            (tessera-gnus-summary--register)
+            (let* ((backend (gethash 'gnus-summary
+                                     tessera--entry-backends))
+                   (slot (seq-find
+                          (lambda (slot)
+                            (eq (tessera-glyph-slot-name slot)
+                                (car spec)))
+                          (tessera--entry-backend-glyph-slots
+                           backend)))
+                   (variant (assq (car entry)
+                                  (tessera-glyph-slot-glyphs slot)))
+                   (glyph (plist-get (cdr variant) :glyph))
+                   (expected (if (= character ?~) ?~
+                               (eval (car (get mark 'standard-value))
+                                     t)))
+                   (tessera-glyph-style 'ascii))
+              (should (eq (funcall (tessera-glyph-slot-selector slot)
+                                   context)
+                          (car entry)))
+              (should (equal (tessera-glyph-render glyph context)
+                             (char-to-string expected)))
+              (should (= (symbol-value mark) character)))))))))
+
+(ert-deftest tessera-gnus-custom-marks-preserve-rendering-and-state ()
+  (let ((gnus-unread-mark ?•)
+        (gnus-read-mark ?○)
+        (gnus-process-mark ?◆)
+        (gnus-downloaded-mark ?✓)
+        (gnus-score-over-mark ?↑)
+        (tessera--entry-backends (make-hash-table :test #'eq)))
+    (tessera-gnus-summary--register)
+    (cl-letf (((symbol-function 'display-graphic-p)
+               (lambda (&optional _display) t))
+              ((symbol-function 'char-displayable-p)
+               (lambda (_character) t))
+              ((symbol-function 'tessera--nerd-icons-available-p)
+               (lambda () t))
+              ((symbol-function 'nerd-icons-mdicon)
+               (lambda (name)
+                 (if (equal name "nf-md-email") "N" "I"))))
+      (dolist (style '(ascii unicode nerd-icons))
+        (let* ((tessera-glyph-style style)
+               (metadata (tessera-gnus-tests--metadata t))
+               (marks (string gnus-unread-mark gnus-process-mark
+                              gnus-downloaded-mark
+                              gnus-score-over-mark))
+               (context (make-tessera-entry-context
+                         :metadata (list :marks marks)))
+               (expected (pcase style
+                           ('ascii " ") ('unicode "●") (_ "N"))))
+          (setq metadata (plist-put metadata :marks marks))
+          (let* ((text (tessera-gnus-summary--render
+                        (tessera-gnus-tests--header) metadata))
+                 (position (tessera-gnus-tests--find
+                            4 (length text) 'help-echo "Unread"
+                            text)))
+            (should position)
+            (should (equal (substring text position (1+ position))
+                           expected))
+            (should (equal (substring-no-properties text 0 4)
+                           marks)))
+          (should (tessera-gnus-summary--unread-p context))
+          (should (eq (tessera-gnus-summary--state
+                       'secondary context)
+                      'processable))
+          (setf (tessera-entry-context-metadata context)
+                (tessera-gnus-tests--metadata))
+          (should-not
+           (tessera-gnus-summary--unread-p context)))))))
+
+(ert-deftest tessera-gnus-custom-marks-restore-existing-and-new
+    ()
+  (dolist (character '(?~ ?•))
+    (let ((gnus-unread-mark character)
+          (gnus-summary-mode-hook nil)
+          (gnus-summary-line-format "Native format\n")
+          (tessera-gnus-mode nil)
+          (tessera--entry-backends (make-hash-table :test #'eq))
+          buffers saved native-local)
+      (unwind-protect
+          (progn
+            (dotimes (index 2)
+              (let ((buffer (generate-new-buffer " *Gnus existing*")))
+                (push buffer buffers)
+                (with-current-buffer buffer
+                  (gnus-summary-mode)
+                  (when (= index 0)
+                    (setq native-local
+                          (local-variable-p
+                           'gnus-summary-line-format)))
+                  (when (= index 1)
+                    (setq-local gnus-summary-line-format "Local\n"))
+                  (push (list buffer gnus-summary-line-format
+                              (local-variable-p
+                               'gnus-summary-line-format))
+                        saved))))
+            (dotimes (_ 2)
+              (tessera-gnus-mode 1)
+              (tessera-gnus-mode 1)
+              (let ((buffer (generate-new-buffer " *Gnus future*")))
+                (push buffer buffers)
+                (with-current-buffer buffer (gnus-summary-mode)))
+              (dolist (buffer buffers)
+                (with-current-buffer buffer
+                  (should tessera-gnus-summary--active)
+                  (should (equal gnus-summary-line-format
+                                 "%u&tessera;\n"))))
+              (tessera-gnus-mode -1)
+              (tessera-gnus-mode -1)
+              (dolist (buffer buffers)
+                (with-current-buffer buffer
+                  (should-not tessera-gnus-summary--active)
+                  (should-not tessera-gnus-summary--saved-settings)
+                  (unless (assq buffer saved)
+                    (should (equal gnus-summary-line-format
+                                   "Native format\n"))
+                    (should
+                     (eq (local-variable-p 'gnus-summary-line-format)
+                         native-local)))))
+              (dolist (item saved)
+                (with-current-buffer (car item)
+                  (should (equal gnus-summary-line-format
+                                 (nth 1 item)))
+                  (should (eq (local-variable-p
+                               'gnus-summary-line-format)
+                              (nth 2 item)))))
+              (should (= gnus-unread-mark character))))
+        (tessera-gnus-mode -1)
+        (mapc #'kill-buffer buffers)))))
+
+(ert-deftest tessera-gnus-custom-mark-rejects-invalid-default ()
+  (let ((gnus-unread-mark ?•)
+        (tessera--entry-backends (make-hash-table :test #'eq)))
+    (dolist (default '(nil (?•) ("x")))
+      (cl-letf (((get 'gnus-unread-mark 'standard-value) default))
+        (should-error (tessera-gnus-summary--register) :type 'error)
+        (should-not (gethash 'gnus-summary tessera--entry-backends))
+        (should (= gnus-unread-mark ?•))))))
+
 (ert-deftest tessera-gnus-mark-update-keeps-native-identity ()
   (with-temp-buffer
     (let ((tessera-glyph-style 'ascii)
