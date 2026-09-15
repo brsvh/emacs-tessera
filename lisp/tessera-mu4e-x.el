@@ -1,0 +1,300 @@
+;;; tessera-mu4e-x.el --- Mu4e context snapshots  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 Bingshan Chang <chang@bingshan.org>
+
+;; Author: Bingshan Chang <chang@bingshan.org>
+;; Maintainer: Bingshan Chang <chang@bingshan.org>
+;; Keywords: convenience, news
+
+;; This file is not part of GNU Emacs.
+
+;; This file is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published
+;; by the Free Software Foundation, either version 3 of the License,
+;; or (at your option) any later version.
+
+;; This file is distributed in the hope that it will be useful, but
+;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;; General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this file.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Commentary:
+
+;; Optional mu4e context construction independent of layout modes.
+
+;;; Code:
+
+(require 'tessera-x)
+(require 'tessera-mu4e)
+(require 'mu4e-headers)
+(require 'mu4e-message)
+(require 'mu4e-server)
+(require 'mu4e-query-items)
+
+(defun tessera-mu4e-x--contacts (contacts)
+  "Format CONTACTS with full names and addresses."
+  (mapconcat
+   (lambda (contact)
+     (let ((name (plist-get contact :name))
+           (email (plist-get contact :email)))
+       (if (and name (not (string-empty-p name)))
+           (format "%s <%s>" name (or email ""))
+         (or email ""))))
+   contacts ", "))
+
+(defun tessera-mu4e-x--item (message)
+  "Snapshot native MESSAGE without using rendered header text."
+  (make-tessera-x-item
+   :id (or (plist-get message :docid) (plist-get message :path))
+   :message-id (car (tessera-x-message-ids
+                     (plist-get message :message-id)))
+   :references (tessera-x-message-ids
+                (plist-get message :references))
+   :subject (plist-get message :subject)
+   :date (plist-get message :date)
+   :data (list :path (plist-get message :path))
+   :metadata
+   (append
+    (mapcar (lambda (field)
+              (cons (capitalize (substring (symbol-name field) 1))
+                    (tessera-mu4e-x--contacts
+                     (plist-get message field))))
+            '(:from :to :cc))
+    (list (cons "Maildir" (plist-get message :maildir))
+          (cons "Labels"
+                (string-join
+                 (delete-dups
+                  (append (plist-get message :labels)
+                          (plist-get message :tags) nil)) ","))
+          (cons "Flags" (plist-get message :flags))))))
+
+(defun tessera-mu4e-x--items (&optional selected)
+  "Read result messages, or SELECTED messages, including folded rows."
+  (unless (derived-mode-p 'mu4e-headers-mode)
+    (user-error "Run this command in mu4e Headers"))
+  (let* ((seen (make-hash-table))
+         (marked (and selected mu4e--mark-map
+                      (> (hash-table-count mu4e--mark-map) 0)))
+         (region (and selected (use-region-p)))
+         (begin (and region (region-beginning)))
+         (end (and region (region-end)))
+         (current (and selected
+                       (plist-get (mu4e-message-at-point t) :docid)))
+         stack items)
+    (mu4e-headers-for-each
+     (lambda (message)
+       (let ((id (plist-get message :docid)))
+         (unless (gethash id seen)
+           (puthash id t seen)
+           (setq stack
+                 (tessera-x-native-parent-stack
+                  (or (car (tessera-x-message-ids
+                            (plist-get message :message-id)))
+                      id (plist-get message :path))
+                  (if (and mu4e-search-threads
+                           (not (mu4e~headers-thread-root-p message)))
+                      (or (plist-get (plist-get message :meta) :level)
+                          0)
+                    0)
+                  stack))
+           (when (cond
+                  ((not selected) t)
+                  (marked (gethash id mu4e--mark-map))
+                  (region (and (< (line-beginning-position) end)
+                               (>= (line-end-position) begin)))
+                  (t (equal id current)))
+             (let ((item (tessera-mu4e-x--item message)))
+               (setf (tessera-x-item-parent item) (cdadr stack))
+               (push item items)))))))
+    (nreverse items)))
+
+(defun tessera-mu4e-x--read-body (item)
+  "Fill ITEM from its readable local message file."
+  (tessera-x-read-message
+   item (lambda ()
+          (insert-file-contents-literally
+           (mu4e-message-readable-path (tessera-x-item-data item))))))
+
+(defun tessera-mu4e-x--finish (context items)
+  "Read local bodies in ITEMS and publish CONTEXT."
+  (when (tessera-x-context-pending-p context)
+    (dolist (item items) (tessera-mu4e-x--read-body item))
+    (setf (tessera-x-context-items context)
+          (tessera-x-group-threads items))
+    (tessera-x-context-finish context)))
+
+(defun tessera-mu4e-x--cancel-query (process output errors)
+  "Stop PROCESS and release OUTPUT and ERRORS buffers."
+  (when (process-live-p process) (delete-process process))
+  (dolist (buffer (list output errors))
+    (when (buffer-live-p buffer) (kill-buffer buffer))))
+
+(defun tessera-mu4e-x--query-done (process _event)
+  "Publish the context attached to finished PROCESS."
+  (when (memq (process-status process) '(exit signal))
+    (let ((context (process-get process 'context))
+          (anchor (process-get process 'anchor)))
+      (when (and context (tessera-x-context-pending-p context))
+        (condition-case err
+            (let ((items nil))
+              ;; mu exits 2 when the query has no matches.
+              (unless (memq (process-exit-status process) '(0 2))
+                (error "mu find failed: %s"
+                       (with-current-buffer
+                           (process-get process 'errors)
+                         (buffer-string))))
+              (with-current-buffer (process-buffer process)
+                (goto-char (point-min))
+                (skip-chars-forward " \t\r\n")
+                (while (not (eobp))
+                  (let ((message (read (current-buffer))))
+                    (unless (and (listp message)
+                                 (stringp (plist-get message :path)))
+                      (error "Unexpected mu message record"))
+                    (push (tessera-mu4e-x--item message) items))
+                  (skip-chars-forward " \t\r\n")))
+              (setq items (nreverse items))
+              (when anchor
+                (let ((seen (make-hash-table :test #'equal)))
+                  (setq items
+                        (cl-remove-if
+                         (lambda (item)
+                           (let ((id (tessera-x--identity item)))
+                             (prog1 (gethash id seen)
+                               (puthash id t seen))))
+                         (append (tessera-x-context-items context)
+                                 items)))
+                  (setq items
+                        (tessera-x-subthread
+                         items
+                         (cl-find (tessera-x-item-message-id anchor)
+                                  items :test #'equal
+                                  :key
+                                  #'tessera-x-item-message-id)))))
+              (tessera-mu4e-x--finish context items))
+          (error (tessera-x-context-fail
+                  context (error-message-string err))))))))
+
+(defun tessera-mu4e-x--query (context query &optional anchor)
+  "Query the local index for CONTEXT using QUERY.
+With ANCHOR, include related messages and keep descendants."
+  (let ((output (generate-new-buffer " *Tessera mu output*"))
+        (errors (generate-new-buffer " *Tessera mu errors*")))
+    (condition-case err
+        (let* ((command
+                (append
+                 (list mu4e-mu-binary "find" "--format=sexp"
+                       "--skip-dups" "--sortfield=date")
+                 (when mu4e-mu-home
+                   (list (concat "--muhome="
+                                 (expand-file-name mu4e-mu-home))))
+                 (when anchor (list "--include-related"))
+                 (list query)))
+               (process
+                (make-process :name "tessera-mu-context"
+                              :command command :buffer output
+                              :stderr errors :noquery t
+                              :coding 'utf-8-unix
+                              :connection-type 'pipe
+                              :sentinel #'ignore)))
+          (process-put process 'context context)
+          (process-put process 'anchor anchor)
+          (process-put process 'errors errors)
+          (push (apply-partially #'tessera-mu4e-x--cancel-query
+                                 process output errors)
+                (tessera-x-context-cleanup context))
+          (set-process-sentinel process #'tessera-mu4e-x--query-done)
+          (tessera-mu4e-x--query-done process ""))
+      (error
+       (kill-buffer output)
+       (kill-buffer errors)
+       (tessera-x-context-fail context (error-message-string err)))))
+  context)
+
+;;;###autoload
+(defun tessera-mu4e-x-prepare-context ()
+  "Prepare marked messages, an active region, or the current message.
+Use local mail files and preserve native marks and read state."
+  (interactive)
+  (let ((items (tessera-mu4e-x--items t)))
+    (unless items (user-error "No mu4e messages selected"))
+    (let ((context (tessera-x-context-start
+                    'mu4e "Selected messages; local files" items)))
+      (tessera-mu4e-x--finish context items)
+      context)))
+
+;;;###autoload
+(defun tessera-mu4e-x-prepare-subthread-context
+    (&optional local-index)
+  "Prepare the current message and its replies from loaded results.
+With prefix LOCAL-INDEX, supplement from the local mu index, ignoring
+the current search filter.  This does not fetch mail from a server."
+  (interactive "P")
+  (let* ((items (tessera-mu4e-x--items))
+         (id (plist-get (mu4e-message-at-point) :docid))
+         (anchor (cl-find id items :key #'tessera-x-item-id))
+         (expanded (or local-index
+                       (eq tessera-mu4e-x-subthread-scope
+                           'local-index))))
+    (unless anchor (user-error "No current mu4e message"))
+    (let ((context
+           (tessera-x-context-start
+            'mu4e (if expanded
+                      "Subthread; local index, possibly incomplete"
+                    "Subthread; current results, including folds")
+            nil)))
+      (if expanded
+          (let ((message-id (tessera-x-item-message-id anchor)))
+            (unless message-id
+              (tessera-x-context-fail context "Missing Message-ID")
+              (user-error "Current message has no Message-ID"))
+            (setf (tessera-x-context-items context)
+                  (tessera-x-subthread items anchor))
+            (tessera-mu4e-x--query
+             context (concat "msgid:" (prin1-to-string message-id))
+             anchor))
+        (tessera-mu4e-x--finish
+         context (tessera-x-subthread items anchor)))
+      context)))
+
+(defun tessera-mu4e-x--today-query ()
+  "Read a native Headers query or Main query-item at point."
+  (cond
+   ((derived-mode-p 'mu4e-headers-mode)
+    (or (plist-get (mu4e-server-last-query) :query) ""))
+   ((derived-mode-p 'mu4e-main-mode)
+    (let ((position (line-beginning-position))
+          (end (line-end-position))
+          query)
+      (while (and (< position end) (not query))
+        (let ((help (get-text-property position 'help-echo)))
+          (when (and (stringp help)
+                     (cl-find help (mu4e-query-items)
+                              :key (lambda (item)
+                                     (plist-get item :query))
+                              :test #'equal))
+            (setq query help)))
+        (setq position (next-single-property-change
+                        position 'help-echo nil end)))
+      (or query (user-error "Point is not on a mu4e query item"))))
+   (t (user-error "Run in mu4e Headers or Main"))))
+
+;;;###autoload
+(defun tessera-mu4e-x-prepare-today-context ()
+  "Prepare today's locally indexed messages in the native query scope.
+In Headers use its current query; in Main use the query item at point.
+`mu4e-mu-home' selects the index.  No mailbox synchronization occurs."
+  (interactive)
+  (let* ((base (funcall tessera-mu4e-x-today-query-function))
+         (query (if (string-empty-p base) "date:today..now"
+                  (format "(%s) AND (date:today..now)" base)))
+         (context
+          (tessera-x-context-start
+           'mu4e (concat "Today; local index; " query) nil)))
+    (tessera-mu4e-x--query context query)))
+
+(provide 'tessera-mu4e-x)
+;;; tessera-mu4e-x.el ends here

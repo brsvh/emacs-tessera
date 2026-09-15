@@ -36,6 +36,23 @@
   :group 'tessera
   :prefix "tessera-gnus-")
 
+;;;; Advanced features
+
+(defcustom tessera-gnus-x-body-policy 'download
+  "How selected and subthread contexts obtain article bodies.
+Download fetches missing bodies into the Agent.  Local-only keeps
+metadata and an explicit note when the Agent has no body.
+Today contexts always use local-only, regardless of this option."
+  :type '(choice (const download) (const local-only))
+  :group 'tessera-gnus)
+
+(defcustom tessera-gnus-x-subthread-scope 'results
+  "Default source of context subthread members.
+Results includes folded articles; local-index also consults the
+current group's Agent overview, which can itself be incomplete."
+  :type '(choice (const results) (const local-index))
+  :group 'tessera-gnus)
+
 ;;;; Public faces (gnus.el)
 
 (defgroup tessera-gnus-summary nil
