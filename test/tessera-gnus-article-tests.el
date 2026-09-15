@@ -105,5 +105,49 @@
                          (cadr target)))
             (should (= (point) (tessera-entry-point)))))))))
 
+(ert-deftest tessera-gnus-article-coalesces-native-content-events ()
+  (with-temp-buffer
+    (let ((summary (current-buffer))
+          (calls 0)
+          (original
+           (symbol-function 'tessera-gnus-article--mime-content)))
+      (setq-local tessera-gnus-summary--active t)
+      (setq-local gnus-current-headers
+                  (make-full-mail-header 1 "Test" "Author"))
+      (with-temp-buffer
+        (gnus-article-mode)
+        (setq-local gnus-summary-buffer summary)
+        (setq-local gnus-article-mime-handles
+                    (list (copy-sequence "multipart/signed")))
+        (tessera-gnus-article--track-content t)
+        (unwind-protect
+            (cl-letf (((symbol-function
+                        'tessera-gnus-article--mime-content)
+                       (lambda (handles)
+                         (cl-incf calls)
+                         (funcall original handles))))
+              (run-hooks 'gnus-article-prepare-hook)
+              (should (= calls 1))
+              (dotimes (_ 10) (run-hooks 'post-command-hook))
+              (should (= calls 1))
+              ;; Metadata changes retain the same native handle.
+              (put-text-property 0 1 'gnus-info "Processed"
+                                 (car gnus-article-mime-handles))
+              (dotimes (_ 10) (run-hooks 'gnus-part-display-hook))
+              (should (= calls 1))
+              (run-hooks 'post-command-hook)
+              (should (= calls 2))
+              (should (eq 'processed
+                          (with-current-buffer summary
+                            (plist-get
+                             (tessera-gnus-summary--content-data
+                              gnus-current-headers) :signature))))
+              (dotimes (_ 10) (run-hooks 'post-command-hook))
+              (should (= calls 2))
+              (run-hooks 'gnus-part-display-hook))
+          (tessera-gnus-article--track-content nil))
+        (should-not (memq #'tessera-gnus-article--updated
+                          post-command-hook))))))
+
 (provide 'tessera-gnus-article-tests)
 ;;; tessera-gnus-article-tests.el ends here

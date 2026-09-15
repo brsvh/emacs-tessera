@@ -219,6 +219,7 @@
       (let ((start (point))
             (overlay (make-overlay (point) (point-max))))
         (overlay-put overlay 'invisible 'gnus-sum)
+        (tessera-gnus-summary--fold-changed)
         (goto-char (point-min))
         (tessera-gnus-summary--post-command)
         (should-not
@@ -226,6 +227,7 @@
           (lambda (item) (overlay-get item 'tessera-entry-overlay))
           (overlays-in start (point-max))))
         (delete-overlay overlay)
+        (tessera-gnus-summary--fold-changed)
         (tessera-gnus-summary--post-command)
         (should
          (seq-some
@@ -306,6 +308,97 @@
     (should (eq (plist-get data :signature) 'present))
     (should (eq (plist-get data :attachment) 'unknown))
     (should (eq (plist-get data :encryption) 'unknown))))
+
+(ert-deftest tessera-gnus-batch-reindexes-native-positions-once ()
+  (with-temp-buffer
+    (let ((gnus-show-threads nil)
+          (tessera-glyph-style 'ascii)
+          (tessera-entry-layout 'two-line))
+      (tessera-tests--gnus-rows (make-list 100 0))
+      (tessera-gnus-summary--sync-buffer t)
+      (gnus-summary-goto-subject 50)
+      (let ((tessera-entry-layout 'single-line))
+        (cl-letf (((symbol-function 'gnus-data-update-list)
+                   (lambda (&rest _)
+                     (ert-fail "Batch updated a suffix"))))
+          (tessera-gnus-summary--sync-buffer t)))
+      (should (= 50 (gnus-summary-article-number)))
+      (should (= (point) (tessera-entry-point)))
+      (dolist (data gnus-newsgroup-data)
+        (goto-char (1- (gnus-data-pos data)))
+        (should (bolp))
+        (should (= (gnus-data-number data)
+                   (gnus-summary-article-number)))))))
+
+(ert-deftest tessera-gnus-mark-keeps-unrelated-layout-overlays ()
+  (with-temp-buffer
+    (let ((gnus-show-threads nil)
+          (tessera-glyph-style 'ascii)
+          (tessera-gnus-summary--active t)
+          (count 0)
+          (apply-layout
+           (symbol-function 'tessera-entry-apply-layout)))
+      (tessera-tests--gnus-rows (make-list 100 0))
+      (tessera-gnus-summary--prepare)
+      (gnus-summary-goto-subject 2)
+      (let ((overlay (get-text-property
+                      (line-beginning-position)
+                      'tessera--layout-overlay)))
+        (goto-char (point-min))
+        (subst-char-in-region (point) (1+ (point))
+                              gnus-unread-mark gnus-read-mark)
+        (cl-letf (((symbol-function 'tessera-entry-apply-layout)
+                   (lambda (&rest arguments)
+                     (cl-incf count)
+                     (apply apply-layout arguments))))
+          (tessera-gnus-summary--sync-buffer))
+        (should (= 1 count))
+        (should (overlay-buffer overlay))
+        (gnus-summary-goto-subject 2)
+        (should (eq overlay (get-text-property
+                             (line-beginning-position)
+                             'tessera--layout-overlay)))))))
+
+(ert-deftest tessera-gnus-fold-events-invalidate-without-polling ()
+  (with-temp-buffer
+    (let ((gnus-show-threads t)
+          (gnus-summary-buffer (current-buffer))
+          (gnus-auto-center-summary nil)
+          (tessera-gnus-summary--active t))
+      (tessera-tests--gnus-rows)
+      (add-to-invisibility-spec 'gnus-sum)
+      (tessera-gnus-summary--track-folds t)
+      (unwind-protect
+          (progn
+            (tessera-gnus-summary--prepare)
+            (gnus-summary-hide-thread)
+            (should tessera-gnus-summary--dirty)
+            (tessera-gnus-summary--post-command)
+            (gnus-summary-goto-subject 1)
+            (should (tessera-thread-context-last
+                     (gethash 1 tessera-gnus-summary--threads)))
+            (cl-letf (((symbol-function 'overlays-in)
+                       (lambda (&rest _)
+                         (ert-fail "Clean command scanned"))))
+              (tessera-gnus-summary--post-command))
+            (gnus-summary-show-all-threads)
+            (should tessera-gnus-summary--dirty)
+            (tessera-gnus-summary--post-command)
+            (should-not (tessera-thread-context-last
+                         (gethash 1 tessera-gnus-summary--threads))))
+        (tessera-gnus-summary--track-folds nil)))))
+
+(ert-deftest tessera-gnus-content-slots-share-one-observation ()
+  (let ((calls 0)
+        (original
+         (symbol-function 'tessera-gnus-summary--content-data)))
+    (cl-letf (((symbol-function 'tessera-gnus-summary--content-data)
+               (lambda (header)
+                 (cl-incf calls)
+                 (funcall original header))))
+      (tessera-gnus-summary--render
+       (tessera-gnus-tests--header) (tessera-gnus-tests--metadata)))
+    (should (= 1 calls))))
 
 (provide 'tessera-gnus-summary-tests)
 ;;; tessera-gnus-summary-tests.el ends here

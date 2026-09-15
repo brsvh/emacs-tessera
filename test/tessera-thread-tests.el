@@ -302,5 +302,33 @@
                                       pos 'display text)
                                      "\n")))))))))
 
+(ert-deftest tessera-thread-deep-paths-share-ancestors ()
+  (let* ((size 2000)
+         (nodes
+          (tessera-thread-build-contexts
+           (cl-loop for id from 1 to size
+                    collect (list id (and (> id 1) (1- id)) nil t))))
+         (context (make-tessera-entry-context)))
+    (cl-loop
+     for id from 2 to size
+     for node = (gethash id nodes)
+     for parent = (gethash (1- id) nodes)
+     do
+     (should (eq (cdr (tessera-thread-context-reverse-path node))
+                 (tessera-thread-context-reverse-path parent)))
+     (setf (tessera-entry-context-thread context) node)
+     (should (<= (string-width (tessera-thread-prefix context)) 12))
+     (tessera-thread-context-key node)
+     ;; Rendering must never materialize the full forward path.
+     (should-not (tessera-thread-context-forward-path node)))
+    (let ((last (gethash size nodes)))
+      (should (= (1- size)
+                 (length (tessera-thread-context-path last))))
+      (setf (tessera-thread-context-path last) '(t nil))
+      (should (equal '(t nil) (tessera-thread-context-path last)))
+      (setf (tessera-entry-context-thread context) last)
+      (should-not
+       (string-prefix-p "…" (tessera-thread-prefix context))))))
+
 (provide 'tessera-thread-tests)
 ;;; tessera-thread-tests.el ends here

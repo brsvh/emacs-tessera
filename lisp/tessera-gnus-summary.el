@@ -131,8 +131,8 @@
 (defvar-local tessera-gnus-summary--updating nil
   "Non-nil while Tessera is updating its own presentation.")
 
-(defvar-local tessera-gnus-summary--folds nil
-  "Native thread hiding overlays seen at the last synchronization.")
+(defvar tessera-gnus-summary--batching nil
+  "Non-nil while article positions will be rebuilt as one batch.")
 
 (defvar-local tessera-gnus-summary--appearance nil
   "Appearance used for the last synchronized entry rendering.")
@@ -502,9 +502,13 @@ Spam and expirable faces take precedence over native attributes."
 
 (defun tessera-gnus-summary--content-state (key context)
   "Return the visible content state for KEY in CONTEXT."
-  (let ((state (plist-get
-                (tessera-gnus-summary--content-data
-                 (tessera-entry-context-object context)) key)))
+  (let* ((metadata (tessera-entry-context-metadata context))
+         (content
+          (if (plist-member metadata :content)
+              (plist-get metadata :content)
+            (tessera-gnus-summary--content-data
+             (tessera-entry-context-object context))))
+         (state (plist-get content key)))
     ;; Unknown and absent remain distinct data, but neither is shown.
     (unless (eq state 'unknown) state)))
 
@@ -669,6 +673,9 @@ Use NATIVE-FACE when supplied, including an explicitly nil face."
                               (tessera-gnus-summary--thread-context
                                header)))
          (metadata (plist-put metadata :native-face native-face))
+         (metadata (plist-put metadata :content
+                              (tessera-gnus-summary--content-data
+                               header)))
          (tessera-gnus-summary--metadata metadata)
          (prefix (propertize (copy-sequence
                               (plist-get metadata :marks))
@@ -772,15 +779,21 @@ Gnus applies its native row face before running the update hook."
             (put-text-property start next 'face (car saved)))
           (setq start next))))))
 
-(defun tessera-gnus-summary--folds ()
-  "Return the native thread hiding overlays in buffer order."
-  (sort
-   (seq-filter
-    (lambda (overlay)
-      (eq (overlay-get overlay 'invisible) 'gnus-sum))
-    (overlays-in (point-min) (point-max)))
-   (lambda (left right)
-     (< (overlay-start left) (overlay-start right)))))
+(defun tessera-gnus-summary--fold-changed (&rest _arguments)
+  "Invalidate the presentation after a native folding operation."
+  (when tessera-gnus-summary--active
+    (setq tessera-gnus-summary--dirty t)))
+
+(defun tessera-gnus-summary--track-folds (enable)
+  "Track native folding when ENABLE is non-nil, or stop tracking."
+  (dolist (function '(gnus-summary-hide-thread
+                      gnus-summary-show-thread
+                      gnus-summary-show-all-threads))
+    (if enable
+        (advice-add function :after
+                    #'tessera-gnus-summary--fold-changed)
+      (advice-remove function
+                     #'tessera-gnus-summary--fold-changed))))
 
 (defun tessera-gnus-summary--sync-buffer (&optional force)
   "Synchronize all entries, preserving point within its article.
@@ -790,6 +803,7 @@ FORCE also redraws entries with unchanged marks."
     (when (/= width tessera-gnus-summary--thread-width)
       (setq force t)))
   (let ((saved-point (tessera-entry-save-point))
+        (tessera-gnus-summary--batching t)
         (tessera-gnus-summary--updating t))
     (unwind-protect
         (progn
@@ -797,7 +811,24 @@ FORCE also redraws entries with unchanged marks."
           (while (< (point) (point-max))
             (tessera-gnus-summary--sync-line force)
             (forward-line 1)))
+      (tessera-gnus-summary--reindex)
       (tessera-entry-restore-point saved-point))))
+
+(defun tessera-gnus-summary--reindex ()
+  "Restore native integer positions after a batch of row changes."
+  (let ((entries (make-hash-table :test #'eql)))
+    (dolist (data gnus-newsgroup-data)
+      (puthash (gnus-data-number data) data entries))
+    (save-restriction
+      (widen)
+      (save-excursion
+        (goto-char (point-min))
+        (while (< (point) (point-max))
+          (when-let* ((data (gethash (get-text-property
+                                      (point) 'gnus-number) entries)))
+            (setf (gnus-data-pos data) (1+ (point))))
+          (forward-line 1))))
+    (setq gnus-newsgroup-data-reverse nil)))
 
 (defun tessera-gnus-summary--sync-line (&optional force)
   "Synchronize the current logical article line.
@@ -818,9 +849,12 @@ FORCE also redraws entries whose native marks have not changed."
                   (not (equal marks (plist-get metadata :marks)))
                   (not (equal (plist-get metadata :native-face)
                               native-face))
-                  (not (equal (plist-get metadata :thread)
-                              (tessera-gnus-summary--thread-context
-                               (car entry)))))
+                  (not (equal
+                        (tessera-thread-context-key
+                         (plist-get metadata :thread))
+                        (tessera-thread-context-key
+                         (tessera-gnus-summary--thread-context
+                          (car entry))))))
           (tessera-entry-clear-current)
           (tessera-entry-clear-layout start (1+ end))
           (let* ((updated (plist-put (copy-sequence metadata)
@@ -840,7 +874,8 @@ FORCE also redraws entries whose native marks have not changed."
                (text-properties-at offset rendered)))
             ;; Gnus stores integer positions, not markers.  Keep later
             ;; articles addressable when a visual layout changes size.
-            (when (/= end (point))
+            (when (and (not tessera-gnus-summary--batching)
+                       (/= end (point)))
               (gnus-data-update-list
                (cdr (gnus-data-find-list number)) (- (point) end)))
             (setq end (point))
@@ -850,7 +885,8 @@ FORCE also redraws entries whose native marks have not changed."
         (tessera-gnus-summary--restore-faces start end)
         (if (invisible-p start)
             (tessera-entry-clear-layout start (1+ end))
-          (tessera-entry-apply-layout start end))))))
+          (unless (tessera-entry-layout-applied-p start)
+            (tessera-entry-apply-layout start end)))))))
 
 (defun tessera-gnus-summary--update-line ()
   "Synchronize the article just updated by Gnus."
@@ -870,8 +906,6 @@ FORCE also redraws entries whose native marks have not changed."
     (tessera-entry-clear-layout)
     (tessera-gnus-summary--sync-buffer)
     (setq tessera-gnus-summary--dirty nil
-          tessera-gnus-summary--folds
-          (tessera-gnus-summary--folds)
           tessera-gnus-summary--appearance
           (tessera-gnus-summary--appearance))
     (tessera-entry-highlight-current)))
@@ -885,18 +919,15 @@ FORCE also redraws entries whose native marks have not changed."
   "Synchronize native changes and highlight the current entry."
   (when tessera-gnus-summary--active
     (let* ((appearance (tessera-gnus-summary--appearance))
-           (folds (tessera-gnus-summary--folds))
            (force (or (not (equal appearance
                                   tessera-gnus-summary--appearance))
                       (and (symbolp this-command)
                            (string-prefix-p
                             "gnus-registry-"
                             (symbol-name this-command))))))
-      (when (or force tessera-gnus-summary--dirty
-                (not (equal folds tessera-gnus-summary--folds)))
+      (when (or force tessera-gnus-summary--dirty)
         (tessera-gnus-summary--sync-buffer force)
         (setq tessera-gnus-summary--appearance appearance
-              tessera-gnus-summary--folds folds
               tessera-gnus-summary--dirty nil)))
     ;; Already at the root, Gnus's top-thread command does not move.
     (when (and gnus-show-threads
@@ -959,7 +990,6 @@ FORCE also redraws entries whose native marks have not changed."
      tessera-gnus-summary--saved-settings)
     (setq tessera-gnus-summary--saved-settings nil
           tessera-gnus-summary--appearance nil
-          tessera-gnus-summary--folds nil
           tessera-gnus-summary--dirty nil
           tessera-gnus-summary--content-cache nil
           tessera-gnus-summary--threads nil

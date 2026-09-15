@@ -31,6 +31,8 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'gv)
+(require 'seq)
 (require 'subr-x)
 
 ;;;; Customization
@@ -236,14 +238,53 @@ provided only when the native backend enables threading."
   metadata
   thread)
 
-(cl-defstruct tessera-thread-context
+(cl-defstruct (tessera-thread-context
+               (:constructor make-tessera-thread-context
+                             (&key id parent root path
+                                   first last total unread
+                                   &aux (forward-path path)
+                                   (reverse-path (reverse path)))))
   "Describe one displayed member of a native thread.
 ID, PARENT, and ROOT are opaque backend identifiers.  PATH lists
 ancestor branches from the root, excluding the root itself; each
 boolean says whether that branch has a following sibling.
 FIRST identifies the displayed representative, LAST the last visible
 member.  TOTAL and UNREAD include folded members of the result set."
-  id parent root path first last total unread)
+  id parent root forward-path reverse-path first last total unread)
+
+(defun tessera-thread-context-path (context)
+  "Return CONTEXT's branch path in root-to-child order.
+Built contexts share reversed paths.  Materialize the public list
+only when requested, rather than copying every ancestor per row."
+  (or (tessera-thread-context-forward-path context)
+      (setf (tessera-thread-context-forward-path context)
+            (reverse (tessera-thread-context-reverse-path context)))))
+
+(gv-define-setter tessera-thread-context-path (value context)
+  `(let ((node ,context)
+         (path ,value))
+     (setf (tessera-thread-context-forward-path node) path
+           (tessera-thread-context-reverse-path node) (reverse path))
+     path))
+
+(defun tessera--thread-path-tail (context)
+  "Return at most five reversed branches for CONTEXT's renderer."
+  (seq-take
+   (if-let* ((path (tessera-thread-context-forward-path context)))
+       (reverse path)
+     (tessera-thread-context-reverse-path context))
+   5))
+
+(defun tessera-thread-context-key (context)
+  "Return the fields affecting CONTEXT's displayed row, or nil.
+Counts affect the head only.  Tree indentation displays at most
+four branches and an omission marker, regardless of thread depth."
+  (when context
+    (let ((first (tessera-thread-context-first context)))
+      (list first (tessera-thread-context-last context)
+            (and first (tessera-thread-context-total context))
+            (and first (tessera-thread-context-unread context))
+            (tessera--thread-path-tail context)))))
 
 (cl-defstruct tessera-thread-layout
   "Compose ordinary entry layouts for thread HEAD and CHILD members."
@@ -657,11 +698,10 @@ from IDs to contexts with counts, branch paths, and boundaries."
               (tessera-thread-context-last node)
               (equal id (gethash root last-visible)))
         (when parent
-          (setf (tessera-thread-context-path node)
-                (append (tessera-thread-context-path parent)
-                        (list (not (equal id
-                                          (gethash parent-id
-                                                   last-child)))))))))
+          (setf (tessera-thread-context-reverse-path node)
+                (cons (not (equal id (gethash parent-id last-child)))
+                      (tessera-thread-context-reverse-path
+                       parent))))))
     contexts))
 
 ;;;; Rendering support
@@ -700,15 +740,15 @@ from IDs to contexts with counts, branch paths, and boundaries."
 Align each branch with its parent text using the segment gap.
 Bound indentation by window width.  Spaces become layout overlays."
   (when-let* ((thread (tessera-entry-context-thread context))
-              (path (tessera-thread-context-path thread)))
+              (tail (tessera--thread-path-tail thread)))
     (let* ((window (tessera-entry-context-window context))
            (limit (if (window-live-p window)
                       (max 1 (min 4 (/ (window-body-width window)
                                        16)))
                     4))
            (ascii (eq tessera-glyph-style 'ascii))
-           (omitted (> (length path) limit))
-           (path (if omitted (last path limit) path))
+           (omitted (> (length tail) limit))
+           (path (nreverse (seq-take tail limit)))
            (branch (if (car (last path))
                        (if ascii "+-" "├─")
                      (if ascii "`-" "└─")))
@@ -1182,6 +1222,10 @@ and uniform color modes retain their normal behavior."
   (when-let* ((face (plist-get properties :face)))
     (unless (facep face)
       (error "Invalid glyph face: %S" face)))
+  (tessera--render-glyph glyph context properties))
+
+(defun tessera--render-glyph (glyph context properties)
+  "Render validated GLYPH and PROPERTIES in CONTEXT."
   (let ((text (copy-sequence (tessera--glyph-text glyph context))))
     (tessera--apply-glyph-color
      text glyph context (plist-get properties :face))
@@ -1224,7 +1268,7 @@ Return nil when the selector returns nil and OMIT-EMPTY is non-nil."
       (let* ((properties (cdr variant))
              (glyph (plist-get properties :glyph))
              (text
-              (tessera-glyph-render
+              (tessera--render-glyph
                glyph context
                (cl-loop for (key value) on properties by #'cddr
                         unless (eq key :glyph)
@@ -1625,6 +1669,13 @@ Omitted bounds select the whole accessible buffer."
     (tessera-entry-clear-current))
   (remove-overlays start end 'tessera-entry-overlay t))
 
+(defun tessera-entry-layout-applied-p (start)
+  "Return non-nil if START's current layout is still attached."
+  (let ((layout (get-text-property start 'tessera--entry-layout))
+        (overlay (get-text-property start 'tessera--layout-overlay)))
+    (and (overlayp overlay) (overlay-buffer overlay)
+         (eq layout (overlay-get overlay 'tessera--entry-layout)))))
+
 (defun tessera-entry-apply-layout (start end)
   "Attach rendered entry layout to buffer content from START to END.
 END excludes the client's terminating newline, which must already
@@ -1634,7 +1685,8 @@ on buffer text, and all decorative spaces live in overlay strings."
   (let* ((layout (get-text-property start 'tessera--entry-layout))
          (bottom (cadr layout))
          (terminator (eq (char-after end) ?\n))
-         (limit (if terminator (1+ end) end)))
+         (limit (if terminator (1+ end) end))
+         anchor)
     (when (and bottom (> bottom 0) (not terminator))
       (error "Entry bottom padding needs a terminating newline"))
     (tessera-entry-clear-layout start limit)
@@ -1642,6 +1694,7 @@ on buffer text, and all decorative spaces live in overlay strings."
       (pcase-let* ((`(,offset ,property ,string) placement)
                    (position (+ start offset))
                    (overlay (make-overlay position (1+ position))))
+        (unless anchor (setq anchor overlay))
         (overlay-put overlay 'tessera-entry-overlay t)
         (overlay-put overlay 'evaporate t)
         ;; Place entry decoration after native boundary headings.
@@ -1654,10 +1707,16 @@ on buffer text, and all decorative spaces live in overlay strings."
           'mouse-face 'default))))
     (when (and bottom (> bottom 0))
       (let ((overlay (make-overlay start limit)))
+        (unless anchor (setq anchor overlay))
         (overlay-put overlay 'tessera-entry-overlay t)
         (overlay-put overlay 'evaporate t)
         (overlay-put overlay 'after-string
-                     (tessera--padding-string bottom))))))
+                     (tessera--padding-string bottom))))
+    (when anchor
+      (overlay-put anchor 'tessera--entry-layout layout)
+      (with-silent-modifications
+        (put-text-property start (1+ start)
+                           'tessera--layout-overlay anchor)))))
 
 (defun tessera-entry-render
     (backend object &optional window prefix)

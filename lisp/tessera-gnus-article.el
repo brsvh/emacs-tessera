@@ -142,8 +142,40 @@ successful verification.  Never infer trust from a result string."
 
 ;;;; Prepared article lifecycle
 
-(defun tessera-gnus-article--updated ()
+(defun tessera-gnus-article--track-content (enable)
+  "Observe native MIME lifecycle events when ENABLE is non-nil."
+  (if enable
+      (progn
+        (add-hook 'gnus-article-prepare-hook
+                  #'tessera-gnus-article--updated t)
+        (add-hook 'gnus-part-display-hook
+                  #'tessera-gnus-article--queue-update t))
+    (remove-hook 'gnus-article-prepare-hook
+                 #'tessera-gnus-article--updated)
+    (remove-hook 'gnus-part-display-hook
+                 #'tessera-gnus-article--queue-update)
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (remove-hook 'post-command-hook
+                     #'tessera-gnus-article--updated t))))
+  ;; Security processing can mutate existing handle properties.
+  ;; Observe it explicitly, including calls outside article commands.
+  (if enable
+      (advice-add 'gnus-mime-security-verify-or-decrypt :after
+                  #'tessera-gnus-article--updated)
+    (advice-remove 'gnus-mime-security-verify-or-decrypt
+                   #'tessera-gnus-article--updated)))
+
+(defun tessera-gnus-article--queue-update ()
+  "Coalesce native part-display events into one MIME observation."
+  (when (derived-mode-p 'gnus-article-mode)
+    (add-hook 'post-command-hook
+              #'tessera-gnus-article--updated t t)))
+
+(defun tessera-gnus-article--updated (&rest _arguments)
   "Observe the displayed article and refresh its summary entry."
+  (remove-hook 'post-command-hook
+               #'tessera-gnus-article--updated t)
   ;; Gnus also runs its article preparation hook in the summary.
   (if (derived-mode-p 'gnus-summary-mode)
       (when (get-buffer gnus-article-buffer)
@@ -152,14 +184,10 @@ successful verification.  Never infer trust from a result string."
     (when (and (derived-mode-p 'gnus-article-mode)
                gnus-summary-buffer
                (buffer-live-p (get-buffer gnus-summary-buffer)))
-      (let ((handles gnus-article-mime-handles)
-            (article-buffer (current-buffer)))
+      (let ((handles gnus-article-mime-handles))
         (with-current-buffer gnus-summary-buffer
           (when (and tessera-gnus-summary--active
                      gnus-current-headers)
-            (with-current-buffer article-buffer
-              (add-hook 'post-command-hook
-                        #'tessera-gnus-article--updated t t))
             (when (tessera-gnus-summary--observe-content
                    gnus-current-headers handles)
               (let ((saved-point (tessera-entry-save-point)))

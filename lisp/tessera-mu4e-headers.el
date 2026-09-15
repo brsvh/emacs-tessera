@@ -522,15 +522,25 @@ Use recipients for personal outgoing mail, as native mu4e does."
         (forward-line 1)))
     width))
 
-(defun tessera-mu4e-headers--sync-line (native)
-  "Render the current row, or restore it when NATIVE is non-nil."
+(defun tessera-mu4e-headers--sync-line (native &optional force)
+  "Render the changed row, or restore it when NATIVE is non-nil.
+FORCE also redraws rows whose message and thread state are unchanged."
   (when-let* ((body (tessera-mu4e-headers--body-start)))
     (let* ((start (line-beginning-position))
            (end (line-end-position))
            (message (get-text-property start 'msg))
            (saved (get-text-property body 'tessera-mu4e-native))
-           (original (or saved (buffer-substring body end))))
-      (when (or saved (not native))
+           (original (or saved (buffer-substring body end)))
+           (state (unless native
+                    (list message (tessera-mu4e-headers--mark message)
+                          (tessera-thread-context-key
+                           (tessera-mu4e-headers--thread-context
+                            message))))))
+      (when (if native saved
+              (or force (not saved)
+                  (not (equal state (get-text-property
+                                     body 'tessera-mu4e-state)))))
+        (tessera-entry-clear-layout body (1+ end))
         (remove-overlays start (1+ end) 'mu4e-mark t)
         (delete-region body end)
         (goto-char body)
@@ -539,12 +549,17 @@ Use recipients for personal outgoing mail, as native mu4e does."
               (insert original)
               (remove-text-properties
                start (1+ (point))
-               '(tessera-mu4e-native nil tessera--entry-layout nil))
+               '(tessera-mu4e-native nil
+                                     tessera-mu4e-state nil
+                                     tessera--entry-layout nil
+                                     tessera--layout-overlay nil))
               (remove-text-properties
                (- body mu4e--mark-fringe-len) body '(display nil)))
           (let ((text (tessera-entry-render 'mu4e-headers message)))
             (put-text-property 0 (length text)
                                'tessera-mu4e-native original text)
+            (put-text-property 0 (length text) 'tessera-mu4e-state
+                               (copy-tree state) text)
             (insert text)
             (put-text-property
              start body 'tessera--entry-layout
@@ -554,12 +569,19 @@ Use recipients for personal outgoing mail, as native mu4e does."
         (add-text-properties
          start (1+ (point))
          (list 'docid (plist-get message :docid) 'msg message))
-        (if native
-            (when-let* ((mark (tessera-mu4e-headers--mark message)))
-              (goto-char start)
-              (mu4e-mark-at-point (car mark) (cdr mark)))
-          (unless (tessera-mu4e-thread-fold-at start)
-            (tessera-entry-apply-layout body (point))))))))
+        (when native
+          (when-let* ((mark (tessera-mu4e-headers--mark message)))
+            (goto-char start)
+            (mu4e-mark-at-point (car mark) (cdr mark)))))
+      (unless native
+        (if (and mu4e-search-threads
+                 (tessera-mu4e-thread-fold-at start))
+            (when (tessera-entry-layout-applied-p body)
+              (tessera-entry-clear-layout
+               body (1+ (line-end-position))))
+          (unless (tessera-entry-layout-applied-p body)
+            (tessera-entry-apply-layout
+             body (line-end-position))))))))
 
 (defun tessera-mu4e-headers--hide-footer ()
   "Hide the native end-of-results notice with a removable overlay."
@@ -574,8 +596,9 @@ Use recipients for personal outgoing mail, as native mu4e does."
           (overlay-put overlay 'tessera-mu4e-footer t)
           (overlay-put overlay 'display ""))))))
 
-(defun tessera-mu4e-headers--sync (native)
-  "Synchronize the result buffer, using NATIVE presentation if set."
+(defun tessera-mu4e-headers--sync (native &optional force)
+  "Synchronize the result buffer, using NATIVE presentation if set.
+FORCE also redraws unchanged messages after presentation changes."
   (let ((tessera-mu4e-headers--updating t)
         (inhibit-read-only t)
         (inhibit-modification-hooks t)
@@ -583,19 +606,23 @@ Use recipients for personal outgoing mail, as native mu4e does."
     (unwind-protect
         (progn
           (tessera-entry-clear-current)
-          (tessera-entry-clear-layout)
+          (when native (tessera-entry-clear-layout))
           (remove-overlays nil nil 'tessera-mu4e-footer t)
           (unless native
             (tessera-mu4e-headers--build-threads)
-            (setq tessera-mu4e-headers--leading-width
-                  (tessera-mu4e-headers--measure)))
+            (let ((width (tessera-mu4e-headers--measure)))
+              (unless (= width tessera-mu4e-headers--leading-width)
+                (setq force t))
+              (setq tessera-mu4e-headers--leading-width width)))
           (goto-char (point-min))
           (while (< (point) (point-max))
-            (tessera-mu4e-headers--sync-line native)
+            (tessera-mu4e-headers--sync-line native force)
             (forward-line 1))
           (when tessera-mu4e-headers--active
-            (tessera-mu4e-thread-pad-folds
-             tessera-mu4e-headers--threads)
+            (if mu4e-search-threads
+                (tessera-mu4e-thread-pad-folds
+                 tessera-mu4e-headers--threads)
+              (remove-overlays nil nil 'tessera-mu4e-fold-padding t))
             (tessera-mu4e-headers--hide-footer)))
       (tessera-entry-restore-point saved-point))))
 
@@ -603,7 +630,7 @@ Use recipients for personal outgoing mail, as native mu4e does."
   "Return native and shared options affecting the presentation."
   (list (when-let* ((window (get-buffer-window (current-buffer))))
           (window-body-width window))
-        mu4e-search-threads (tessera-mu4e-thread-folds)
+        mu4e-search-threads
         tessera-thread-outer-top-padding
         tessera-thread-outer-bottom-padding
         tessera-thread-inner-top-padding
@@ -618,9 +645,10 @@ Use recipients for personal outgoing mail, as native mu4e does."
         tessera-entry-bottom-padding tessera-entry-segment-gap
         tessera-entry-flex-gap-min-width))
 
-(defun tessera-mu4e-headers--changed (_start _end _old)
+(defun tessera-mu4e-headers--changed (&rest _arguments)
   "Record native buffer changes without reacting to our own edits."
   (unless tessera-mu4e-headers--updating
+    (tessera-mu4e-thread-invalidate)
     (setq tessera-mu4e-headers--dirty t)))
 
 (defun tessera-mu4e-headers--refresh (&optional _window)
@@ -628,18 +656,18 @@ Use recipients for personal outgoing mail, as native mu4e does."
   (when (and tessera-mu4e-headers--active
              (not tessera-mu4e-headers--updating))
     (let* ((tessera-mu4e-headers--updating t)
-           (appearance (tessera-mu4e-headers--appearance)))
-      (when (or tessera-mu4e-headers--dirty
-                (not (equal appearance
-                            tessera-mu4e-headers--appearance)))
-        (tessera-mu4e-headers--sync nil)
+           (appearance (tessera-mu4e-headers--appearance))
+           (force (not (equal appearance
+                              tessera-mu4e-headers--appearance))))
+      (when (or tessera-mu4e-headers--dirty force)
+        (tessera-mu4e-headers--sync nil force)
         (setq tessera-mu4e-headers--dirty nil
               tessera-mu4e-headers--appearance appearance))
       (when header-line-format
         (setq tessera-mu4e-headers--native-header-line
               header-line-format))
       (setq header-line-format nil)
-      (hl-line-mode -1)
+      (when hl-line-mode (hl-line-mode -1))
       (if (tessera-mu4e-thread-fold-at (point))
           (tessera-entry-clear-current)
         (tessera-entry-highlight-current)))))
@@ -696,6 +724,7 @@ message only while it remains selected after the native update."
 
 (defun tessera-mu4e-headers--navigation (enable)
   "Install navigation integration when ENABLE is non-nil, or remove."
+  (tessera-mu4e-thread-track enable)
   (dolist (function '(mu4e~headers-move
                       mu4e~headers-prev-or-next-unread
                       mu4e-headers-goto-message-id))
@@ -742,7 +771,10 @@ message only while it remains selected after the native update."
     ;; Mu4e skips folded messages itself.  Its logical line motion
     ;; must not stop at the visual newlines in padding overlays.
     (setq-local line-move-ignore-invisible nil)
+    (tessera-mu4e-thread-invalidate)
     (add-hook 'after-change-functions
+              #'tessera-mu4e-headers--changed nil t)
+    (add-hook 'tessera-mu4e-thread-change-hook
               #'tessera-mu4e-headers--changed nil t)
     (add-hook 'post-command-hook
               #'tessera-mu4e-headers--refresh t t)
@@ -759,6 +791,8 @@ message only while it remains selected after the native update."
   (when tessera-mu4e-headers--active
     (setq tessera-mu4e-headers--active nil)
     (remove-hook 'after-change-functions
+                 #'tessera-mu4e-headers--changed t)
+    (remove-hook 'tessera-mu4e-thread-change-hook
                  #'tessera-mu4e-headers--changed t)
     (remove-hook 'post-command-hook
                  #'tessera-mu4e-headers--refresh t)

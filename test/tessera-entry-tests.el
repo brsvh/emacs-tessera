@@ -912,5 +912,25 @@
                    (point-min) (point-max)
                    'tessera--current-face nil)))))
 
+(ert-deftest tessera-entry-validates-glyphs-at-registration ()
+  (let ((backend 'tessera-entry-tests)
+        (tessera-glyph-style 'ascii))
+    (unwind-protect
+        (progn
+          (tessera-entry-tests--register backend)
+          (cl-letf (((symbol-function 'tessera--validate-glyph)
+                     (lambda (&rest _)
+                       (ert-fail "Glyph was revalidated"))))
+            (should (string-match-p
+                     "Title" (tessera-entry-render
+                              backend '(:title "Title"
+                                               :status unread)))))
+          (should-error
+           (tessera-glyph-render nil (make-tessera-entry-context)))
+          (should-error
+           (tessera-glyph-render (tessera-entry-tests--glyph)
+                                 nil :unsupported t)))
+      (remhash backend tessera--entry-backends))))
+
 (provide 'tessera-entry-tests)
 ;;; tessera-entry-tests.el ends here
