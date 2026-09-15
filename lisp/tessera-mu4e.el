@@ -216,6 +216,8 @@
                   "tessera-mu4e-headers")
 (declare-function tessera-mu4e-headers--register
                   "tessera-mu4e-headers")
+(declare-function tessera-mu4e-headers--navigation
+                  "tessera-mu4e-headers")
 
 (defun tessera-mu4e--enable-headers ()
   "Enable Tessera in the current mu4e headers buffer."
@@ -242,7 +244,10 @@ automatically selects the shared thread layout."
         (if tessera-mu4e-mode
             (tessera-mu4e--enable-headers)
           (when (featurep 'tessera-mu4e-headers)
-            (tessera-mu4e-headers--disable)))))))
+            (tessera-mu4e-headers--disable))))))
+  (when (and (not tessera-mu4e-mode)
+             (featurep 'tessera-mu4e-headers))
+    (tessera-mu4e-headers--navigation nil)))
 
 (provide 'tessera-mu4e)
 ;;; tessera-mu4e.el ends here

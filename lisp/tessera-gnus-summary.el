@@ -583,7 +583,7 @@ Spam and expirable faces take precedence over native attributes."
   (let* ((slots '(score availability secondary status))
          (left '((thread-tree :grow t :min-width 0 :truncate head
                               :priority -2 :optional t)
-                 (author :grow t :min-width 4 :truncate tail)
+                 (author :grow t :min-width 4 :truncate tail :point t)
                  (:slots (attachment :optional t)
                          (signature :optional t)
                          (encryption :optional t))))
@@ -687,6 +687,9 @@ Use NATIVE-FACE when supplied, including an explicitly nil face."
         (remove-text-properties 0 1 '(display nil) result))
       (compose-string result 0 1 (aref glyph 0))
       (put-text-property 1 5 'display "" result))
+    (when-let* ((position (tessera-entry-point result)))
+      (put-text-property position (1+ position)
+                         'gnus-position t result))
     (put-text-property 0 (length result) 'tessera-gnus-summary-entry
                        (cons header metadata) result)
     (let ((position 0))
@@ -786,8 +789,7 @@ FORCE also redraws entries with unchanged marks."
     (tessera-gnus-summary--build-threads)
     (when (/= width tessera-gnus-summary--thread-width)
       (setq force t)))
-  (let ((origin (copy-marker (line-beginning-position)))
-        (offset (- (point) (line-beginning-position)))
+  (let ((saved-point (tessera-entry-save-point))
         (tessera-gnus-summary--updating t))
     (unwind-protect
         (progn
@@ -795,9 +797,7 @@ FORCE also redraws entries with unchanged marks."
           (while (< (point) (point-max))
             (tessera-gnus-summary--sync-line force)
             (forward-line 1)))
-      (goto-char origin)
-      (goto-char (min (+ (point) offset) (line-end-position)))
-      (set-marker origin nil))))
+      (tessera-entry-restore-point saved-point))))
 
 (defun tessera-gnus-summary--sync-line (&optional force)
   "Synchronize the current logical article line.
@@ -857,8 +857,11 @@ FORCE also redraws entries whose native marks have not changed."
   (when (and tessera-gnus-summary--active
              (not tessera-gnus-summary--updating))
     (setq tessera-gnus-summary--dirty t)
-    (let ((tessera-gnus-summary--updating t))
-      (save-excursion (tessera-gnus-summary--sync-line)))))
+    (let ((tessera-gnus-summary--updating t)
+          (saved-point (tessera-entry-save-point)))
+      (unwind-protect
+          (tessera-gnus-summary--sync-line)
+        (tessera-entry-restore-point saved-point)))))
 
 (defun tessera-gnus-summary--prepare ()
   "Attach entry layouts after Gnus has generated a summary."
@@ -895,6 +898,10 @@ FORCE also redraws entries whose native marks have not changed."
         (setq tessera-gnus-summary--appearance appearance
               tessera-gnus-summary--folds folds
               tessera-gnus-summary--dirty nil)))
+    ;; Already at the root, Gnus's top-thread command does not move.
+    (when (and gnus-show-threads
+               (eq this-command 'gnus-summary-top-thread))
+      (gnus-summary-position-point))
     (tessera-entry-highlight-current)))
 
 (defun tessera-gnus-summary--resize (_frame)

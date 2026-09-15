@@ -162,15 +162,17 @@ successful verification.  Never infer trust from a result string."
                         #'tessera-gnus-article--updated t t))
             (when (tessera-gnus-summary--observe-content
                    gnus-current-headers handles)
-              (save-excursion
-                (when-let* ((position
-                             (text-property-any
-                              (point-min) (point-max) 'gnus-number
-                              (mail-header-number
-                               gnus-current-headers))))
-                  (goto-char position)
-                  (let ((tessera-gnus-summary--updating t))
-                    (tessera-gnus-summary--sync-line t))))
+              (let ((saved-point (tessera-entry-save-point)))
+                (unwind-protect
+                    (when-let* ((position
+                                 (text-property-any
+                                  (point-min) (point-max) 'gnus-number
+                                  (mail-header-number
+                                   gnus-current-headers))))
+                      (goto-char position)
+                      (let ((tessera-gnus-summary--updating t))
+                        (tessera-gnus-summary--sync-line t)))
+                  (tessera-entry-restore-point saved-point)))
               (tessera-entry-highlight-current))))))))
 
 (provide 'tessera-gnus-article)

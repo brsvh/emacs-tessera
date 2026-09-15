@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'mu4e-headers)
 (require 'mu4e-thread)
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-headers)
@@ -47,7 +48,9 @@
                                'face 'mu4e-system-face))
            (goto-char (point-min))
            (tessera-mu4e--enable-headers)
-           ,@body)))))
+           (unwind-protect
+               (progn ,@body)
+             (tessera-mu4e-headers--disable)))))))
 
 (ert-deftest tessera-mu4e-thread-native-paths-and-updates ()
   (tessera-mu4e-tests--with-thread
@@ -64,12 +67,13 @@
     (should-not (string-match-p "Subject 2" (buffer-string)))
     (should (= 6 (count-lines (point-min) (point-max))))
     (mu4e~headers-goto-docid 3)
-    (let ((message (copy-sequence (mu4e-message-at-point)))
-          (start (line-beginning-position)))
-      (mu4e~headers-remove-header 3)
+    (goto-char (tessera-entry-point))
+    (let ((message (copy-sequence (mu4e-message-at-point))))
       (setq message (plist-put message :flags '(seen draft attach)))
-      (mu4e~headers-insert-header message start)
+      (mu4e~headers-update-handler message nil nil)
       (tessera-mu4e-headers--refresh)
+      (should (= 3 (mu4e~headers-docid-at-point)))
+      (should (= (point) (tessera-entry-point)))
       (should (= 0 (tessera-thread-context-unread
                     (gethash 1 tessera-mu4e-headers--threads)))))
     (mu4e~headers-goto-docid 2)
@@ -108,7 +112,9 @@
                         tessera-thread-outer-bottom-padding))))
       (mu4e~headers-goto-docid 1)
       (should (= 5 (mu4e-headers-next)))
+      (should (= (point) (tessera-entry-point)))
       (should (= 1 (mu4e-headers-prev)))
+      (should (= (point) (tessera-entry-point)))
       (tessera-mu4e-headers--disable)
       (should (overlay-buffer fold))
       (should (equal display (overlay-get fold 'display)))
@@ -158,6 +164,112 @@
     (should (tessera-thread-context-first
              (gethash 4 tessera-mu4e-headers--threads)))
     (tessera-mu4e-headers--disable)))
+
+(ert-deftest tessera-mu4e-thread-navigation-selects-contact ()
+  (tessera-mu4e-tests--with-thread
+    (let ((mu4e-headers-open-after-move nil))
+      (should (looking-at "Author 1"))
+      (dolist (id '(2 3 4 5))
+        (should (= id (call-interactively (key-binding "n"))))
+        (should (looking-at (format "Author %d" id))))
+      (dolist (id '(4 3 2 1))
+        (should (= id (call-interactively (key-binding "p"))))
+        (should (looking-at (format "Author %d" id))))
+      (should (= 3 (mu4e-headers-next 2)))
+      (should (looking-at "Author 3"))
+      (should (= 1 (mu4e-headers-prev 2)))
+      (mu4e-headers-next-unread)
+      (should (looking-at "Author 3"))
+      (call-interactively #'mu4e-headers-next-thread)
+      (should (looking-at "Author 5"))
+      (call-interactively #'mu4e-headers-prev-thread)
+      (should (looking-at "Author 1"))
+      ;; Native identity lookup still returns the actual line start.
+      (should (= (mu4e~headers-goto-docid 2)
+                 (line-beginning-position)))
+      (call-interactively #'mu4e-thread-goto-root)
+      (should (looking-at "Author 1"))
+      (mu4e~headers-goto-docid 5)
+      (should-not (mu4e-headers-next))
+      (should-not (mu4e~headers-docid-at-point)))))
+
+(ert-deftest tessera-mu4e-thread-redraw-preserves-contact-or-offset ()
+  (tessera-mu4e-tests--with-thread
+    (let ((message (copy-sequence (mu4e-message-at-point)))
+          (offset (- (point) (line-beginning-position))))
+      (setq message (plist-put
+                     message :subject "A much longer root subject"))
+      (mu4e~headers-update-handler message nil nil)
+      (should (looking-at "Author 1"))
+      (should (/= offset (- (point) (line-beginning-position))))
+      (forward-char 2)
+      (setq offset (- (point) (line-beginning-position)))
+      (let ((tessera-entry-segment-gap 3))
+        (tessera-mu4e-headers--refresh)
+        (should (= offset (- (point) (line-beginning-position)))))
+      (setq mu4e-search-threads nil)
+      (tessera-mu4e-headers--refresh)
+      (should-not (tessera-entry-point))
+      (should (= 2 (mu4e-headers-next)))
+      (should (= 2 (current-column)))
+      (tessera-mu4e-headers--disable)
+      (should-not (advice-member-p
+                   #'tessera-mu4e-headers--moved
+                   'mu4e~headers-move))
+      (should-not (text-property-any
+                   (point-min) (point-max) 'tessera-entry-point t)))))
+
+(ert-deftest tessera-mu4e-thread-navigation-keeps-preview-and-windows
+    ()
+  (tessera-mu4e-tests--with-thread
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (let ((other (split-window-right))
+            viewed)
+        (setq-local mu4e~headers-view-win other)
+        (cl-letf (((symbol-function 'mu4e-headers-view-message)
+                   (lambda ()
+                     (push (mu4e~headers-docid-at-point) viewed))))
+          (let ((mu4e-headers-open-after-move t))
+            (should (= 2 (mu4e-headers-next)))
+            (should (equal viewed '(2)))
+            (should (= (point) (tessera-entry-point)))
+            (dolist (window (get-buffer-window-list (current-buffer)))
+              (should (= (window-point window) (point)))))
+          (let ((mu4e-headers-open-after-move nil))
+            (should (= 3 (mu4e-headers-next)))
+            (should (equal viewed '(2))))
+          (delete-window other)
+          (let ((mu4e-headers-open-after-move t))
+            (should (= 4 (mu4e-headers-next)))
+            (should (equal viewed '(2)))))))))
+
+(ert-deftest tessera-mu4e-thread-update-from-another-window ()
+  (tessera-mu4e-tests--with-thread
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (let ((headers (current-buffer))
+            (other (split-window-right)))
+        (select-window other)
+        (with-temp-buffer
+          (switch-to-buffer (current-buffer))
+          (with-current-buffer headers
+            ;; Exercise graphical measurement in batch tests too.
+            (cl-letf (((symbol-function 'display-graphic-p)
+                       (lambda (&optional _) t))
+                      ((symbol-function 'string-pixel-width)
+                       #'string-width))
+              (let ((message (copy-sequence (mu4e-message-at-point))))
+                (setq message (plist-put message :flags '(unread)))
+                (mu4e~headers-update-handler message nil nil)))
+            (should (looking-at "Author 1"))
+            (should (= 6 (count-lines (point-min) (point-max))))
+            (dolist (id '(1 2 3 4 5))
+              (should (mu4e~headers-goto-docid id))
+              (should (= id (plist-get
+                             (mu4e-message-at-point) :docid)))
+              (should (< (- (line-end-position)
+                            (line-beginning-position)) 100)))))))))
 
 (provide 'tessera-mu4e-thread-tests)
 ;;; tessera-mu4e-thread-tests.el ends here

@@ -8,6 +8,7 @@
 
 (require 'ert)
 (require 'tessera-gnus-article)
+(require 'tessera-gnus-test-support)
 
 (ert-deftest
     tessera-gnus-article-opaque-content-retains-outer-signature ()
@@ -73,6 +74,36 @@
             (should-not (plist-get data :signature))
             (should-not (plist-get data :encryption))))
       (when handles (mm-destroy-parts handles)))))
+
+(ert-deftest tessera-gnus-article-update-preserves-summary-point ()
+  (with-temp-buffer
+    (let ((gnus-show-threads t)
+          (tessera-gnus-summary--active t)
+          (tessera-glyph-style 'ascii))
+      (tessera-gnus-summary--register)
+      (tessera-tests--gnus-rows)
+      (tessera-gnus-summary--sync-buffer)
+      (setq-local gnus-current-headers
+                  (gnus-data-header (gnus-data-find 1)))
+      (let ((summary (current-buffer)))
+        (dolist (target '((1 nil) (3 nil) (1 10)))
+          (setq tessera-gnus-summary--content-cache nil)
+          (gnus-summary-goto-subject (car target))
+          (when (cadr target)
+            (goto-char (+ (line-beginning-position) (cadr target))))
+          (with-temp-buffer
+            (gnus-article-mode)
+            (setq-local gnus-summary-buffer summary)
+            (setq-local gnus-article-mime-handles
+                        (mm-make-handle
+                         (current-buffer) '("application/pdf")
+                         nil nil '("attachment")))
+            (tessera-gnus-article--updated))
+          (should (= (gnus-summary-article-number) (car target)))
+          (if (cadr target)
+              (should (= (- (point) (line-beginning-position))
+                         (cadr target)))
+            (should (= (point) (tessera-entry-point)))))))))
 
 (provide 'tessera-gnus-article-tests)
 ;;; tessera-gnus-article-tests.el ends here

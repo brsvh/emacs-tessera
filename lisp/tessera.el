@@ -274,6 +274,8 @@ an alist of variant specifications."
 Non-nil extra fields add a second visual line to the logical entry.
 Segment lists also accept `(:slots SLOT...)' for an inline group
 of fixed-width glyph slots.
+The segment option `:point t' marks its first displayed character as
+the preferred navigation position, found by `tessera-entry-point'.
 Glyph slot lists accept slot names and `(NAME :reserve t)'
 references.  A reserved reference occupies the selected glyph's
 display width without showing it.  `(NAME :optional t)' omits the
@@ -310,7 +312,7 @@ returning one, shared by both lines."
   "Registered Tessera entry backends.")
 
 (defvar tessera--segment-properties
-  '(:grow :min-width :max-width :truncate :priority :optional)
+  '(:grow :min-width :max-width :truncate :priority :optional :point)
   "Properties accepted in a layout segment reference.")
 
 (defvar tessera--glyph-slot-properties
@@ -445,7 +447,8 @@ returning one, shared by both lines."
              (maximum (plist-get properties :max-width))
              (truncate (plist-get properties :truncate))
              (priority (plist-get properties :priority))
-             (optional (plist-get properties :optional)))
+             (optional (plist-get properties :optional))
+             (point (plist-get properties :point)))
         (unless (memq grow '(nil t))
           (error "Segment reference `%s' has invalid :grow" name))
         (unless (or (null minimum) (natnump minimum))
@@ -464,6 +467,9 @@ returning one, shared by both lines."
           (error "Segment reference `%s' has invalid :priority" name))
         (unless (memq optional '(nil t))
           (error "Segment reference `%s' has invalid :optional"
+                 name))
+        (unless (memq point '(nil t))
+          (error "Segment reference `%s' has invalid :point"
                  name))))))
 
 (defun tessera--glyph-slot-reference-reserved-p (reference)
@@ -779,7 +785,8 @@ RIGHT-OFFSET is a column count or a one-element pixel count list."
   truncate
   priority
   optional
-  visible)
+  visible
+  point)
 
 (defun tessera--render-segment (reference definition context)
   "Render segment REFERENCE using DEFINITION and CONTEXT."
@@ -811,6 +818,7 @@ RIGHT-OFFSET is a column count or a one-element pixel count list."
            :truncate truncate
            :priority (or (plist-get properties :priority) 0)
            :optional (plist-get properties :optional)
+           :point (plist-get properties :point)
            :visible t))))))
 
 (defun tessera--render-segments (references definition context)
@@ -976,6 +984,9 @@ Return the number of columns still overflowing."
               (tessera--rendered-segment-string segment)
               (tessera--rendered-segment-target-width segment)
               (tessera--rendered-segment-truncate segment)))))
+       (when (and (tessera--rendered-segment-point segment)
+                  (not (string-empty-p text)))
+         (put-text-property 0 1 'tessera-entry-point t text))
        (tessera--prepare-hover text)))
    (tessera--visible-segments segments)
    (tessera--space tessera-entry-segment-gap)))
@@ -1370,10 +1381,11 @@ LEADING-WIDTH supplies the shared minimum width of that area."
            (right-offset
             (if (and (window-live-p window)
                      (display-graphic-p (window-frame window)))
-                (with-selected-window window
-                  ;; Fallback fonts need not occupy whole columns.
-                  (list (+ (* margin (frame-char-width))
-                           (string-pixel-width right-string))))
+                (save-excursion
+                  (with-selected-window window
+                    ;; Fallback fonts need not occupy whole columns.
+                    (list (+ (* margin (frame-char-width))
+                             (string-pixel-width right-string)))))
               (+ margin (tessera--segments-width right))))
            (surface
             (concat
@@ -1464,6 +1476,40 @@ LEADING-WIDTH supplies the shared minimum width of that area."
      (list (nreverse placements) tessera-entry-bottom-padding)
      content)
     content))
+
+;;;; Entry navigation
+
+(defun tessera-entry-point (&optional string)
+  "Return the preferred navigation position in STRING or this line.
+Return nil when no displayed segment specifies `:point t'."
+  (text-property-any
+   (if string 0 (line-beginning-position))
+   (if string (length string) (line-end-position))
+   'tessera-entry-point t string))
+
+(defun tessera-entry-save-point ()
+  "Save point within its logical entry for a subsequent redraw.
+Pass the returned snapshot to `tessera-entry-restore-point' to
+restore point and release its marker, even if redrawing fails."
+  (list (copy-marker (line-beginning-position))
+        (- (point) (line-beginning-position))
+        (get-text-property (point) 'tessera-entry-point)))
+
+(defun tessera-entry-restore-point (snapshot)
+  "Restore point from SNAPSHOT after redrawing its logical entry.
+A preferred navigation position follows its segment; other
+positions retain their character offset.  Release the saved marker."
+  (pcase-let ((`(,origin ,offset ,anchored) snapshot))
+    (unwind-protect
+        (when (marker-buffer origin)
+          (with-current-buffer (marker-buffer origin)
+            (goto-char origin)
+            (goto-char
+             (or (and anchored (tessera-entry-point))
+                 (min (+ (point) offset) (line-end-position))))))
+      (set-marker origin nil))))
+
+;;;; Current entry highlighting
 
 (defvar-local tessera--current-entry nil
   "Current entry's boundary markers, layout, and saved decorations.")

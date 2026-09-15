@@ -51,6 +51,8 @@
 (declare-function mu4e-mark-at-point "mu4e-mark")
 (declare-function mu4e~headers-apply-flags "mu4e-headers")
 (declare-function mu4e~headers-thread-root-p "mu4e-headers")
+(declare-function mu4e-get-headers-buffer "mu4e-window")
+(declare-function mu4e~headers-docid-at-point "mu4e-headers")
 
 ;;;; Message state and face composition
 
@@ -433,7 +435,8 @@ Use recipients for personal outgoing mail, as native mu4e does."
            (left (list '(thread-tree :grow t :min-width 0
                                      :truncate head :priority -2
                                      :optional t)
-                       '(contact :grow t :min-width 4 :truncate tail)
+                       '(contact :grow t :min-width 4 :truncate tail
+                                 :point t)
                        content target))
            (right (list labels 'date)))
        (make-tessera-thread-layout
@@ -575,8 +578,7 @@ Use recipients for personal outgoing mail, as native mu4e does."
   (let ((tessera-mu4e-headers--updating t)
         (inhibit-read-only t)
         (inhibit-modification-hooks t)
-        (origin (copy-marker (line-beginning-position)))
-        (offset (- (point) (line-beginning-position))))
+        (saved-point (tessera-entry-save-point)))
     (unwind-protect
         (progn
           (tessera-entry-clear-current)
@@ -594,9 +596,7 @@ Use recipients for personal outgoing mail, as native mu4e does."
             (tessera-mu4e-thread-pad-folds
              tessera-mu4e-headers--threads)
             (tessera-mu4e-headers--hide-footer)))
-      (goto-char origin)
-      (goto-char (min (+ (point) offset) (line-end-position)))
-      (set-marker origin nil))))
+      (tessera-entry-restore-point saved-point))))
 
 (defun tessera-mu4e-headers--appearance ()
   "Return native and shared options affecting the presentation."
@@ -643,6 +643,88 @@ Use recipients for personal outgoing mail, as native mu4e does."
           (tessera-entry-clear-current)
         (tessera-entry-highlight-current)))))
 
+;;;; Native navigation
+
+(defun tessera-mu4e-headers--position-point ()
+  "Place point at the selected thread member's visible contact.
+Resolve the related headers buffer when called from a message view
+or a native search hook.  Preserve folded rows and native selection."
+  (when-let* ((buffer (mu4e-get-headers-buffer)))
+    (with-current-buffer buffer
+      (when (and tessera-mu4e-headers--active mu4e-search-threads)
+        (tessera-mu4e-headers--refresh)
+        (when-let* ((_ (not (tessera-mu4e-thread-fold-at (point))))
+                    (position (tessera-entry-point)))
+          (goto-char position)
+          (dolist (window (get-buffer-window-list buffer nil t))
+            (set-window-point window position)))))))
+
+(defun tessera-mu4e-headers--moved (result)
+  "Normalize a successful native navigation RESULT's contact point.
+Return RESULT unchanged, including native docids and positions."
+  (when (numberp result)
+    (tessera-mu4e-headers--position-point))
+  result)
+
+(defun tessera-mu4e-headers--command (function &rest arguments)
+  "Normalize interactive navigation by FUNCTION with ARGUMENTS.
+Thread commands also serve native fold-boundary calculations;
+those noninteractive calls must retain their original positions."
+  (let ((interactive (called-interactively-p 'any)))
+    (prog1 (apply function arguments)
+      (when interactive (tessera-mu4e-headers--position-point)))))
+
+(defun tessera-mu4e-headers--update (function &rest arguments)
+  "Preserve a contact anchor across native FUNCTION with ARGUMENTS.
+Native updates replace rows and restore a column.  Follow the old
+message only while it remains selected after the native update."
+  (let* ((buffer (mu4e-get-headers-buffer))
+         (docid
+          (when (buffer-live-p buffer)
+            (with-current-buffer buffer
+              (when (and tessera-mu4e-headers--active
+                         mu4e-search-threads
+                         (get-text-property
+                          (point) 'tessera-entry-point))
+                (mu4e~headers-docid-at-point))))))
+    (prog1 (apply function arguments)
+      (when (and docid (buffer-live-p buffer))
+        (with-current-buffer buffer
+          (when (eql docid (mu4e~headers-docid-at-point))
+            (tessera-mu4e-headers--position-point)))))))
+
+(defun tessera-mu4e-headers--navigation (enable)
+  "Install navigation integration when ENABLE is non-nil, or remove."
+  (dolist (function '(mu4e~headers-move
+                      mu4e~headers-prev-or-next-unread
+                      mu4e-headers-goto-message-id))
+    (if enable
+        (advice-add function :filter-return
+                    #'tessera-mu4e-headers--moved)
+      (advice-remove function #'tessera-mu4e-headers--moved)))
+  (dolist (function '(mu4e-headers-prev-thread
+                      mu4e-headers-next-thread
+                      mu4e-thread-goto-root
+                      mu4e-thread-fold-goto-next
+                      mu4e-thread-unfold-goto-next
+                      mu4e-thread-fold-toggle-goto-next
+                      mu4e-view-headers-prev-thread
+                      mu4e-view-headers-next-thread))
+    (if enable
+        (advice-add function :around
+                    #'tessera-mu4e-headers--command)
+      (advice-remove function #'tessera-mu4e-headers--command)))
+  (if enable
+      (progn
+        (advice-add 'mu4e~headers-update-handler :around
+                    #'tessera-mu4e-headers--update)
+        (add-hook 'mu4e-headers-found-hook
+                  #'tessera-mu4e-headers--position-point t))
+    (advice-remove 'mu4e~headers-update-handler
+                   #'tessera-mu4e-headers--update)
+    (remove-hook 'mu4e-headers-found-hook
+                 #'tessera-mu4e-headers--position-point)))
+
 ;;;; Adapter lifecycle
 
 (defun tessera-mu4e-headers--enable ()
@@ -667,7 +749,9 @@ Use recipients for personal outgoing mail, as native mu4e does."
               #'tessera-mu4e-headers--refresh nil t)
     (add-hook 'change-major-mode-hook
               #'tessera-mu4e-headers--disable nil t)
-    (tessera-mu4e-headers--refresh)))
+    (tessera-mu4e-headers--navigation t)
+    (tessera-mu4e-headers--refresh)
+    (tessera-mu4e-headers--position-point)))
 
 (defun tessera-mu4e-headers--disable ()
   "Restore native text, marks, highlight, and header line."
@@ -684,7 +768,13 @@ Use recipients for personal outgoing mail, as native mu4e does."
     (tessera-mu4e-headers--sync t)
     (setq header-line-format tessera-mu4e-headers--native-header-line)
     (hl-line-mode (if tessera-mu4e-headers--saved-hl-line 1 -1))
-    (tessera--restore-settings tessera-mu4e-headers--saved-settings)))
+    (tessera--restore-settings tessera-mu4e-headers--saved-settings)
+    (unless (seq-some
+             (lambda (buffer)
+               (buffer-local-value
+                'tessera-mu4e-headers--active buffer))
+             (buffer-list))
+      (tessera-mu4e-headers--navigation nil))))
 
 (provide 'tessera-mu4e-headers)
 ;;; tessera-mu4e-headers.el ends here
