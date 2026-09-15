@@ -8,6 +8,7 @@
 
 (require 'ert)
 (require 'tessera-gnus-summary)
+(require 'tessera-gnus-test-support)
 
 (defvar gnus-registry-db)
 
@@ -160,6 +161,39 @@
                                        "A useful article")))
         (should (memq 'tessera-gnus-summary-subject-face
                       (get-text-property position 'face)))))))
+
+(ert-deftest tessera-gnus-navigation-selects-subject-in-flat-layouts
+    ()
+  (dolist (tessera-entry-layout '(single-line two-line))
+    (with-temp-buffer
+      (let ((gnus-show-threads nil)
+            (gnus-summary-buffer (current-buffer))
+            (gnus-summary-check-current nil)
+            (gnus-summary-goto-unread t)
+            (gnus-auto-select-same nil)
+            (gnus-auto-center-summary nil)
+            (tessera-glyph-style 'ascii)
+            opened)
+        (tessera-tests--gnus-rows)
+        (tessera-gnus-summary--sync-buffer)
+        (gnus-summary-goto-subject 1)
+        (should (looking-at "Subject 1"))
+        (cl-letf (((symbol-function 'gnus-summary-display-article)
+                   (lambda (article &optional _all)
+                     (push article opened) t)))
+          (dolist (step '((gnus-summary-next-unread-article 3)
+                          (gnus-summary-prev-unread-article 1)))
+            (setq opened nil)
+            (funcall (car step))
+            (should (= (gnus-summary-article-number) (cadr step)))
+            (should (looking-at (format "Subject %d" (cadr step))))
+            (should (= (point) (tessera-entry-point)))
+            (should (get-text-property (point) 'gnus-position))
+            (should (equal opened (list (cadr step))))))
+        (let ((tessera-entry-segment-gap 3))
+          (tessera-gnus-summary--sync-buffer t)
+          (should (looking-at "Subject 1"))
+          (should (= (point) (tessera-entry-point))))))))
 
 (ert-deftest tessera-gnus-redraw-preserves-point-offset ()
   (with-temp-buffer

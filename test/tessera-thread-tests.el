@@ -272,9 +272,9 @@
       (should (looking-at "Author"))
       (setq gnus-show-threads nil)
       (tessera-gnus-summary--sync-buffer t)
-      (should-not (tessera-entry-point))
-      (should-not (text-property-any
-                   (point-min) (point-max) 'gnus-position t)))))
+      (should (looking-at "Changed subject:"))
+      (should (= (point) (tessera-entry-point)))
+      (should (get-text-property (point) 'gnus-position)))))
 
 (ert-deftest tessera-thread-position-follows-visible-author-text ()
   (with-temp-buffer

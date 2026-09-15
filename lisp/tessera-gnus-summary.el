@@ -630,7 +630,7 @@ Spam and expirable faces take precedence over native attributes."
            :main-glyph-slots
            '(score availability secondary status)
            :main-left-segments
-           '((subject :grow t :min-width 4 :truncate tail)
+           '((subject :grow t :min-width 4 :truncate tail :point t)
              (:slots (attachment :optional t)
                      (signature :optional t)
                      (encryption :optional t)))
@@ -644,7 +644,7 @@ Spam and expirable faces take precedence over native attributes."
            :glyph-slots-align 'right
            :main-glyph-slots '(secondary status)
            :main-left-segments
-           '((subject :grow t :min-width 4 :truncate tail))
+           '((subject :grow t :min-width 4 :truncate tail :point t))
            :main-right-segments
            '((labels :grow t :max-width 24 :min-width 0
                      :truncate tail :priority -1 :optional t))
