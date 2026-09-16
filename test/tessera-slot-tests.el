@@ -143,5 +143,56 @@
     (make-tessera-entry-layout :glyph-slots-align 'middle)
     nil nil "Test")))
 
+(ert-deftest tessera-slot-pixels-stay-fixed-with-large-glyphs ()
+  (skip-unless (display-graphic-p))
+  (let* ((tessera-glyph-style 'ascii)
+         (tessera-glyph-color nil)
+         (glyph-text
+          (propertize "X" 'face '(:height 3.0)
+                      'display '(raise 0.1)))
+         (original (copy-sequence glyph-text))
+         (context
+          (make-tessera-entry-context :window (selected-window)))
+         (names '(a b c d))
+         (definition
+          (tessera--make-entry-backend
+           :glyph-slots
+           (mapcar
+            (lambda (name)
+              (make-tessera-glyph-slot
+               :name name :width 2 :align 'center
+               :selector
+               (lambda (ctx)
+                 (when (memq name (tessera-entry-context-object ctx))
+                   'present))
+               :glyphs
+               (list (list 'present :help-echo "State"
+                           :glyph (make-tessera-glyph
+                                   :ascii glyph-text
+                                   :semantic 'neutral)))))
+            names))))
+    (should (> (string-pixel-width glyph-text)
+               (* 2 (frame-char-width))))
+    (dolist (active '(nil (a) (a b c) (a b c d)))
+      (setf (tessera-entry-context-object context) active)
+      (dolist (align '(nil left right))
+        (let* ((area (tessera--render-glyph-slots
+                      names definition context align))
+               (text (car area)))
+          (should (= 8 (cdr area)))
+          (should (= (* 8 (frame-char-width))
+                     (string-pixel-width text)))
+          (should (= (length active) (cl-count ?X text)))
+          (dotimes (index (length text))
+            (when (= (aref text index) ?X)
+              (should (equal "State"
+                             (get-text-property
+                              index 'help-echo text)))
+              (should (equal '(raise 0.1)
+                             (get-text-property
+                              index 'display text)))
+              (should (get-text-property index 'mouse-face text)))))))
+    (should (equal-including-properties original glyph-text))))
+
 (provide 'tessera-slot-tests)
 ;;; tessera-slot-tests.el ends here

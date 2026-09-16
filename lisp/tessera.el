@@ -303,7 +303,8 @@ four branches and an omission marker, regardless of thread depth."
 NAME identifies the slot within its backend.  SELECTOR is called with
 an entry context and returns a variant ID or nil.  WIDTH is measured
 in columns.  ALIGN is one of `left', `center', or `right'.  GLYPHS is
-an alist of variant specifications."
+an alist of variant specifications.  On graphical frames, oversized
+glyphs are scaled down to fit WIDTH without changing the slot."
   name
   selector
   width
@@ -1244,6 +1245,24 @@ and uniform color modes retain their normal behavior."
             ('right remaining))))
     (cons left (- remaining left))))
 
+(defun tessera--fit-glyph-width (text width)
+  "Fit TEXT within WIDTH pixels, returning its final pixel width.
+Shrink only oversized glyphs, preserving their other properties.
+TEXT must be a private rendered copy.  Use the selected frame."
+  (let ((pixels (string-pixel-width text)))
+    ;; Font sizes are discrete, so a proportional step can round up.
+    ;; Bound retries for fonts that cannot be scaled.
+    (cl-loop repeat 16
+             while (> pixels width)
+             do (add-face-text-property
+                 0 (length text)
+                 (list :height (* 0.99 (/ (float width) pixels)))
+                 nil text)
+             (setq pixels (string-pixel-width text)))
+    (when (> pixels width)
+      (error "Glyph cannot fit within %d pixels" width))
+    pixels))
+
 (defun tessera--render-glyph-slot (slot context &optional omit-empty)
   "Render glyph SLOT for CONTEXT at its fixed width.
 Return nil when the selector returns nil and OMIT-EMPTY is non-nil."
@@ -1283,10 +1302,12 @@ Return nil when the selector returns nil and OMIT-EMPTY is non-nil."
                (padding
                 (if pixels
                     (with-selected-frame frame
-                      (tessera--glyph-slot-padding
-                       slot (string-pixel-width text)
-                       (* (tessera-glyph-slot-width slot)
-                          (frame-char-width frame))))
+                      (let ((width
+                             (* (tessera-glyph-slot-width slot)
+                                (frame-char-width frame))))
+                        (tessera--glyph-slot-padding
+                         slot (tessera--fit-glyph-width text width)
+                         width)))
                   (tessera--glyph-slot-padding slot content-width)))
                (space (if pixels #'tessera--pixel-space
                         #'tessera--space)))

@@ -742,10 +742,14 @@
           (tessera-entry-tests--register-two-line backend)
           (cl-letf (((symbol-function 'display-graphic-p)
                      (lambda (&optional _) t))
+                    ((symbol-function 'frame-char-width)
+                     (lambda (&optional _) 10))
                     ((symbol-function 'string-pixel-width)
                      (lambda (string)
                        (push string measured)
-                       41)))
+                       (cond ((equal string "*") 17)
+                             ((string-match-p "\\*" string) 30)
+                             (t 41)))))
             (let ((display
                    (tessera-entry-render
                     backend
@@ -759,7 +763,7 @@
                        measured))
               (should
                (tessera-entry-tests--overlay-property-p
-                'display '(space :width (41)) display)))))
+                'display '(space :width (30)) display)))))
       (remhash backend tessera--entry-backends))))
 
 (ert-deftest tessera-entry-render-adds-vertical-padding ()
@@ -796,7 +800,7 @@
           (should-not (overlays-in (point-min) (point-max)))
           (should (equal original (buffer-string))))))))
 
-(ert-deftest tessera-entry-render-budgets-actual-glyph-width ()
+(ert-deftest tessera-entry-render-budgets-fitted-glyph-width ()
   (let ((tessera--entry-backends (make-hash-table :test #'eq))
         (tessera-entry-layout 'single-line)
         (tessera-glyph-style 'ascii)
@@ -809,7 +813,15 @@
               ((symbol-function 'frame-char-width)
                (lambda (&optional _) 1))
               ((symbol-function 'string-pixel-width)
-               (lambda (_) 5))
+               (lambda (text)
+                 (if (equal text "*")
+                     (ceiling
+                      (* 5 (or (plist-get
+                                (car-safe
+                                 (get-text-property 0 'face text))
+                                :height)
+                               1)))
+                   (string-width text))))
               ((symbol-function 'window-body-width)
                (lambda (&rest _) 23)))
       (let ((rendered
@@ -819,7 +831,7 @@
                        :status unread)
               (selected-window))))
         (should (equal (substring-no-properties rendered)
-                       "*A very …2026"))))))
+                       "*A very lo…2026"))))))
 
 (defun tessera-entry-tests--insert-current-fixture ()
   "Insert two entries and install their overlay layouts."

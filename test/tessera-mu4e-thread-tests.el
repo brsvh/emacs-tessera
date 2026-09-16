@@ -263,6 +263,8 @@
                 (setq message (plist-put message :flags '(unread)))
                 (mu4e~headers-update-handler message nil nil)))
             (should (looking-at "Author 1"))
+            (should (= 1 (mu4e~headers-docid-at-point)))
+            (should (= (point) (tessera-entry-point)))
             (should (= 6 (count-lines (point-min) (point-max))))
             (dolist (id '(1 2 3 4 5))
               (should (mu4e~headers-goto-docid id))
@@ -300,6 +302,48 @@
           (should (eq overlay (get-text-property
                                (tessera-mu4e-headers--body-start)
                                'tessera--layout-overlay))))))))
+
+(ert-deftest tessera-mu4e-flags-keep-prefix-capacity ()
+  (tessera-mu4e-tests--with-thread
+    (mu4e~headers-goto-docid 3)
+    (mu4e-mark-at-point 'move "/archive")
+    (let ((mu4e-headers-visible-flags
+           '(draft trashed flagged replied passed list personal)))
+      (dolist (mu4e-search-threads '(nil t))
+        (dolist (tessera-entry-layout '(single-line two-line))
+          (tessera-mu4e-headers--refresh)
+          (dolist (state
+                   '(((unread) nil 8 4)
+                     ((seen flagged replied) high 8 4)
+                     ((seen draft trashed flagged replied passed
+                            list personal) high 8 4)
+                     ((seen) nil 8 4)))
+            (mu4e~headers-goto-docid 3)
+            (let ((message (copy-tree (mu4e-message-at-point))))
+              (setf (plist-get message :flags) (car state)
+                    (plist-get message :priority) (cadr state))
+              (mu4e~headers-update-handler message nil nil))
+            (tessera-mu4e-headers--refresh)
+            (should
+             (= (nth (if (and (not mu4e-search-threads)
+                              (eq tessera-entry-layout 'two-line))
+                         3 2)
+                     state)
+                tessera-mu4e-headers--leading-width))))))))
+
+(ert-deftest tessera-mu4e-prefix-width-uses-thread-contexts ()
+  (tessera-mu4e-tests--with-thread
+    (let* ((head (gethash 1 tessera-mu4e-headers--threads))
+           (saved-point (point)))
+      (setf (tessera-thread-context-total head) 100000
+            (tessera-thread-context-unread head) 12345)
+      (should (= 12 (tessera-mu4e-headers--measure)))
+      (let ((mu4e-search-threads nil))
+        (dolist (spec '((single-line . 8) (two-line . 4)))
+          (let ((tessera-entry-layout (car spec)))
+            (should (= (cdr spec)
+                       (tessera-mu4e-headers--measure))))))
+      (should (= saved-point (point))))))
 
 (ert-deftest tessera-mu4e-clean-refresh-does-no-global-overlay-scan ()
   (tessera-mu4e-tests--with-thread

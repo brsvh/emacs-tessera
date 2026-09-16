@@ -125,11 +125,14 @@ Pending operation marks take precedence over matching flag names."
 
 (defconst tessera-mu4e-headers--icons
   '((status
+     (trashed "T" "⌫" "trash-can-outline" "Trashed")
+     (draft "D" "✎" "email-edit-outline" "Draft")
      (new "N" "✦" "new-box" "New")
      (unread "u" "●" "email" "Unread")
      (seen "S" "○" "email-open-outline" "Read"))
     (priority
      (high "H" "↑" "arrow-up-bold" "High priority")
+     (flagged "F" "★" "star" "Flagged")
      (low "L" "↓" "arrow-down-bold" "Low priority"))
     (operation
      (move "m" "→" "folder-move-outline" "Move")
@@ -145,20 +148,11 @@ Pending operation marks take precedence over matching flag names."
      (unlabel "L" "−" "tag-remove-outline" "Clear labels")
      (action "a" "▶" "play-circle-outline" "Custom action")
      (something "*" "◆" "clipboard-clock-outline" "Deferred"))
-    (draft
-     (draft "D" "✎" "email-edit-outline" "Draft"))
-    (trashed
-     (trashed "T" "⌫" "trash-can-outline" "Trashed"))
-    (flagged
-     (flagged "F" "★" "star" "Flagged"))
-    (replied
-     (replied "R" "↩" "reply" "Replied"))
-    (passed
-     (passed "P" "↪" "forward" "Forwarded"))
-    (list
+    (secondary
+     (replied "R" "↩" "reply" "Replied")
+     (passed "P" "↪" "forward" "Forwarded")
+     (personal "p" "♙" "account-outline" "Personal")
      (list "l" "≡" "format-list-bulleted" "Mailing list"))
-    (personal
-     (personal "p" "♙" "account-outline" "Personal"))
     (attach
      (attach "a" "📎" "paperclip" "Attachment present"))
     (signed
@@ -170,8 +164,11 @@ Pending operation marks take precedence over matching flag names."
   "Glyph variants grouped by their native message or action slot.")
 
 (defconst tessera-mu4e-headers--auxiliary
-  '(draft trashed flagged replied passed list personal)
-  "Independent auxiliary flags, in display order.")
+  '((status trashed draft)
+    (priority flagged)
+    (secondary replied passed personal list))
+  "Optional flags grouped by semantic slot, in display priority order.
+These flags follow `mu4e-headers-visible-flags'.")
 
 (defvar-local tessera-mu4e-headers--active nil
   "Whether presentation synchronization is enabled.")
@@ -249,34 +246,64 @@ for padding purposes.  Threading follows `mu4e-search-threads'."
   (when (hash-table-p mu4e--mark-map)
     (gethash (plist-get message :docid) mu4e--mark-map)))
 
-(defun tessera-mu4e-headers--state (slot context)
-  "Select SLOT from CONTEXT, retaining independent auxiliary flags."
+(defun tessera-mu4e-headers--states (slot context)
+  "Return active states of SLOT in CONTEXT, ordered by priority."
   (let* ((message (tessera-entry-context-object context))
-         (flags (plist-get message :flags)))
+         (flags (plist-get message :flags))
+         (priority (plist-get message :priority))
+         (optional
+          (cl-remove-if-not
+           (lambda (flag)
+             (and (memq flag flags)
+                  (memq flag mu4e-headers-visible-flags)))
+           (cdr (assq slot tessera-mu4e-headers--auxiliary)))))
     (pcase slot
-      ('status (cond ((memq 'new flags) 'new)
-                     ((memq 'unread flags) 'unread)
-                     (t 'seen)))
-      ('priority (let ((value (plist-get message :priority)))
-                   (and (memq value '(high low)) value)))
+      ('status
+       (append optional
+               (or (append (when (memq 'new flags) '(new))
+                           (when (memq 'unread flags) '(unread)))
+                   '(seen))))
+      ('priority
+       (append (when (eq priority 'high) '(high)) optional
+               (when (eq priority 'low) '(low))))
+      ('secondary optional)
       ('operation
-       (let ((mark (car (tessera-mu4e-headers--mark message))))
-         (if (eq mark 'unread) 'mark-unread mark)))
+       (when-let* ((mark (car (tessera-mu4e-headers--mark message))))
+         (list (if (eq mark 'unread) 'mark-unread mark))))
       (_ (and (memq slot flags)
-              (memq slot mu4e-headers-visible-flags) slot)))))
+              (memq slot mu4e-headers-visible-flags) (list slot))))))
+
+(defun tessera-mu4e-headers--state (slot context)
+  "Select the highest-priority state of SLOT in CONTEXT."
+  (car (tessera-mu4e-headers--states slot context)))
 
 (defun tessera-mu4e-headers--help
-    (label window object position)
-  "Describe operation LABEL at POSITION in OBJECT or WINDOW.
-Include the native pending mark target when available."
+    (slot label window object position)
+  "Describe SLOT at POSITION in OBJECT or WINDOW, defaulting to LABEL.
+Include all active states hidden by the selected icon, respecting
+visibility settings.  Pending operations also show their target."
   (let ((buffer (if (bufferp object) object
                   (and (window-live-p window)
                        (window-buffer window)))))
-    (if (buffer-live-p buffer)
+    (if (and (buffer-live-p buffer)
+             (integer-or-marker-p position))
         (with-current-buffer buffer
-          (let* ((message (get-text-property position 'msg))
-                 (mark (tessera-mu4e-headers--mark message)))
-            (if (cdr mark) (format "%s: %s" label (cdr mark)) label)))
+          (if-let* ((message (get-text-property position 'msg)))
+              (if (eq slot 'operation)
+                  (let ((mark (tessera-mu4e-headers--mark message)))
+                    (if (cdr mark)
+                        (format "%s: %s" label (cdr mark)) label))
+                (mapconcat
+                 (lambda (state)
+                   (nth 4 (assq state
+                                (cdr (assq
+                                      slot
+                                      tessera-mu4e-headers--icons)))))
+                 (tessera-mu4e-headers--states
+                  slot (tessera-mu4e-headers--context
+                        message buffer window))
+                 "; "))
+            label))
       label)))
 
 (defun tessera-mu4e-headers--glyph (spec)
@@ -291,7 +318,7 @@ Include the native pending mark target when available."
    :semantic 'neutral))
 
 (defun tessera-mu4e-headers--slot (name)
-  "Make an independent glyph slot NAME."
+  "Make semantic or content glyph slot NAME."
   (make-tessera-glyph-slot
    :name name :width 2 :align 'center
    :selector (apply-partially #'tessera-mu4e-headers--state name)
@@ -301,9 +328,9 @@ Include the native pending mark target when available."
       (list (car spec) :glyph (tessera-mu4e-headers--glyph spec)
             :face (tessera-mu4e-headers--glyph-face name (car spec))
             :help-echo
-            (if (eq name 'operation)
+            (if (memq name '(status priority secondary operation))
                 (apply-partially #'tessera-mu4e-headers--help
-                                 (nth 4 spec))
+                                 name (nth 4 spec))
               (nth 4 spec))))
     (cdr (assq name tessera-mu4e-headers--icons)))))
 
@@ -389,18 +416,12 @@ Use recipients for personal outgoing mail, as native mu4e does."
 ;;;; Layout registration
 
 (defun tessera-mu4e-headers--prefix (kind extra)
-  "Return packed icon references for KIND and EXTRA line."
-  (mapcar
-   (lambda (name) (list name :optional t))
-   (cond
-    ((eq kind 'thread)
-     (append '(priority operation) tessera-mu4e-headers--auxiliary
-             '(status)))
-    ((eq kind 'single-line)
-     (append '(operation priority) tessera-mu4e-headers--auxiliary
-             '(status)))
-    (extra (cons 'priority tessera-mu4e-headers--auxiliary))
-    (t '(operation status)))))
+  "Return semantic slots for KIND and EXTRA line."
+  (cond
+   ((eq kind 'thread) '(priority operation secondary status))
+   ((eq kind 'single-line) '(operation priority secondary status))
+   (extra '(priority secondary))
+   (t '(operation status))))
 
 (defun tessera-mu4e-headers--width (_context)
   "Return the common prefix width for the current result set."
@@ -430,9 +451,7 @@ Use recipients for personal outgoing mail, as native mu4e does."
                (tessera-mu4e-headers--slot (car spec)))
              tessera-mu4e-headers--icons)
      :thread-layout
-     (let ((leading (list (cons :slots
-                                (tessera-mu4e-headers--prefix
-                                 'thread nil))))
+     (let ((leading (tessera-mu4e-headers--prefix 'thread nil))
            (left (list '(thread-tree :grow t :min-width 0
                                      :truncate head :priority -2
                                      :optional t)
@@ -447,13 +466,13 @@ Use recipients for personal outgoing mail, as native mu4e does."
          :leading-width #'tessera-mu4e-headers--width
          :main-leading-segments '(thread-count)
          :main-left-segments (list subject)
-         :extra-leading-segments leading
+         :extra-glyph-slots leading
          :extra-left-segments left :extra-right-segments right)
         :child
         (make-tessera-entry-layout
          :glyph-slots-align 'right
          :leading-width #'tessera-mu4e-headers--width
-         :main-leading-segments leading
+         :main-glyph-slots leading
          :main-left-segments left :main-right-segments right)))
      :layouts
      (list
@@ -461,9 +480,8 @@ Use recipients for personal outgoing mail, as native mu4e does."
             (make-tessera-entry-layout
              :glyph-slots-align 'right
              :leading-width #'tessera-mu4e-headers--width
-             :main-leading-segments
-             (list (cons :slots (tessera-mu4e-headers--prefix
-                                 'single-line nil)))
+             :main-glyph-slots
+             (tessera-mu4e-headers--prefix 'single-line nil)
              :main-left-segments (list entry-subject target content)
              :main-right-segments
              (list labels '(contact :max-width 20 :truncate tail
@@ -472,12 +490,10 @@ Use recipients for personal outgoing mail, as native mu4e does."
             (make-tessera-entry-layout
              :glyph-slots-align 'right
              :leading-width #'tessera-mu4e-headers--width
-             :main-leading-segments
-             (list (cons :slots (tessera-mu4e-headers--prefix
-                                 'two-line nil)))
-             :extra-leading-segments
-             (list (cons :slots (tessera-mu4e-headers--prefix
-                                 'two-line t)))
+             :main-glyph-slots
+             (tessera-mu4e-headers--prefix 'two-line nil)
+             :extra-glyph-slots
+             (tessera-mu4e-headers--prefix 'two-line t)
              :main-left-segments (list entry-subject target)
              :main-right-segments (list labels)
              :extra-left-segments
@@ -497,29 +513,30 @@ Use recipients for personal outgoing mail, as native mu4e does."
       (+ (point) mu4e--mark-fringe-len))))
 
 (defun tessera-mu4e-headers--measure ()
-  "Measure the maximum visible prefix width for this result set."
+  "Measure registered semantic slots, enlarged for thread counts."
   (let ((width 0)
-        (kind (if mu4e-search-threads 'thread tessera-entry-layout)))
-    (save-excursion
-      (goto-char (point-min))
-      (while (< (point) (point-max))
-        (when (tessera-mu4e-headers--body-start)
-          (let ((context (tessera-mu4e-headers--context
-                          (get-text-property (point) 'msg)
-                          (current-buffer) nil)))
-            (when-let* ((count (tessera-thread-count context)))
-              (setq width (max width (string-width count))))
-            (dolist (extra (if (eq kind 'two-line)
-                               '(nil t) '(nil)))
-              (setq width
-                    (max width
-                         (* 2 (cl-count-if
-                               (lambda (reference)
-                                 (tessera-mu4e-headers--state
-                                  (car reference) context))
-                               (tessera-mu4e-headers--prefix
-                                kind extra))))))))
-        (forward-line 1)))
+        (kind (if mu4e-search-threads 'thread tessera-entry-layout))
+        (slots (tessera--entry-backend-glyph-slots
+                (tessera--find-entry-backend 'mu4e-headers))))
+    (dolist (extra (if (eq kind 'two-line) '(nil t) '(nil)))
+      (setq width
+            (max width
+                 (cl-loop
+                  for name in
+                  (tessera-mu4e-headers--prefix kind extra)
+                  sum (tessera-glyph-slot-width
+                       (cl-find name slots
+                                :key #'tessera-glyph-slot-name))))))
+    (when mu4e-search-threads
+      (maphash
+       (lambda (_id thread)
+         (when (tessera-thread-context-first thread)
+           (let ((count
+                  (format "%d/%d"
+                          (tessera-thread-context-unread thread)
+                          (tessera-thread-context-total thread))))
+             (setq width (max width (length count))))))
+       tessera-mu4e-headers--threads))
     width))
 
 (defun tessera-mu4e-headers--sync-line (native &optional force)
@@ -528,6 +545,7 @@ FORCE also redraws rows whose message and thread state are unchanged."
   (when-let* ((body (tessera-mu4e-headers--body-start)))
     (let* ((start (line-beginning-position))
            (end (line-end-position))
+           (fringe (- body mu4e--mark-fringe-len))
            (message (get-text-property start 'msg))
            (saved (get-text-property body 'tessera-mu4e-native))
            (original (or saved (buffer-substring body end)))
@@ -538,9 +556,13 @@ FORCE also redraws rows whose message and thread state are unchanged."
                             message))))))
       (when (if native saved
               (or force (not saved)
+                  ;; Reapplying a mark replaces its hidden text too.
+                  (not (equal (get-text-property fringe 'display) ""))
                   (not (equal state (get-text-property
                                      body 'tessera-mu4e-state)))))
-        (tessera-entry-clear-layout body (1+ end))
+        ;; Native mark edits can move old padding into the fringe.
+        ;; Clear the whole row so no clipped decoration survives.
+        (tessera-entry-clear-layout start (1+ end))
         (remove-overlays start (1+ end) 'mu4e-mark t)
         (delete-region body end)
         (goto-char body)
@@ -553,8 +575,7 @@ FORCE also redraws rows whose message and thread state are unchanged."
                                      tessera-mu4e-state nil
                                      tessera--entry-layout nil
                                      tessera--layout-overlay nil))
-              (remove-text-properties
-               (- body mu4e--mark-fringe-len) body '(display nil)))
+              (remove-text-properties fringe body '(display nil)))
           (let ((text (tessera-entry-render 'mu4e-headers message)))
             (put-text-property 0 (length text)
                                'tessera-mu4e-native original text)
@@ -564,8 +585,7 @@ FORCE also redraws rows whose message and thread state are unchanged."
             (put-text-property
              start body 'tessera--entry-layout
              (get-text-property body 'tessera--entry-layout))
-            (put-text-property
-             (- body mu4e--mark-fringe-len) body 'display "")))
+            (put-text-property fringe body 'display "")))
         (add-text-properties
          start (1+ (point))
          (list 'docid (plist-get message :docid) 'msg message))
