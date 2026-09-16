@@ -162,6 +162,30 @@
                 thereis (equal (get-text-property p 'display) "\n")))
       (should-not (search-forward "Subject" (line-end-position) t)))))
 
+(ert-deftest tessera-thread-current-excludes-virtual-subject ()
+  (with-temp-buffer
+    (let ((gnus-show-threads t)
+          (tessera-entry-layout 'two-line)
+          (tessera-glyph-style 'ascii))
+      (tessera-gnus-summary--register)
+      (tessera-tests--gnus-rows)
+      (tessera-gnus-summary--sync-buffer)
+      (goto-char (tessera-entry-point))
+      (tessera-entry-highlight-current)
+      (should (memq 'tessera-entry-current-face
+                    (get-text-property (point) 'face)))
+      (goto-char (point-min))
+      (search-forward "2/4Subject 1")
+      (should-not (memq 'tessera-entry-current-face
+                        (ensure-list
+                         (get-text-property (1- (point)) 'face))))
+      (should (get-text-property (point) 'tessera--thread-heading))
+      (forward-line 1)
+      (goto-char (tessera-entry-point))
+      (tessera-entry-highlight-current)
+      (should (memq 'tessera-entry-current-face
+                    (get-text-property (point) 'face))))))
+
 (ert-deftest tessera-thread-uses-inner-and-outer-overlay-padding ()
   (with-temp-buffer
     (let ((gnus-show-threads t)

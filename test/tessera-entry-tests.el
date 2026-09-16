@@ -890,6 +890,12 @@
         (goto-char (point-min))
         (tessera-entry-highlight-current)
         (should-not (buffer-modified-p))
+        (cl-loop for position from (point-min)
+                 to (line-end-position)
+                 do (should
+                     (memq 'tessera-entry-current-face
+                           (ensure-list
+                            (get-text-property position 'face)))))
         (should (= count (length (overlays-in (point-min)
                                               (point-max)))))
         (should (memq 'tessera-entry-current-face
@@ -917,6 +923,60 @@
         (tessera-entry-clear-current)
         (should (equal-including-properties original (buffer-string)))
         (should-not (buffer-modified-p))))))
+
+(ert-deftest tessera-entry-current-excludes-thread-heading ()
+  (with-temp-buffer
+    (let* ((tessera-entry-top-padding 0.2)
+           (tessera-entry-bottom-padding 0.2)
+           (heading
+            (propertize
+             (concat (tessera--space 1) "1/2"
+                     (tessera--space 1) "Subject"
+                     (tessera--visual-line-break))
+             'tessera--thread-heading t)))
+      (insert (tessera--entry-content
+               (concat heading (tessera--space 1) "Sender"
+                       (tessera--space 1) "Date")))
+      (let ((end (point)))
+        (insert "\n")
+        (tessera-entry-apply-layout (point-min) end))
+      (let ((original (buffer-string))
+            (decorations
+             (mapcar
+              (lambda (overlay)
+                (list overlay (overlay-get overlay 'before-string)
+                      (overlay-get overlay 'after-string)))
+              (overlays-in (point-min) (point-max)))))
+        (goto-char (point-min))
+        (tessera-entry-highlight-current)
+        (cl-loop
+         for position from (point-min) below (point-max)
+         do (if (get-text-property position 'tessera--thread-heading)
+                (should (equal (get-text-property position 'face)
+                               (get-text-property
+                                (1- position) 'face original)))
+              (should (memq 'tessera-entry-current-face
+                            (ensure-list
+                             (get-text-property position 'face))))))
+        (dolist (decoration decorations)
+          (dolist (property '(before-string after-string))
+            (let ((string (overlay-get (car decoration) property)))
+              (dotimes (position (length string))
+                (should
+                 (eq (and (get-text-property
+                           position 'tessera--layout-space string)
+                          (not (get-text-property
+                                position 'tessera--thread-heading
+                                string)))
+                     (and (memq 'tessera-entry-current-face
+                                (ensure-list
+                                 (get-text-property
+                                  position 'face string))) t)))))))
+        (tessera-entry-clear-current)
+        (should (equal-including-properties original (buffer-string)))
+        (pcase-dolist (`(,overlay ,before ,after) decorations)
+          (should (eq before (overlay-get overlay 'before-string)))
+          (should (eq after (overlay-get overlay 'after-string))))))))
 
 (ert-deftest tessera-entry-layout-spaces-never-change-on-hover ()
   (let ((tessera--entry-backends (make-hash-table :test #'eq))

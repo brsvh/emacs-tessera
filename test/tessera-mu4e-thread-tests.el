@@ -90,6 +90,25 @@
     (should (string-match-p "Subject 2" (buffer-string)))
     (tessera-mu4e-headers--disable)))
 
+(ert-deftest tessera-mu4e-thread-current-excludes-virtual-subject ()
+  (tessera-mu4e-tests--with-thread
+    (mu4e~headers-goto-docid 1)
+    (goto-char (tessera-entry-point))
+    (tessera-entry-highlight-current)
+    (should (memq 'tessera-entry-current-face
+                  (get-text-property (point) 'face)))
+    (beginning-of-line)
+    (search-forward "1/4Subject 1")
+    (should-not (memq 'tessera-entry-current-face
+                      (ensure-list
+                       (get-text-property (1- (point)) 'face))))
+    (should (get-text-property (point) 'tessera--thread-heading))
+    (mu4e~headers-goto-docid 2)
+    (goto-char (tessera-entry-point))
+    (tessera-entry-highlight-current)
+    (should (memq 'tessera-entry-current-face
+                  (get-text-property (point) 'face)))))
+
 (ert-deftest tessera-mu4e-thread-folding-keeps-native-control ()
   (tessera-mu4e-tests--with-thread
     (mu4e-thread-fold t)

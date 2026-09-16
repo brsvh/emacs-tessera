@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'hl-line)
 (require 'tessera-gnus-summary)
 (require 'tessera-gnus-test-support)
 
@@ -270,6 +271,44 @@
               (should (= gnus-unread-mark character))))
         (tessera-gnus-mode -1)
         (mapc #'kill-buffer buffers)))))
+
+(ert-deftest tessera-gnus-current-replaces-and-restores-hl-line ()
+  (dolist (enabled '(nil t))
+    (with-temp-buffer
+      (let ((gnus-show-threads t)
+            (gnus-newsgroup-headers nil)
+            (tessera-glyph-style 'ascii))
+        (tessera-gnus-summary--register)
+        (tessera-tests--gnus-rows)
+        (hl-line-mode (if enabled 1 -1))
+        (unwind-protect
+            (dotimes (_ 2)
+              (tessera-gnus-summary--enable)
+              (tessera-gnus-summary--enable)
+              (should-not hl-line-mode)
+              (should-not hl-line-overlay)
+              (tessera-gnus-summary--prepare)
+              (goto-char (tessera-entry-point))
+              ;; Another mode hook may enable Hl-Line again.
+              (hl-line-mode 1)
+              (should (overlay-buffer hl-line-overlay))
+              (run-hooks 'post-command-hook)
+              (should-not hl-line-mode)
+              (should-not hl-line-overlay)
+              (should (memq 'tessera-entry-current-face
+                            (get-char-property (point) 'face)))
+              (save-excursion
+                (beginning-of-line)
+                (search-forward "Subject 1")
+                (should
+                 (eq
+                  'tessera-gnus-summary-thread-unread-subject-face
+                  (get-char-property (1- (point)) 'face))))
+              (tessera-gnus-summary--disable)
+              (should (eq enabled hl-line-mode))
+              (should (eq enabled (and hl-line-overlay t))))
+          (tessera-gnus-summary--disable)
+          (hl-line-mode -1))))))
 
 (ert-deftest tessera-gnus-custom-mark-rejects-invalid-default ()
   (let ((gnus-unread-mark ?•)

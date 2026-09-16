@@ -1478,19 +1478,25 @@ LEADING-WIDTH supplies the shared minimum width of that area."
 
 (defun tessera--render-two-line (layout definition context)
   "Render two-line LAYOUT using DEFINITION and CONTEXT."
-  (mapconcat
-   #'identity
-   (list
-    (tessera--render-single-line layout definition context)
-    (tessera--render-line
-     (tessera-entry-layout-extra-glyph-slots layout)
-     (tessera-entry-layout-extra-left-segments layout)
-     (tessera-entry-layout-extra-right-segments layout)
-     definition context
-     (tessera-entry-layout-glyph-slots-align layout)
-     (tessera-entry-layout-extra-leading-segments layout)
-     (tessera-entry-layout-leading-width layout)))
-   (tessera--visual-line-break)))
+  (let ((main (concat
+               (tessera--render-single-line layout definition context)
+               (tessera--visual-line-break)))
+        (thread (and (tessera--entry-backend-thread-layout definition)
+                     (tessera-entry-context-thread context))))
+    ;; A thread heading belongs to the group, not its first message.
+    (when (and thread (tessera-thread-context-first thread))
+      (put-text-property 0 (length main)
+                         'tessera--thread-heading t main))
+    (concat
+     main
+     (tessera--render-line
+      (tessera-entry-layout-extra-glyph-slots layout)
+      (tessera-entry-layout-extra-left-segments layout)
+      (tessera-entry-layout-extra-right-segments layout)
+      definition context
+      (tessera-entry-layout-glyph-slots-align layout)
+      (tessera-entry-layout-extra-leading-segments layout)
+      (tessera-entry-layout-leading-width layout)))))
 
 (defun tessera--render-entry-lines (layout definition context)
   "Render the visual lines of LAYOUT using DEFINITION and CONTEXT."
@@ -1648,11 +1654,19 @@ Return the original and styled overlay strings for restoration."
                   (position 0)
                   (limit (length original)))
               (while (< position limit)
-                (let ((next (next-single-property-change
+                (let ((next
+                       (min (next-single-property-change
                              position 'tessera--layout-space
-                             original limit)))
-                  (when (get-text-property
-                         position 'tessera--layout-space original)
+                             original limit)
+                            (next-single-property-change
+                             position 'tessera--thread-heading
+                             original limit))))
+                  (when (and (get-text-property
+                              position 'tessera--layout-space
+                              original)
+                             (not (get-text-property
+                                   position 'tessera--thread-heading
+                                   original)))
                     (add-face-text-property
                      position next 'tessera-entry-current-face
                      nil styled))
@@ -1665,8 +1679,9 @@ Return the original and styled overlay strings for restoration."
 (defun tessera-entry-highlight-current ()
   "Visually distinguish the entry containing point.
 Keep native content faces and mouse interactions, and exclude
-vertical padding.  Restore the previous entry before moving the
-highlight.  This function is suitable for `post-command-hook'."
+vertical padding and virtual thread headings.  Restore the previous
+entry before moving the highlight.  This function is suitable for
+`post-command-hook'."
   (let* ((start (line-beginning-position))
          (end (min (point-max) (1+ (line-end-position))))
          (layout (get-text-property start 'tessera--entry-layout)))
@@ -1680,20 +1695,29 @@ highlight.  This function is suitable for `post-command-hook'."
           (let ((inhibit-read-only t)
                 (position start))
             (while (< position end)
-              (let ((next (next-single-property-change
-                           position 'face nil end)))
-                (put-text-property
-                 position next 'tessera--current-face
-                 (list (get-text-property position 'face)))
-                (add-face-text-property
-                 position next 'tessera-entry-current-face)
+              (let ((next
+                     (min (next-single-property-change
+                           position 'face nil end)
+                          (next-single-property-change
+                           position 'tessera--thread-heading
+                           nil end))))
+                (unless (get-text-property
+                         position 'tessera--thread-heading)
+                  (put-text-property
+                   position next 'tessera--current-face
+                   (list (get-text-property position 'face)))
+                  (add-face-text-property
+                   position next 'tessera-entry-current-face))
                 (setq position next)))
             (let ((position start))
               (while (< position end)
                 (let ((next (next-single-property-change
                              position 'display nil end)))
-                  (when (equal (get-text-property position 'display)
-                               "\n")
+                  (when (and (equal (get-text-property
+                                     position 'display) "\n")
+                             (not (get-text-property
+                                   position
+                                   'tessera--thread-heading)))
                     (add-face-text-property
                      position next '(:extend t)))
                   (setq position next))))

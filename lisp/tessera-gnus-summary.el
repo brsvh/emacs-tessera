@@ -36,6 +36,7 @@
 (require 'tessera-gnus-article)
 (require 'gnus-sum)
 (require 'gnus-spec)
+(require 'hl-line)
 (require 'subr-x)
 (require 'seq)
 
@@ -124,6 +125,9 @@
 
 (defvar-local tessera-gnus-summary--saved-settings nil
   "Original values and locality of settings replaced by Tessera.")
+
+(defvar-local tessera-gnus-summary--saved-hl-line nil
+  "Whether Hl-Line mode was enabled before Tessera took over.")
 
 (defvar-local tessera-gnus-summary--dirty nil
   "Whether native buffer changes need synchronization.")
@@ -919,6 +923,7 @@ FORCE also redraws entries whose native marks have not changed."
 (defun tessera-gnus-summary--post-command ()
   "Synchronize native changes and highlight the current entry."
   (when tessera-gnus-summary--active
+    (when hl-line-mode (hl-line-mode -1))
     (let* ((appearance (tessera-gnus-summary--appearance))
            (force (or (not (equal appearance
                                   tessera-gnus-summary--appearance))
@@ -953,9 +958,12 @@ FORCE also redraws entries whose native marks have not changed."
 (defun tessera-gnus-summary--enable ()
   "Enable Tessera in the current Gnus summary buffer."
   (unless tessera-gnus-summary--active
-    (setq tessera-gnus-summary--saved-settings
+    (setq tessera-gnus-summary--saved-hl-line hl-line-mode
+          tessera-gnus-summary--saved-settings
           (tessera--save-settings
            '(gnus-summary-line-format tessera-entry-layout)))
+    ;; Native line overlays also cover virtual headings and padding.
+    (when hl-line-mode (hl-line-mode -1))
     (setq-local gnus-summary-line-format "%u&tessera;\n")
     (setq-local tessera-entry-layout 'two-line)
     (setq tessera-gnus-summary--active t)
@@ -995,7 +1003,9 @@ FORCE also redraws entries whose native marks have not changed."
           tessera-gnus-summary--content-cache nil
           tessera-gnus-summary--threads nil
           tessera-gnus-summary--thread-width 8)
-    (tessera-gnus-summary--refresh)))
+    (tessera-gnus-summary--refresh)
+    (hl-line-mode (if tessera-gnus-summary--saved-hl-line 1 -1))
+    (setq tessera-gnus-summary--saved-hl-line nil)))
 
 (provide 'tessera-gnus-summary)
 ;;; tessera-gnus-summary.el ends here
