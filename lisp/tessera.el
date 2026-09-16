@@ -1498,20 +1498,47 @@ LEADING-WIDTH supplies the shared minimum width of that area."
       (tessera--render-two-line layout definition context)
     (tessera--render-single-line layout definition context)))
 
+(defun tessera--inert-layout-string (string)
+  "Copy decorative STRING without changing its appearance on hover.
+An empty face blocks hover inherited from the underlying buffer.
+Keep each face span separate: Emacs paints an entire mouse-face
+span using the face of the character under the pointer."
+  (let* ((text (tessera--add-default-property
+                (copy-sequence string) 'face 'default))
+         (position 0)
+         (end (length text)))
+    (while (< position end)
+      (let ((next (next-single-property-change
+                   position 'face text end)))
+        (put-text-property position next 'mouse-face
+                           (list :inherit nil) text)
+        (setq position next)))
+    text))
+
 (defun tessera--padding-string (height)
   "Return display-only vertical padding of HEIGHT normal lines."
   (when (> height 0)
-    (propertize " \n" 'face `((:height ,height) default)
-                'line-height t 'mouse-face 'default)))
+    (tessera--inert-layout-string
+     (propertize " \n" 'face `((:height ,height) default)
+                 'line-height t))))
 
 (defun tessera--entry-content (rendered &optional prefix)
   "Extract RENDERED content and layout after native PREFIX."
-  (let ((position 0)
-        (length (length rendered))
-        (content (copy-sequence (or prefix "")))
-        (pending (tessera--padding-string
-                  tessera-entry-top-padding))
-        placements)
+  ;; Keep the padding's buffer position outside every content hover
+  ;; span.  A before-string containing a newline can otherwise enter
+  ;; the first element's mouse-face rectangle, despite its own face.
+  ;; A zero-width display keeps this anchor on the content's visual
+  ;; line; making it invisible breaks backward visual-line motion.
+  (let* ((prefix (tessera--inert-layout-string
+                  (if (string-empty-p (or prefix "")) " " prefix)))
+         (position 0)
+         (length (length rendered))
+         (content prefix)
+         (pending (tessera--padding-string
+                   tessera-entry-top-padding))
+         placements)
+    (put-text-property 0 (length prefix) 'display
+                       '(space :width 0) prefix)
     (while (< position length)
       (let* ((space (get-text-property
                      position 'tessera--layout-space rendered))
@@ -1531,8 +1558,6 @@ LEADING-WIDTH supplies the shared minimum width of that area."
             (setq pending nil))
           (setq content (concat content part)))
         (setq position end)))
-    (when (string-empty-p content)
-      (setq content (propertize " " 'display '(space :width 0))))
     (when pending
       (push (list (1- (length content)) 'after-string pending)
             placements))
@@ -1722,10 +1747,7 @@ on buffer text, and all decorative spaces live in overlay strings."
         (overlay-put overlay 'priority 1)
         (overlay-put
          overlay property
-         (propertize
-          (tessera--add-default-property
-           (copy-sequence string) 'face 'default)
-          'mouse-face 'default))))
+         (tessera--inert-layout-string string))))
     (when (and bottom (> bottom 0))
       (let ((overlay (make-overlay start limit)))
         (unless anchor (setq anchor overlay))
@@ -1748,7 +1770,9 @@ After inserting it and the native terminating newline, call
 `tessera-entry-apply-layout' to display padding and alignment.
 WINDOW defaults to a window displaying the current buffer.
 PREFIX is optional non-displaying native text placed before content;
-it does not participate in width allocation."
+it does not participate in width allocation.  It also anchors layout
+outside content hover ranges.  Without PREFIX, use one zero-width
+space for that anchor."
   (when (and window (not (window-live-p window)))
     (error "Cannot render an entry for a dead window"))
   (let* ((definition (tessera--find-entry-backend backend))

@@ -266,8 +266,8 @@
             'tessera-entry-tests
             '(:title "Subject" :date "2026" :status unread))))
       (should (equal (substring-no-properties rendered)
-                     "*Subject2026"))
-      (should (equal (get-text-property 1 'mouse-face rendered)
+                     " *Subject2026"))
+      (should (equal (get-text-property 2 'mouse-face rendered)
                      '(tessera-entry-hover-face)))
       (should (tessera-entry-tests--overlay-property-p
                'display '(space :width 2) rendered))
@@ -831,7 +831,38 @@
                        :status unread)
               (selected-window))))
         (should (equal (substring-no-properties rendered)
-                       "*A very lo…2026"))))))
+                       " *A very lo…2026"))))))
+
+(ert-deftest tessera-entry-padding-anchor-excludes-content-hover ()
+  (dolist (prefix '(nil "" "ABCD"))
+    (dolist (padding '(0 0.05 0.5))
+      (let* ((tessera-entry-top-padding padding)
+             (hover (list 'highlight))
+             (input (propertize "Title" 'mouse-face hover
+                                'help-echo "Subject"))
+             (text (tessera--entry-content input prefix))
+             (start (max 1 (length prefix))))
+        (should (equal (substring-no-properties text start)
+                       "Title"))
+        (should (equal (substring-no-properties text 0 start)
+                       (if (> (length prefix) 0) prefix " ")))
+        (dotimes (position start)
+          (should (equal (get-text-property position 'display text)
+                         '(space :width 0)))
+          (should (equal (get-text-property
+                          position 'mouse-face text)
+                         '(:inherit nil))))
+        (should (eq (get-text-property start 'mouse-face text)
+                    hover))
+        (should (= (previous-single-property-change
+                    (1+ start) 'mouse-face text) start))
+        (should (equal (get-text-property start 'help-echo text)
+                       "Subject"))
+        (when (> padding 0)
+          (should (= 0 (caaar (get-text-property
+                               0 'tessera--entry-layout text)))))
+        (should (equal-including-properties
+                 input (substring text start)))))))
 
 (defun tessera-entry-tests--insert-current-fixture ()
   "Insert two entries and install their overlay layouts."
@@ -886,6 +917,74 @@
         (tessera-entry-clear-current)
         (should (equal-including-properties original (buffer-string)))
         (should-not (buffer-modified-p))))))
+
+(ert-deftest tessera-entry-layout-spaces-never-change-on-hover ()
+  (let ((tessera--entry-backends (make-hash-table :test #'eq))
+        (tessera-entry-layout 'two-line)
+        (tessera-entry-top-padding 0.2)
+        (tessera-entry-bottom-padding 0.3)
+        (tessera-entry-safe-gap 1)
+        (tessera-entry-left-padding 1)
+        (tessera-entry-segment-gap 1)
+        (tessera-entry-flex-gap-min-width 1)
+        (tessera-glyph-style 'ascii))
+    (with-temp-buffer
+      (tessera-entry-tests--insert-current-fixture)
+      (let ((start (point)))
+        (insert (tessera-entry-render
+                 'tessera-entry-tests
+                 '(:title "Spaced title" :author "Plain author"
+                          :date "2026" :count "12")))
+        (let ((end (point)))
+          (insert "\n")
+          (tessera-entry-apply-layout start end)))
+      (goto-char (point-min))
+      (dolist (selected '(nil t nil))
+        (if selected (tessera-entry-highlight-current)
+          (tessera-entry-clear-current))
+        (let (aligned padded)
+          (dolist (overlay (overlays-in (point-min) (point-max)))
+            (when (overlay-get overlay 'tessera-entry-overlay)
+              (dolist (property '(before-string after-string))
+                (when-let* ((text (overlay-get overlay property)))
+                  (dotimes (index (length text))
+                    (let* ((face (get-text-property index 'face text))
+                           (hover
+                            (get-text-property
+                             index 'mouse-face text))
+                           (end (next-single-property-change
+                                 index 'mouse-face text
+                                 (length text))))
+                      ;; Non-nil blocks hover from the anchor text;
+                      ;; no attributes override the space's face.
+                      (should (equal hover '(:inherit nil)))
+                      (should
+                       (cl-loop for position from index below end
+                                always
+                                (equal face (get-text-property
+                                             position 'face text))))
+                      (when (get-text-property
+                             index 'line-height text)
+                        (setq padded t))
+                      (when (plist-member
+                             (cdr-safe (get-text-property
+                                        index 'display text))
+                             :align-to)
+                        (setq aligned t))))))))
+          (should aligned)
+          (should padded))
+        (search-forward "First")
+        (should (get-text-property (1- (point)) 'mouse-face))
+        (should-not
+         (equal (get-text-property (1- (point)) 'mouse-face)
+                '(:inherit nil)))
+        (search-forward "Spaced title")
+        (let ((hover (get-text-property (1- (point)) 'mouse-face)))
+          (should hover)
+          (should-not (equal hover '(:inherit nil)))
+          (should (eq hover (get-text-property
+                             (- (point) 6) 'mouse-face))))
+        (goto-char (point-min))))))
 
 (ert-deftest tessera-entry-current-survives-entry-replacement ()
   (let ((tessera--entry-backends (make-hash-table :test #'eq))

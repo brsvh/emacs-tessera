@@ -695,16 +695,6 @@ Use NATIVE-FACE when supplied, including an explicitly nil face."
           (tessera-entry-render
            'gnus-summary header
            (get-buffer-window (current-buffer)) prefix)))
-    ;; The native mark prefix also carries the first visible glyph.
-    ;; A fully hidden prefix before a display newline confuses
-    ;; Emacs's backward visual-line motion.
-    (let ((glyph (substring result 4 5)))
-      (add-text-properties 0 4 (text-properties-at 4 result) result)
-      (if-let* ((display (get-text-property 0 'display glyph)))
-          (put-text-property 0 1 'display display result)
-        (remove-text-properties 0 1 '(display nil) result))
-      (compose-string result 0 1 (aref glyph 0))
-      (put-text-property 1 5 'display "" result))
     (when-let* ((position (tessera-entry-point result)))
       (put-text-property position (1+ position)
                          'gnus-position t result))
