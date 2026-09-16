@@ -53,6 +53,7 @@
 (declare-function mu4e~headers-thread-root-p "mu4e-headers")
 (declare-function mu4e-get-headers-buffer "mu4e-window")
 (declare-function mu4e~headers-docid-at-point "mu4e-headers")
+(declare-function mu4e~headers-field-for-docid "mu4e-headers")
 
 ;;;; Message state and face composition
 
@@ -351,6 +352,30 @@ Use recipients for personal outgoing mail, as native mu4e does."
          contacts ", ")
       "?")))
 
+(defun tessera-mu4e-headers--overflow-help (window object position)
+  "Describe the clipped message at POSITION in OBJECT or WINDOW."
+  (when-let* ((buffer (if (bufferp object) object
+                        (and (window-live-p window)
+                             (window-buffer window)))))
+    (with-current-buffer buffer
+      (when-let* ((message (get-text-property position 'msg))
+                  (node (tessera-mu4e-headers--thread-context
+                         message)))
+        (let* ((parent (tessera-thread-context-parent node))
+               (from (and parent
+                          (mu4e~headers-field-for-docid
+                           parent :from))))
+          (format
+           "%s\n%s\nDepth: %d\nReply to: %s"
+           (tessera-mu4e-headers--contact message)
+           (plist-get message :subject)
+           (length (tessera--thread-path-tail node))
+           (if from
+               (format "%s (#%s)"
+                       (tessera-mu4e-headers--contact
+                        (list :from from)) parent)
+             (or parent "Root"))))))))
+
 (defun tessera-mu4e-headers--field (role context)
   "Return a native message element for ROLE in CONTEXT."
   (let* ((message (tessera-entry-context-object context))
@@ -360,6 +385,8 @@ Use recipients for personal outgoing mail, as native mu4e does."
        (when-let* ((text (tessera-thread-prefix context)))
          (propertize text
                      'face 'tessera-mu4e-headers-thread-tree-face
+                     'tessera--overflow-help
+                     #'tessera-mu4e-headers--overflow-help
                      'mouse-face 'tessera-entry-hover-face)))
       ('thread-count
        (when-let* ((text (tessera-thread-count context)))
@@ -452,9 +479,7 @@ Use recipients for personal outgoing mail, as native mu4e does."
              tessera-mu4e-headers--icons)
      :thread-layout
      (let ((leading (tessera-mu4e-headers--prefix 'thread nil))
-           (left (list '(thread-tree :grow t :min-width 0
-                                     :truncate head :priority -2
-                                     :optional t)
+           (left (list 'thread-tree
                        '(contact :grow t :min-width 4 :truncate tail
                                  :point t)
                        content target))

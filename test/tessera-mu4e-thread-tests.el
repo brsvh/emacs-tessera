@@ -52,6 +52,44 @@
                (progn ,@body)
              (tessera-mu4e-headers--disable)))))))
 
+(ert-deftest tessera-mu4e-thread-tree-survives-narrow-allocation ()
+  (tessera-mu4e-headers--register)
+  (let* ((definition (tessera--find-entry-backend 'mu4e-headers))
+         (context (make-tessera-entry-context
+                   :thread (make-tessera-thread-context
+                            :path (make-list 27 t))))
+         (layout (tessera--find-entry-layout definition context))
+         (tree (tessera--render-segment
+                (car (tessera-entry-layout-main-left-segments layout))
+                definition context)))
+    (tessera--allocate-segment-widths (list tree) nil 8 20)
+    (should (equal (tessera--render-segment-group (list tree))
+                   (tessera-mu4e-headers--field
+                    'thread-tree context)))))
+
+(ert-deftest tessera-mu4e-thread-overflow-keeps-message-and-help ()
+  (save-window-excursion
+    (tessera-mu4e-tests--with-thread
+      (set-window-buffer (selected-window) (current-buffer))
+      (mu4e~headers-goto-docid 3)
+      (setf (tessera-thread-context-path
+             (gethash 3 tessera-mu4e-headers--threads))
+            (make-list 23 t))
+      (cl-letf (((symbol-function 'window-body-width)
+                 (lambda (&rest _) 50)))
+        (tessera-mu4e-headers--sync-line nil t))
+      (goto-char (tessera-entry-point))
+      (should (eq (char-after) ?…))
+      (should (= 3 (mu4e~headers-docid-at-point)))
+      (let* ((position (point))
+             (help (funcall (get-text-property (point) 'help-echo)
+                            (selected-window) (current-buffer)
+                            (point))))
+        (should (string-match-p "Author 3\nSubject 3" help))
+        (should (string-match-p "Depth: 23" help))
+        (should (string-match-p "Reply to: Author 2 (#2)" help))
+        (should (= position (point)))))))
+
 (ert-deftest tessera-mu4e-thread-native-paths-and-updates ()
   (tessera-mu4e-tests--with-thread
     (let ((head (gethash 1 tessera-mu4e-headers--threads)))

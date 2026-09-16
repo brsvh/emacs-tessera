@@ -213,6 +213,8 @@ current group's Agent overview, which can itself be incomplete."
 
 (declare-function tessera-gnus-summary--track-folds
                   "tessera-gnus-summary")
+(declare-function tessera-gnus-summary--navigation
+                  "tessera-gnus-summary")
 (declare-function tessera-gnus-article--track-content
                   "tessera-gnus-article")
 
@@ -242,6 +244,7 @@ current group's Agent overview, which can itself be incomplete."
         (require 'tessera-gnus-article)
         (require 'tessera-gnus-summary)
         (tessera-gnus-summary--track-folds t)
+        (tessera-gnus-summary--navigation t)
         (tessera-gnus-article--track-content t)
         (add-hook 'gnus-summary-mode-hook
                   #'tessera-gnus--enable-summary)
@@ -257,6 +260,7 @@ current group's Agent overview, which can itself be incomplete."
       (tessera-gnus-article--track-content nil))
     (when (featurep 'tessera-gnus-summary)
       (tessera-gnus-summary--track-folds nil)
+      (tessera-gnus-summary--navigation nil)
       (tessera-gnus--map-summary-buffers
        #'tessera-gnus-summary--disable))))
 

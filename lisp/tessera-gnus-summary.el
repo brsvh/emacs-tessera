@@ -380,7 +380,32 @@ Spam and expirable faces take precedence over native attributes."
 (defun tessera-gnus-summary--thread-tree (context)
   "Return CONTEXT's thread branches using the Gnus tree face."
   (when-let* ((text (tessera-thread-prefix context)))
-    (propertize text 'face 'tessera-gnus-summary-thread-tree-face)))
+    (propertize text 'face 'tessera-gnus-summary-thread-tree-face
+                'tessera--overflow-help
+                #'tessera-gnus-summary--overflow-help)))
+
+(defun tessera-gnus-summary--overflow-help (window object position)
+  "Describe the clipped article at POSITION in OBJECT or WINDOW."
+  (when-let* ((buffer (if (bufferp object) object
+                        (and (window-live-p window)
+                             (window-buffer window)))))
+    (with-current-buffer buffer
+      (when-let* ((entry (get-text-property
+                          position 'tessera-gnus-summary-entry))
+                  (node (tessera-gnus-summary--thread-context
+                         (car entry))))
+        (let* ((parent (tessera-thread-context-parent node))
+               (data (and parent (gnus-data-find parent))))
+          (format
+           "%s\n%s\nDepth: %d\nReply to: %s"
+           (plist-get (cdr entry) :author)
+           (mail-header-subject (car entry))
+           (length (tessera--thread-path-tail node))
+           (if data
+               (format "%s (#%s)"
+                       (mail-header-from (gnus-data-header data))
+                       parent)
+             (or parent "Root"))))))))
 
 (defun tessera-gnus-summary--thread-count (context)
   "Return CONTEXT's thread count using the Gnus count faces."
@@ -600,8 +625,7 @@ value.  Signal an error if neither value is an ASCII character."
 (defun tessera-gnus-summary--thread-layout ()
   "Return the automatically selected native thread layout."
   (let* ((slots '(score availability secondary status))
-         (left '((thread-tree :grow t :min-width 0 :truncate head
-                              :priority -2 :optional t)
+         (left '(thread-tree
                  (author :grow t :min-width 4 :truncate tail :point t)
                  (:slots (attachment :optional t)
                          (signature :optional t)
@@ -799,6 +823,23 @@ Gnus applies its native row face before running the update hook."
                     #'tessera-gnus-summary--fold-changed)
       (advice-remove function
                      #'tessera-gnus-summary--fold-changed))))
+
+(defun tessera-gnus-summary--horizontal-recenter
+    (function &rest arguments)
+  "Call FUNCTION with ARGUMENTS outside Tessera summaries.
+Native horizontal centering measures logical columns, which include
+the text of both visual lines in a Tessera entry.  Leave vertical
+centering and the user's chosen target row to Gnus."
+  (unless tessera-gnus-summary--active
+    (apply function arguments)))
+
+(defun tessera-gnus-summary--navigation (enable)
+  "Adapt native centering when ENABLE is non-nil, or restore it."
+  (if enable
+      (advice-add 'gnus-horizontal-recenter :around
+                  #'tessera-gnus-summary--horizontal-recenter)
+    (advice-remove 'gnus-horizontal-recenter
+                   #'tessera-gnus-summary--horizontal-recenter)))
 
 (defun tessera-gnus-summary--sync-buffer (&optional force)
   "Synchronize all entries, preserving point within its article.

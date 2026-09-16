@@ -268,17 +268,15 @@ only when requested, rather than copying every ancestor per row."
      path))
 
 (defun tessera--thread-path-tail (context)
-  "Return at most five reversed branches for CONTEXT's renderer."
-  (seq-take
-   (if-let* ((path (tessera-thread-context-forward-path context)))
-       (reverse path)
-     (tessera-thread-context-reverse-path context))
-   5))
+  "Return CONTEXT's branch path in child-to-root order."
+  (if-let* ((path (tessera-thread-context-forward-path context)))
+      (reverse path)
+    (tessera-thread-context-reverse-path context)))
 
 (defun tessera-thread-context-key (context)
   "Return the fields affecting CONTEXT's displayed row, or nil.
-Counts affect the head only.  Tree indentation displays at most
-four branches and an omission marker, regardless of thread depth."
+Counts affect the head only.  All ancestor branches affect the
+displayed tree, including those outside the current window."
   (when context
     (let ((first (tessera-thread-context-first context)))
       (list first (tessera-thread-context-last context)
@@ -739,24 +737,17 @@ from IDs to contexts with counts, branch paths, and boundaries."
 (defun tessera-thread-prefix (context)
   "Return the tree prefix for the native member in CONTEXT.
 Align each branch with its parent text using the segment gap.
-Bound indentation by window width.  Spaces become layout overlays."
+Preserve every ancestor column.  Spaces become layout overlays."
   (when-let* ((thread (tessera-entry-context-thread context))
               (tail (tessera--thread-path-tail thread)))
-    (let* ((window (tessera-entry-context-window context))
-           (limit (if (window-live-p window)
-                      (max 1 (min 4 (/ (window-body-width window)
-                                       16)))
-                    4))
-           (ascii (eq tessera-glyph-style 'ascii))
-           (omitted (> (length tail) limit))
-           (path (nreverse (seq-take tail limit)))
+    (let* ((ascii (eq tessera-glyph-style 'ascii))
+           (path (reverse tail))
            (branch (if (car (last path))
                        (if ascii "+-" "├─")
                      (if ascii "`-" "└─")))
            (indent (+ (string-width branch)
                       tessera-entry-segment-gap)))
       (concat
-       (when omitted (propertize (if ascii ":" "…") 'face 'shadow))
        (mapconcat
         (lambda (continues)
           (concat
@@ -1398,6 +1389,30 @@ keep their individual positions.  Each selector runs once."
   "Return a logical space displayed as a visual line break."
   (propertize " " 'display "\n"))
 
+(defun tessera--clip-thread-content (text width)
+  "Clip thread TEXT on the right to WIDTH columns when necessary.
+The tree provider supplies `tessera--overflow-help' for the ellipsis.
+Retain original columns and move a hidden navigation anchor onto the
+ellipsis.  Keep layout whitespace outside its mouse hover range."
+  (let ((help (and (> (length text) 0)
+                   (get-text-property
+                    0 'tessera--overflow-help text)))
+        (width (max 1 width)))
+    (if (or (not help) (<= (string-width text) width))
+        text
+      (let* ((prefix (truncate-string-to-width text (1- width)))
+             (ellipsis
+              (propertize "…" 'tessera--overflow t
+                          'face 'tessera-glyph-muted-face
+                          'mouse-face (list 'tessera-entry-hover-face)
+                          'help-echo help)))
+        (when (and (tessera-entry-point text)
+                   (not (tessera-entry-point prefix)))
+          (put-text-property 0 1 'tessera-entry-point t ellipsis))
+        (concat prefix
+                (tessera--space (- (1- width) (string-width prefix)))
+                ellipsis)))))
+
 (defun tessera--render-line
     (slot-references left-references right-references
                      definition context &optional glyph-align
@@ -1452,6 +1467,21 @@ LEADING-WIDTH supplies the shared minimum width of that area."
                     (list (+ (* margin (frame-char-width))
                              (string-pixel-width right-string)))))
               (+ margin (tessera--segments-width right))))
+           (left-string
+            (if (window-live-p window)
+                (tessera--clip-thread-content
+                 left-string
+                 (- (window-body-width window)
+                    tessera-entry-safe-gap tessera-entry-left-padding
+                    slot-width (if (string-empty-p slot-gap) 0
+                                 tessera-entry-segment-gap)
+                    tessera-entry-flex-gap-min-width
+                    (if (consp right-offset)
+                        (ceiling (car right-offset)
+                                 (frame-char-width
+                                  (window-frame window)))
+                      right-offset)))
+              left-string))
            (surface
             (concat
              (tessera--space tessera-entry-left-padding)

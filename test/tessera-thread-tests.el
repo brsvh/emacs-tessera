@@ -39,7 +39,7 @@
    (tessera--validate-layout
     (make-tessera-entry-layout :leading-width -1) nil nil "Test")))
 
-(ert-deftest tessera-thread-prefix-preserves-branches-and-bounds-depth
+(ert-deftest tessera-thread-prefix-preserves-branches-at-full-depth
     ()
   (let* ((tessera-glyph-style 'unicode)
          (tessera-entry-segment-gap 1)
@@ -51,17 +51,22 @@
     (should (= 8 (string-width prefix)))
     (setf (tessera-thread-context-path node) '(nil))
     (should (string-prefix-p "└─" (tessera-thread-prefix context)))
-    (setf (tessera-thread-context-path node) (make-list 50 nil))
-    (should (string-prefix-p "…" (tessera-thread-prefix context)))
-    (should (< (string-width (tessera-thread-prefix context)) 20))
+    (setf (tessera-thread-context-path node)
+          (cons t (make-list 49 nil)))
+    (should (string-prefix-p "│" (tessera-thread-prefix context)))
+    (should (= (string-width (tessera-thread-prefix context)) 149))
     (let ((tessera-glyph-style 'ascii))
-      (should (string-prefix-p ":" (tessera-thread-prefix context)))))
+      (should (string-prefix-p "|" (tessera-thread-prefix context)))
+      (should (= (string-width (tessera-thread-prefix context))
+                 149))))
   (should-not (tessera-thread-prefix (make-tessera-entry-context))))
 
 (ert-deftest tessera-thread-branches-align-with-parent-text ()
   (dolist (tessera-glyph-style '(ascii unicode nerd-icons))
     (dolist (tessera-entry-segment-gap '(0 1 3))
-      (dolist (path '((t) (nil) (t nil) (nil t)))
+      (dolist (path (append '((t) (nil) (t nil) (nil t))
+                            (cl-loop for depth in '(4 5 6 27)
+                                     collect (make-list depth t))))
         (let* ((node (make-tessera-thread-context :path path))
                (context (make-tessera-entry-context :thread node))
                (parent (tessera-thread-prefix context))
@@ -75,6 +80,63 @@
             (should (= author-column
                        (string-width
                         (substring child 0 branch))))))))))
+
+(ert-deftest tessera-thread-context-key-includes-all-ancestors ()
+  (let ((node (make-tessera-thread-context
+               :path (cons t (make-list 26 nil)))))
+    (let ((key (tessera-thread-context-key node)))
+      (setf (tessera-thread-context-path node) (make-list 27 nil))
+      (should-not (equal key (tessera-thread-context-key node))))))
+
+(ert-deftest tessera-thread-tree-survives-narrow-width-allocation ()
+  (tessera-gnus-summary--register)
+  (let* ((definition (tessera--find-entry-backend 'gnus-summary))
+         (context (make-tessera-entry-context
+                   :thread (make-tessera-thread-context
+                            :path (make-list 27 t))))
+         (layout (tessera--find-entry-layout definition context))
+         (tree (tessera--render-segment
+                (car (tessera-entry-layout-main-left-segments layout))
+                definition context)))
+    (tessera--allocate-segment-widths (list tree) nil 8 20)
+    (should (equal (tessera--render-segment-group (list tree))
+                   (tessera-gnus-summary--thread-tree context)))))
+
+(ert-deftest tessera-thread-overflow-keeps-native-navigation-and-help
+    ()
+  (save-window-excursion
+    (with-temp-buffer
+      (let ((gnus-show-threads t)
+            (tessera-glyph-style 'ascii)
+            (width 200))
+        (set-window-buffer (selected-window) (current-buffer))
+        (tessera-gnus-summary--register)
+        (tessera-tests--gnus-rows (number-sequence 0 23))
+        (cl-letf (((symbol-function 'window-body-width)
+                   (lambda (&rest _) width)))
+          (tessera-gnus-summary--sync-buffer)
+          (forward-line 23)
+          (goto-char (tessera-entry-point))
+          (should (looking-at "Author"))
+          (setq width 50)
+          (tessera-gnus-summary--sync-buffer t)
+          (should (= 24 (get-text-property (point) 'gnus-number)))
+          (should (eq (char-after) ?…))
+          (should (get-text-property (point) 'gnus-position))
+          (should (= (point) (tessera-entry-point)))
+          (let* ((position (point))
+                 (help (funcall (get-text-property (point) 'help-echo)
+                                (selected-window) (current-buffer)
+                                (point))))
+            (should (string-match-p "Author\nSubject 24" help))
+            (should (string-match-p "Depth: 23" help))
+            (should (string-match-p "Reply to: Author (#23)" help))
+            (should (= position (point))))
+          (setq width 200)
+          (tessera-gnus-summary--sync-buffer t)
+          (should (looking-at "Author"))
+          (should (= 24 (get-text-property
+                         (point) 'gnus-number))))))))
 
 (ert-deftest tessera-thread-native-order-counts-and-paths ()
   (with-temp-buffer
@@ -328,6 +390,7 @@
 
 (ert-deftest tessera-thread-deep-paths-share-ancestors ()
   (let* ((size 2000)
+         (tessera-entry-segment-gap 1)
          (nodes
           (tessera-thread-build-contexts
            (cl-loop for id from 1 to size
@@ -340,8 +403,10 @@
      do
      (should (eq (cdr (tessera-thread-context-reverse-path node))
                  (tessera-thread-context-reverse-path parent)))
-     (setf (tessera-entry-context-thread context) node)
-     (should (<= (string-width (tessera-thread-prefix context)) 12))
+     (when (memq id '(2 5 6 28 2000))
+       (setf (tessera-entry-context-thread context) node)
+       (should (= (string-width (tessera-thread-prefix context))
+                  (1- (* 3 (1- id))))))
      (tessera-thread-context-key node)
      ;; Rendering must never materialize the full forward path.
      (should-not (tessera-thread-context-forward-path node)))

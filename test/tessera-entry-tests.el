@@ -924,6 +924,35 @@
         (should (equal-including-properties original (buffer-string)))
         (should-not (buffer-modified-p))))))
 
+(ert-deftest tessera-entry-thread-clipping-keeps-columns-and-anchor ()
+  (let* ((tree (propertize "│     │     └─"
+                           'tessera--overflow-help "Full message"))
+         (author (propertize "Author" 'tessera-entry-point t))
+         (text (concat tree (tessera--space 1) author)))
+    (dolist (width '(1 4 8 12 16))
+      (let* ((clipped (tessera--clip-thread-content text width))
+             (end (1- (length clipped))))
+        (should (= width (string-width clipped)))
+        (should (string= (substring clipped 0 end)
+                         (substring text 0 end)))
+        (should (eq (aref clipped end) ?…))
+        (should (equal (get-text-property end 'help-echo clipped)
+                       "Full message"))
+        (should (get-text-property end 'mouse-face clipped))
+        (should-not (get-text-property
+                     end 'tessera--layout-space clipped))
+        (should (tessera-entry-point clipped))))
+    (should (eq text (tessera--clip-thread-content text 100)))
+    (should (equal "Ordinary entry"
+                   (tessera--clip-thread-content
+                    "Ordinary entry" 4))))
+  (let* ((text (concat (propertize "界" 'tessera--overflow-help "Full")
+                       (propertize "名字" 'tessera-entry-point t)))
+         (clipped (tessera--clip-thread-content text 2)))
+    (should (= 2 (string-width clipped)))
+    (should (get-text-property 0 'tessera--layout-space clipped))
+    (should (= 1 (tessera-entry-point clipped)))))
+
 (ert-deftest tessera-entry-current-excludes-thread-heading ()
   (with-temp-buffer
     (let* ((tessera-entry-top-padding 0.2)

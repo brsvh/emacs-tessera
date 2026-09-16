@@ -391,6 +391,98 @@
           (should (looking-at "Subject 1"))
           (should (= (point) (tessera-entry-point))))))))
 
+(ert-deftest tessera-gnus-navigation-keeps-horizontal-position ()
+  (save-window-excursion
+    (with-temp-buffer
+      (let ((gnus-show-threads t)
+            (gnus-newsgroup-headers nil)
+            (gnus-summary-buffer (current-buffer))
+            (gnus-article-buffer " *tessera-absent-article*")
+            (gnus-summary-check-current nil)
+            (gnus-auto-center-summary 2)
+            (tessera-glyph-style 'ascii))
+        (setq major-mode 'gnus-summary-mode)
+        (set-window-buffer (selected-window) (current-buffer))
+        (tessera-tests--gnus-rows '(0 1 0))
+        (setf (mail-header-subject
+               (gnus-data-header (gnus-data-find 3)))
+              (make-string 200 ?x))
+        (unwind-protect
+            (cl-letf (((symbol-function 'window-end)
+                       (lambda (&rest _) (point-max))))
+              (tessera-gnus-mode 1)
+              (tessera-gnus-mode 1)
+              (tessera-gnus-summary--prepare)
+              (gnus-summary-goto-subject 2)
+              (set-window-hscroll (selected-window) 0)
+              (gnus-summary-next-subject 1)
+              (should (= 3 (gnus-summary-article-number)))
+              (should (looking-at "Author"))
+              (should (> (current-column) (/ (window-width) 2)))
+              (should (= 0 (window-hscroll)))
+              (should (= gnus-auto-center-summary 2))
+              ;; Explicit horizontal scrolling remains available.
+              (set-window-hscroll (selected-window) 3)
+              (gnus-summary-recenter)
+              (should (= 3 (window-hscroll)))
+              ;; The same native call still works without Tessera.
+              (let ((tessera-gnus-summary--active nil))
+                (set-window-hscroll (selected-window) 0)
+                (gnus-summary-recenter)
+                (should (> (window-hscroll) 0)))
+              (tessera-gnus-mode -1)
+              (should-not
+               (advice-member-p
+                #'tessera-gnus-summary--horizontal-recenter
+                'gnus-horizontal-recenter)))
+          (tessera-gnus-mode -1))))))
+
+(ert-deftest tessera-gnus-navigation-preserves-vertical-centering ()
+  (save-window-excursion
+    (delete-other-windows)
+    (with-temp-buffer
+      (let ((summary (current-buffer)))
+        (with-temp-buffer
+          (let ((gnus-article-buffer (current-buffer))
+                (window (selected-window))
+                (article-window (split-window-below)))
+            (set-window-buffer article-window (current-buffer))
+            (with-current-buffer summary
+              (set-window-buffer window summary)
+              (dotimes (_ 80)
+                (let ((start (point)))
+                  (insert (make-string 120 ?x) "\n")
+                  (put-text-property (+ start 60) (+ start 61)
+                                     'gnus-position t)))
+              (let ((tessera-gnus-summary--active t))
+                (unwind-protect
+                    (progn
+                      (tessera-gnus-summary--navigation t)
+                      (dolist (setting '(2 t vertical nil))
+                        (let ((gnus-auto-center-summary setting)
+                              expected)
+                          (goto-char (point-min))
+                          (forward-line 20)
+                          (forward-char 60)
+                          (set-window-start window (point-min) t)
+                          (set-window-hscroll window 0)
+                          (setq expected
+                                (if setting
+                                    (save-excursion
+                                      (forward-line
+                                       (- (if (numberp setting)
+                                              setting
+                                            (/ (1- (window-height))
+                                               2))))
+                                      (point))
+                                  (point-min)))
+                          (gnus-summary-recenter)
+                          (should (= (window-start window) expected))
+                          (should (= (window-hscroll window) 0))
+                          (should (eq gnus-auto-center-summary
+                                      setting)))))
+                  (tessera-gnus-summary--navigation nil))))))))))
+
 (ert-deftest tessera-gnus-redraw-preserves-point-offset ()
   (with-temp-buffer
     (let ((tessera-glyph-style 'ascii)
