@@ -89,7 +89,8 @@
   (make-tessera-glyph-slot
    :name 'status
    :selector #'tessera-elfeed-search--select-status
-   :width 1
+   ;; Normal-size Nerd Icons need more than one text column.
+   :width 2
    :align 'center
    :glyphs
    `((unread
