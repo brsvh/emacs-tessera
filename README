@@ -1,22 +1,421 @@
 # README --- Emacs Tessera README -*- mode: org; -*-
 
 #+begin_quote
-Copyright (c)  2026 Bingshan Chang.
+Copyright (c) 2026 Bingshan Chang.
 
-Permission is granted to copy, distribute and/or modify this document under the
-terms of the GNU Free Documentation License, Version 1.3 or any later version
-published by the Free Software Foundation; with no Invariant Sections, no
-Front-Cover Texts, and no Back-Cover Texts.  A copy of the license is included
-in the section entitled "GNU Free Documentation License".
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3 or
+any later version published by the Free Software Foundation; with no
+Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.  A
+copy of the license is included in the section entitled "GNU Free
+Documentation License".
 #+end_quote
 
 #+startup: noindent
 
 * emacs-tessera
 
-~emacs-tessera~ is a modern interface suite for ~elfeed~, ~gnus~, and ~mu4e~.
+Tessera provides layouts for Elfeed Search, Gnus Summary, and mu4e Headers.  You
+keep using their native commands to read, search, mark, and navigate entries.
 
-/This work still in progress/.
+The ~tessera~ package contains all display adapters.  The separate ~tessera-x~
+packages provide experimental features; ~x~ means experimental.
+
+** Getting Started
+
+*** Install
+
+Use Emacs 30.1 or later with Alert installed, and set up the mail or feed
+application you use.  Install ~tessera~ for display features; add the
+corresponding ~tessera-x-*~ package and ~tessera-x~ for experiments.
+
+For a source checkout, add the core directory to ~load-path~:
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/emacs-tessera/lisp/tessera/")
+#+end_src
+
+For experimental features, also add ~lisp/tessera-x/~ and the selected
+~lisp/tessera-x-*/~ directory.  Each directory is a separate package.
+
+Alternatively, create archives as described under [[*Build][Build]], then use ~M-x
+package-install-file~ on the desired archives in ~dist/~.  Install ~tessera~ before
+~tessera-x~, then the experimental backend packages.  The archives include their
+Info manuals.
+
+For Nix, add this repository as a flake input named ~tessera~ and include
+~inputs.tessera.overlays.default~ in your nixpkgs overlays.  Select the packages
+you want from that package set, for example:
+
+#+begin_src nix
+(pkgs.emacsPackagesFor pkgs.emacs).emacsWithPackages (
+  epkgs: with epkgs; [
+    tessera
+    tessera-x-gnus
+  ]
+)
+#+end_src
+
+*** Configure
+
+Enable the adapter for your application.  For Gnus:
+
+#+begin_src emacs-lisp
+(require 'tessera-gnus)
+(tessera-gnus-mode +1)
+#+end_src
+
+Loading the library makes its settings available; enabling the mode updates
+existing and future matching buffers.  Pass ~-1~ to restore the native display.
+Elfeed and mu4e examples appear below.
+
+Use ~M-x customize-group~ with ~tessera~, ~tessera-elfeed~, ~tessera-gnus~, or
+~tessera-mu4e~.  Installed manuals are available with ~C-h i~, then ~m~ and the manual
+name, such as ~Tessera~.
+
+** tessera
+
+Shared display settings apply to all three adapters.  See the [[file:doc/tessera.texi][Tessera manual]] for
+complete options and extension interfaces.
+
+*** Entry Layouts and Spacing
+
+Adapters initially use two visual lines per entry.  To select a compact layout,
+evaluate this in an already enabled view:
+
+#+begin_src emacs-lisp
+(setq-local tessera-entry-layout 'single-line)
+#+end_src
+
+Use ~two-line~ to switch back.  Gnus and mu4e use their thread layouts while
+native threading is enabled, regardless of this option.
+
+Horizontal padding uses character columns; vertical padding uses normal line
+heights.  For example, in your initialization file:
+
+#+begin_src emacs-lisp
+(require 'tessera)
+(setq tessera-entry-left-padding 2
+        tessera-entry-right-padding 2
+        tessera-entry-top-padding 0.1
+        tessera-entry-bottom-padding 0.1)
+#+end_src
+
+Gnus and mu4e track shared appearance changes during their normal update cycles.
+In an active Elfeed Search buffer, redraw after changing these settings with ~M-:
+(elfeed-search-update :force)~.
+
+*** Glyphs and Faces
+
+Glyphs use Unicode and semantic colors by default.  For monochrome ASCII
+symbols:
+
+#+begin_src emacs-lisp
+(require 'tessera)
+(setopt tessera-glyph-style 'ascii
+        tessera-glyph-color nil)
+#+end_src
+
+Use ~unicode~ to restore Unicode symbols; ~nerd-icons~ is also supported with the
+corresponding library and font.  A color string for ~tessera-glyph-color~ gives
+all glyphs that foreground color.
+
+Use ~M-x customize-face~ for ~tessera-entry-current-face~ and
+~tessera-entry-hover-face~, or the backend faces described below.
+
+*** Native Threads
+
+Gnus and mu4e retain their native thread ordering and folding commands.  Their
+~gnus-show-threads~ and ~mu4e-search-threads~ settings select the thread display.
+Headings summarize the thread, while individual rows retain message state and
+navigation.
+
+Thread spacing has separate outer and inner values.  To remove gaps between
+members while keeping the outer padding:
+
+#+begin_src emacs-lisp
+(require 'tessera)
+(setopt tessera-thread-inner-top-padding 0
+        tessera-thread-inner-bottom-padding 0)
+#+end_src
+
+*** tessera-elfeed
+
+Enable the Search adapter:
+
+#+begin_src emacs-lisp
+(require 'tessera-elfeed)
+(tessera-elfeed-mode 1)
+#+end_src
+
+Rows show titles, feeds, tags, dates, and read or enclosure indicators.  Use ~M-x
+customize-group~ with ~tessera-elfeed~ for text faces.  For example, change the
+unread Unicode glyph with:
+
+#+begin_src emacs-lisp
+(setopt tessera-elfeed-search-unread-glyph
+        '("*" "•" nerd-icons-mdicon "nf-md-email" accent))
+#+end_src
+
+Use Customize or ~setopt~ for the glyph options so their setters refresh active
+Search buffers.
+
+*** tessera-gnus
+
+Enable ~tessera-gnus-mode~ as shown under [[*Configure][Configure]].  Summary rows show subjects,
+contacts, labels, dates, and native article marks.  Attachment and security
+indicators reflect information Gnus has already examined; Tessera does not
+retrieve articles to populate them.
+
+Use ~M-x customize-group~ with ~tessera-gnus-summary~ for faces such as
+~tessera-gnus-summary-label-face~.  Native Gnus highlighting continues to supply
+article-state styling.
+
+*** tessera-mu4e
+
+Enable the Headers adapter:
+
+#+begin_src emacs-lisp
+(require 'tessera-mu4e)
+(tessera-mu4e-mode 1)
+#+end_src
+
+Rows show subjects, contacts, labels, dates, message flags, and pending
+operations.  Thread folding continues to use mu4e's own controls.
+
+Use ~M-x customize-group~ with ~tessera-mu4e-headers~ for text and glyph faces,
+including ~tessera-mu4e-headers-label-face~.  Native message-state faces remain
+part of the display.
+
+** tessera-x
+
+A context snapshot is a read-only buffer containing selected records, metadata,
+and available body text.  Load one of the experimental backend libraries below
+to prepare it.  See the [[file:doc/tessera-x.texi][Tessera X manual]] for shared behavior and interfaces.
+
+*** Managing Context Snapshots
+
+Run these commands in the buffer from which you prepared the snapshot:
+
+- ~M-x tessera-x-show-context~ displays the latest successful snapshot.
+- ~M-x tessera-x-cancel-context~ cancels pending work.
+- ~M-x tessera-x-discard-context~ kills the latest snapshot buffer.
+
+A pending replacement leaves the previous successful snapshot available.  To
+limit the text included in future snapshots:
+
+#+begin_src emacs-lisp
+(require 'tessera-x)
+(setopt tessera-x-context-max-characters 100000
+        tessera-x-context-body-max-characters 10000)
+#+end_src
+
+Metadata and omission notices are retained even if they exceed the total budget.
+Use ~nil~ for either option to remove that limit.
+
+*** Using Snapshot Results
+
+~tessera-x-context-ready-hook~ receives each completed context.  This optional
+user function displays its buffer when preparation finishes:
+
+#+begin_src emacs-lisp
+(require 'tessera-x)
+
+(defun my-tessera-display-context (context)
+  "Display the snapshot buffer of completed CONTEXT."
+  (display-buffer (tessera-x-context-buffer context)))
+
+(add-hook 'tessera-x-context-ready-hook
+          #'my-tessera-display-context)
+#+end_src
+
+Other consumers, including ~gptel~ integrations, can use the same hook.  Tessera
+itself does not send model requests.
+
+** tessera-x-elfeed
+
+Load ~tessera-x-elfeed~ with ~require~.  The display mode is optional.  See the
+[[file:doc/tessera-x-elfeed.texi][Tessera X Elfeed manual]].
+
+*** Selected Entries
+
+In Search, run ~M-x tessera-x-elfeed-prepare-context~.  Native marks take
+precedence over the active region; otherwise the entry at point is used.
+Results are grouped by feed, preserving entry order within each feed.
+
+*** Today's Entries
+
+Run ~M-x tessera-x-elfeed-prepare-today-context~ in Search or Tree.  It uses the
+current Search filter or Tree filter at point to select today's local entries.
+It always uses stored bodies without fetching pages.
+
+*** Linked-page Retrieval
+
+Ordinary selected-entry snapshots fetch linked pages by default and fall back to
+stored feed content on failure.  To fetch only when the stored body is short,
+and limit concurrent requests:
+
+#+begin_src emacs-lisp
+(require 'tessera-elfeed)
+(setopt tessera-x-elfeed-fetch-minimum-characters 1000
+        tessera-x-elfeed-fetch-timeout 10
+        tessera-x-elfeed-fetch-concurrency 2)
+#+end_src
+
+Set ~tessera-x-elfeed-fetch-linked-content~ to ~nil~ for stored content only.  These
+settings do not affect today's snapshots.
+
+** tessera-x-gnus
+
+Load ~tessera-x-gnus~ with ~require~ and enable Gnus Agent for the groups you use.
+The display mode is optional.  See the [[file:doc/tessera-x-gnus.texi][Tessera X Gnus manual]].
+
+*** Selected Articles
+
+In Summary, run ~M-x tessera-x-gnus-prepare-context~.  Selection uses the active
+region, then process marks, then the article at point.  Existing marks and read
+state are preserved.
+
+*** Current Subthread
+
+Run ~M-x tessera-x-gnus-prepare-subthread-context~ for the current article and its
+descendants, including folded entries.  ~C-u~ expands the selection using the
+current group's local Agent overview.
+
+To use that expanded scope by default:
+
+#+begin_src emacs-lisp
+(require 'tessera-gnus)
+(setopt tessera-x-gnus-subthread-scope 'local-index)
+#+end_src
+
+*** Today's Articles
+
+Run ~M-x tessera-x-gnus-prepare-today-context~ in Summary for the current group,
+or in Group for the group or topic at point.  It reads today's locally indexed
+articles and uses cached Agent bodies only.
+
+*** Body Retrieval
+
+Selected-article and subthread snapshots download missing bodies into the Agent
+by default.  To use cached bodies only:
+
+#+begin_src emacs-lisp
+(require 'tessera-gnus)
+(setopt tessera-x-gnus-body-policy 'local-only)
+#+end_src
+
+Missing bodies leave metadata and a content note in the snapshot.  Today's
+snapshots always use this local-only policy.
+
+** tessera-x-mu4e
+
+Load ~tessera-x-mu4e~ with ~require~.  It uses local message files and the mu index;
+the display mode is optional.  See the [[file:doc/tessera-x-mu4e.texi][Tessera X mu4e manual]].
+
+*** Selected Messages
+
+In Headers, run ~M-x tessera-x-mu4e-prepare-context~.  Marks take precedence over
+the active region, followed by the message at point.  The command preserves
+pending operations and read state.
+
+*** Current Subthread
+
+Run ~M-x tessera-x-mu4e-prepare-subthread-context~ for the current message and its
+descendants, including folded rows.  ~C-u~ also searches the local mu index for
+descendants outside the current results.
+
+To expand through the index by default:
+
+#+begin_src emacs-lisp
+(require 'tessera-mu4e)
+(setopt tessera-x-mu4e-subthread-scope 'local-index)
+#+end_src
+
+*** Today's Messages
+
+Run ~M-x tessera-x-mu4e-prepare-today-context~ in Headers to use its current
+query, or in Main on a bookmark or maildir query.  The result includes today's
+indexed messages in that scope.  Index queries can finish asynchronously; the
+ready hook runs on successful completion.
+
+To supply a fixed maildir scope, replace the path in this example:
+
+#+begin_src emacs-lisp
+(require 'tessera-mu4e)
+
+(defun my-tessera-today-query ()
+  "Return the mail scope for today's snapshot."
+  "maildir:/personal/Inbox")
+
+(setopt tessera-x-mu4e-today-query-function
+        #'my-tessera-today-query)
+#+end_src
+
+** Build
+
+Run these commands from the checkout root.  Use Emacs, GNU Make, GNU tar, and
+Texinfo.  ~nix develop~ supplies the build tools; Emacs and backend libraries must
+also be available.
+
+*** Packages
+
+Create all package archives, or just one:
+
+#+begin_src sh
+make archive
+make archive PACKAGE=tessera-x-gnus
+#+end_src
+
+Archives are written to ~dist/PACKAGE-VERSION.tar~ with the package's Info manual
+and directory entry.  For descriptions, autoloads, local bytecode, and archives
+together, use ~make all~.  Compilation runs Emacs with ~-Q~; provide external
+library directories explicitly:
+
+#+begin_src sh
+make all EMACS_LOAD_PATH="/path/to/elfeed /path/to/mu4e"
+#+end_src
+
+~PACKAGE=...~ also selects one package for ~all~, ~compile~, and ~clean~.  ~make clean~
+removes generated Lisp files and package archives.
+
+*** Manuals
+
+Build all Info and HTML manuals, or one package's manual:
+
+#+begin_src sh
+make -C doc all
+make -C doc all PACKAGE=tessera-x-gnus
+#+end_src
+
+Use ~info~ or ~html~ in place of ~all~ for one format.  Output goes to
+~dist/manuals/info/~ and ~dist/manuals/html/~.  HTML links to the GNU Emacs
+stylesheet.  ~make -C doc clean~ removes these generated manuals.
+
+** Test
+
+The ERT runner covers all five packages.  Make Elfeed and mu4e libraries
+available even when you normally use only one backend.
+
+*** Source Tests
+
+From the checkout root, replace the library paths and run:
+
+#+begin_src sh
+emacs -Q --batch \
+  -L /path/to/elfeed -L /path/to/mu4e \
+  -l test/run-tests.el
+#+end_src
+
+The runner adds the checkout's package directories to ~load-path~.  It exits with
+a nonzero status if a test fails.
+
+*** Installed Package Tests
+
+Run the same command with ~TESSERA_TEST_PACKAGE_DIRS~ set to the colon-separated
+directories of all five installed packages.  Each must contain its ~.el~ sources
+and ~.elc~ bytecode.  The runner checks that production libraries load from those
+installed copies.
 
 ** License
 

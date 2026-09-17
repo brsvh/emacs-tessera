@@ -7,6 +7,7 @@
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "30.1") (alert "1.2"))
 ;; Keywords: convenience, mail, news
+;; URL: https://github.com/brsvh/emacs-tessera
 
 ;; This file is not part of GNU Emacs.
 

@@ -1,0 +1,797 @@
+\input texinfo
+
+@c Copyright (C) 2026 Bingshan Chang.
+@setfilename tessera-x.info
+@settitle Tessera X
+@documentencoding UTF-8
+@set txicodequoteundirected
+@set txicodequotebacktick
+@documentlanguage en
+@set VERSION 0.1.0
+@syncodeindex vr fn
+@syncodeindex tp fn
+
+@copying
+This manual describes tessera-x version @value{VERSION}.
+
+Copyright @copyright{} 2026 Bingshan Chang.
+
+@quotation
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3 or
+any later version published by the Free Software Foundation; with no
+Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.  A
+copy of the license is included in the section entitled ``GNU Free
+Documentation License''.
+@end quotation
+@end copying
+
+@dircategory Emacs
+@direntry
+* Tessera X: (tessera-x). Shared experimental features for Tessera.
+@end direntry
+
+@titlepage
+@title Tessera X
+@subtitle For version @value{VERSION}
+@author Bingshan Chang
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Tessera X
+
+Shared experimental features for Tessera.
+
+@insertcopying
+@end ifnottex
+
+@menu
+* Introduction::         What this package provides.
+* Getting Started::      Installing and using the package.
+* Reading Snapshots::    Understanding the resulting text.
+* Text Extraction::      Converting message and feed bodies to text.
+* Character Budgets::    Limiting total and per-body text.
+* Snapshot Lifecycle::   Managing snapshots and pending requests.
+* Consuming Snapshots::  Using completed snapshots from Lisp.
+* Producing Snapshots::  Adding sources of snapshots in Lisp.
+* Content Helpers: Content Helper Interfaces.  Text, message, and date helpers.
+* Troubleshooting::      Diagnosing problems and reporting bugs.
+* Copying::              The GNU Free Documentation License.
+* Concept Index::        Topics covered in this manual.
+* Symbol Index::         Commands, options, faces, and interfaces.
+@end menu
+
+@node Introduction
+@chapter Introduction
+@cindex experimental features
+  Tessera X supplies mechanisms shared by experimental Tessera packages.
+The @samp{x} in the package name means @dfn{experimental}.  This version
+provides context snapshots and helpers for reading source content and
+following message relationships.  Context snapshots are one feature of
+this package family.
+
+  A @dfn{context snapshot} is a separate buffer containing source
+material selected from mail, news, or feed entries.  It can be
+inspected, copied, or passed to another application.  Its contents
+include metadata and available body text, independently of the
+abbreviated text shown in a list of messages.  Preparing a snapshot does
+not send a language-model request.
+
+  The @dfn{source buffer} is the buffer from which you start
+preparation.  The @dfn{scope} is the set of messages or entries selected
+for that snapshot, such as marked messages or today's entries in one
+feed.
+
+  This manual first explains how to read, limit, and manage snapshots.
+The later chapters on consuming and producing snapshots are for Lisp
+programmers connecting them to other applications.  For selection
+commands and content retrieval, see the manual for your application:
+@ref{Top,,, tessera-x-gnus, Tessera X Gnus}, @ref{Top,,, tessera-x-mu4e,
+Tessera X mu4e}, or @ref{Top,,, tessera-x-elfeed, Tessera X Elfeed}.
+
+@node Getting Started
+@chapter Getting Started
+
+  Install the shared package and one backend package before preparing a
+snapshot.  The backend commands work independently of Tessera's display
+minor modes.
+
+@menu
+* Requirements::        Required packages and loading libraries.
+* First Snapshot::      Preparing and viewing a snapshot.
+@end menu
+
+@node Requirements
+@section Requirements
+@cindex installation
+  Tessera X requires Emacs 30.1 or later and Tessera 0.1.0 or later.
+Tessera itself requires Alert 1.2 or later.
+
+  With a source checkout, add @file{lisp/tessera/},
+@file{lisp/tessera-x/}, and the selected backend package directory to
+@code{load-path}.  Adding only @file{lisp/} does not locate these
+libraries.  For example, the following configuration loads the Gnus
+snapshot commands; replace the checkout path first.
+
+@lisp
+(dolist (package '("tessera" "tessera-x" "tessera-x-gnus"))
+  (add-to-list
+   'load-path
+   (expand-file-name package "/path/to/emacs-tessera/lisp/")))
+(require 'tessera-x-gnus)
+@end lisp
+
+  Use the selection commands supplied by the package for Gnus, mu4e, or
+Elfeed.  There is no Tessera X minor mode to enable.
+
+@node First Snapshot
+@section Preparing a First Snapshot
+@cindex snapshot, preparing
+  In a supported source buffer, run the backend's @samp{prepare-context}
+command with @kbd{M-x}.  Once the request has completed, run @kbd{M-x
+tessera-x-show-context} in that same source buffer.  The latter command
+displays the snapshot in a buffer using Special mode.
+
+  Preparation can finish before the command returns or can remain
+pending while a backend queries an index or retrieves linked content.
+If an older successful snapshot exists, the show command continues to
+display that snapshot until the new request succeeds.  @xref{Request
+States}.
+
+  Some backend commands may retrieve content from the network.  The
+retrieval policy belongs to that backend; it is not controlled by the
+shared character budgets.  Each backend's ``today'' command reads local
+data only.
+
+@node Reading Snapshots
+@chapter Reading Snapshots
+
+  A snapshot records the selection at request time.  Subsequent edits to
+a search filter, marks, or displayed row text do not redefine that
+request.
+
+@menu
+* Snapshot Contents::   Headers, metadata, and body text.
+* Grouping and Order::  Conversation and feed grouping.
+* Missing Content::     Content notes and empty results.
+@end menu
+
+@node Snapshot Contents
+@section Snapshot Contents
+@cindex metadata
+@cindex provenance
+  The text starts with the application name, creation time, selection
+scope, and item count.  Each numbered item has a subject and date,
+followed by available source information and metadata.  Mail and news
+items can include Message-ID, References, an inferred reply relationship
+from the mail reader, full addresses, labels, and MIME-part
+descriptions.  Feed items include entry and feed URLs, authors, tags,
+and enclosure descriptions.
+
+  These fields come from backend records and available raw content, not
+from rendered Tessera rows.  Unknown dates are identified as such.
+Ordinary metadata fields are printed one per line.  Body text follows
+the metadata and retains its line breaks.
+
+@node Grouping and Order
+@section Grouping and Order
+@cindex conversation grouping
+  Mail and news records are grouped using message identifiers and reply
+relationships.  The @samp{Message-ID} header identifies a message;
+@samp{References} lists earlier messages in the conversation.  Thread
+relationships supplied by the mail reader are also used.  Matching
+subjects alone do not join two conversations.  Groups occur in order of
+their first member, and members keep their input order within each
+group.  A group's printed label is the subject of its first member.
+
+  Elfeed groups records by feed URL, preserving the input order within
+that feed.  A backend's local-index expansion or date query can have a
+different input order from its displayed results.  Grouping does not
+imply that all members of a remote conversation have been discovered.
+
+@node Missing Content
+@section Missing Content
+@cindex missing bodies
+@cindex content notes
+  An item can retain useful metadata even when its body cannot be read.
+A @samp{Content note} explains an unavailable body, an extraction error,
+or a backend fallback.  Such an omission need not fail the whole
+request.  Read these notes before treating a snapshot as complete.
+
+  An empty result is also a valid snapshot for commands whose scope can
+be empty, such as a today query.  It still becomes ready and invokes the
+ready hook.  Commands requiring a current selection may instead signal a
+user error before creating a request.
+
+@node Text Extraction
+@chapter Text Extraction
+
+  Snapshots contain plain body text extracted from messages and feed
+content.  The following rules determine which text and attachment
+information are included.
+
+@menu
+* Mail Bodies::         MIME text, attachments, and security parts.
+* HTML Bodies::         Converting HTML to plain text.
+@end menu
+
+@node Mail Bodies
+@section Mail Bodies and Attachments
+@cindex MIME
+@cindex attachments
+  For a @samp{multipart/alternative} message, extraction prefers a
+direct @samp{text/plain} alternative, then @samp{text/html}, then the
+first available part.  Other multipart messages are traversed in their
+MIME order.  Plain text is decoded using its declared charset when
+possible; HTML is rendered with SHR.  Quotes and signatures are retained
+rather than stripped from the message.
+
+  Attachments contribute names and media types to metadata.  Their file
+contents are not inserted as body text.  Other non-text parts are listed
+by type.  @samp{multipart/encrypted} contributes an explicit notice that
+its contents have not been decrypted.  Extraction disables signature
+verification and decryption; it does not open a message or mark it read.
+
+  A missing file or MIME error becomes an item's content note.  Messages
+with no extractable body retain their metadata and a corresponding note.
+
+@node HTML Bodies
+@section HTML Bodies
+@cindex HTML conversion
+  HTML conversion uses SHR at a width of 80 columns, with images and
+font styling disabled.  It does not fetch images or styles.  The result
+is plain text with surrounding whitespace removed.
+
+  This is document rendering, not a specialized article extractor.  Page
+navigation and other surrounding text may remain.  Whether an HTML page
+is fetched in the first place is a backend policy; the shared conversion
+function only processes the string given to it.
+
+@node Character Budgets
+@chapter Character Budgets
+@cindex character budgets
+  Budgets limit the body text included in a snapshot.  They count Emacs
+characters, not bytes or language-model tokens.  They do not bound
+network response size, index results, or the memory needed to read
+source bodies before rendering.
+
+@cindex metadata reservation
+@defopt tessera-x-context-max-characters
+The total character budget, initially @code{900000}.  Use a nonnegative
+integer, or @code{nil} for no total limit.  The request captures its
+value when it starts.
+@end defopt
+
+  Rendering reserves the introduction, full item metadata, boundaries,
+and space for truncation notices before allocating body text.  The
+remaining budget is divided among the remaining items in order.  Space
+unused by a short body remains available to later items; this is not an
+iterative redistribution among all bodies.
+
+  Metadata and notices are never silently cut.  If they alone exceed the
+budget, the snapshot can exceed the specified limit.  Reservations can
+also leave some of the budget unused.
+
+@cindex body truncation
+@defopt tessera-x-context-body-max-characters
+An additional maximum for each body, initially @code{nil}.  Use a
+nonnegative integer, or @code{nil} for no separate per-body limit.  The
+request captures this value when it starts.
+@end defopt
+
+  The actual allowance is the smallest of the body length, this limit
+when set, and the body's share of the remaining total budget.  A cut
+body is followed by @samp{[Body truncated by context budget.]}.  Setting
+either budget to zero can suppress bodies while retaining metadata and
+notices.
+
+  Both options belong to the @code{tessera-x} customization group.  A
+buffer-local binding affects requests started in that source buffer.
+Changing an option does not modify pending requests or published
+snapshots.
+
+@node Snapshot Lifecycle
+@chapter Snapshot Lifecycle
+
+  Each source buffer can have one preparation in progress.  While it
+runs, you can continue to view that buffer's last successful snapshot.
+Completed snapshots remain available until you discard them.
+
+@menu
+* Request States::        Pending, ready, cancelled, and failed work.
+* Managing Snapshots::    Showing and discarding completed snapshots.
+* Cancelling a Request::  Stopping preparation in the source buffer.
+@end menu
+
+@node Request States
+@section Request States
+@cindex request states
+@cindex asynchronous requests
+  A preparation request is @code{pending} while work remains.  It
+becomes @code{ready} on success, @code{cancelled} if stopped, or
+@code{failed} if preparation cannot complete.  Only a ready result
+replaces the source buffer's latest snapshot.  Failure and cancellation
+leave the previous successful result available.
+
+  Starting a request cancels pending work from the same source buffer.
+Requests from other source buffers are unaffected.  Killing the source
+buffer or changing its major mode also cancels its pending work.
+
+  Some commands finish preparation before returning.  Others continue
+working in the background, for example while downloading a linked page.
+To run Lisp code when a snapshot becomes ready, see @ref{Consuming
+Snapshots}.
+
+@node Managing Snapshots
+@section Managing Snapshots
+
+@deffn Command tessera-x-show-context
+Display the latest successful snapshot associated with the current
+buffer.  Signal a user error if its snapshot buffer is no longer live.
+Preparation itself does not select this buffer; this command does.
+@end deffn
+
+@cindex snapshot ownership
+  Each successful request creates a separate, read-only buffer in
+Special mode.  Preparing another snapshot does not kill the previous
+one, so previously displayed snapshots remain readable.  The show
+command in the source buffer selects its latest successful snapshot.
+Killing the source buffer leaves completed snapshots alive.
+
+@deffn Command tessera-x-discard-context
+Kill the snapshot associated with the current source or snapshot buffer.
+If it is the source's latest snapshot, the show command can no longer
+display it.  Signal a user error when there is no associated context.
+Programs using that buffer lose access to its contents.
+@end deffn
+
+  You can discard an older snapshot from its own buffer without
+affecting the source's latest snapshot.  Ordinary @code{kill-buffer}
+also removes the snapshot; trying to show it afterward reports that no
+live snapshot exists.  Discarding a completed result does not cancel a
+preparation already in progress.
+
+@node Cancelling a Request
+@section Cancelling a Request
+@cindex cancellation
+@deffn Command tessera-x-cancel-context
+Stop preparation in the current source buffer, including any pending
+retrieval.  Retain all successful snapshots.  Do nothing when that
+source has no preparation in progress.
+@end deffn
+
+  Run this command in the source buffer, not in a previously published
+snapshot buffer.  The command can stop an asynchronous index query or
+page download.  It cannot undo a completed Gnus download or interrupt a
+synchronous operation that is currently occupying Emacs.
+
+@node Consuming Snapshots
+@chapter Consuming Snapshots
+
+  This chapter is for Lisp programmers using snapshots in another
+application.  A @dfn{consumer} is code that reads or processes a
+completed snapshot.  It can use the ready hook to run when preparation
+succeeds.
+
+@defvar tessera-x-current-context
+A buffer-local reference to the latest successful context from a source
+buffer, initially @code{nil}.  In a snapshot buffer it refers to that
+buffer's own context.  It does not refer to pending work.
+@end defvar
+
+  A non-@code{nil} reference alone does not prove that the snapshot
+buffer still exists.  Check @code{buffer-live-p} on the result of
+@code{tessera-x-context-buffer} before reading it.  Treat completed
+context objects and their text as immutable.
+
+  Publishing another snapshot does not kill the previous one.  Consumers
+that need an older snapshot must retain their own references and arrange
+to release it when no longer needed.  Ordinary @code{kill-buffer} can
+leave a context object referring to a dead buffer.
+
+@cindex ready hook
+@defopt tessera-x-context-ready-hook
+An abnormal hook, initially @code{nil}.  Each function receives one
+argument, the completed @code{tessera-x-context}.  It runs once per
+successful request in the originating source buffer, after the ready
+object and snapshot buffer have been installed.
+@end defopt
+
+  The hook also runs for an empty successful snapshot.  Tessera does not
+select a window when publishing, and it saves source point around the
+hook.  Hook functions remain responsible for their own window changes or
+other side effects.
+
+  If a hook function signals an error, Tessera reports it without
+invalidating the snapshot.  As with ordinary hook iteration, the error
+can prevent later functions on that invocation from running.  Consumer
+functions should handle their own expected failures.
+
+  The following example saves a reference for a consumer in each source
+buffer.  It does not send or display the text.  The @samp{my-} symbols
+belong to user configuration, not to the Tessera API.
+
+@lisp
+(require 'tessera-x)
+
+(defvar-local my-tessera-snapshot nil
+  "Snapshot retained by my consumer.")
+
+(defun my-tessera-remember (context)
+  "Retain the completed CONTEXT for my consumer."
+  (setq my-tessera-snapshot
+        (tessera-x-context-buffer context)))
+
+(add-hook 'tessera-x-context-ready-hook
+          #'my-tessera-remember)
+@end lisp
+
+@noindent
+After completion, use @code{buffer-live-p} before reading the retained
+buffer with @code{with-current-buffer}.  Copy its text when a consumer
+needs ownership independent of the buffer's lifetime.
+
+@cindex gptel
+  Applications such as gptel can consume snapshots through the ready
+hook.  Install and configure the consumer separately.  Tessera X does
+not depend on gptel or install consumer bindings; request submission and
+response display belong to the consumer.
+
+@node Producing Snapshots
+@chapter Producing Snapshots
+
+  This chapter is for Lisp programmers adding a source of snapshots.  A
+@dfn{producer} supplies records, starts a request in the source buffer,
+obtains available content, and finishes the request.  For asynchronous
+work it also registers cleanup and checks request identity before
+handling a callback.  The following interfaces belong to the
+experimental package; private helpers containing @samp{--} are not
+extension interfaces.
+
+  Snapshot request objects are distinct from the entry contexts used to
+render display rows.  @xref{Entry Contexts,,, tessera, Tessera}.
+
+@menu
+* Source Items::        Records supplied by a snapshot producer.
+* Context Objects::     Request data and completed results.
+* Request Lifecycle::   Starting, finishing, and cleaning up work.
+* Producer Example::    A small synchronous snapshot producer.
+@end menu
+
+@node Source Items
+@section Source Items
+@cindex source items
+@deftp {Data Type} tessera-x-item
+A record supplied by a backend.  Construct one with
+@code{make-tessera-x-item}, using keyword arguments for its fields.
+Read fields with accessors named @samp{tessera-x-item-@var{field}}.  Use
+@code{setf} to fill content while the request is pending.
+@end deftp
+@findex make-tessera-x-item
+@findex tessera-x-item-p
+@findex tessera-x-item-id
+@findex tessera-x-item-message-id
+@findex tessera-x-item-references
+@findex tessera-x-item-parent
+@findex tessera-x-item-subject
+@findex tessera-x-item-date
+@findex tessera-x-item-metadata
+@findex tessera-x-item-group
+@findex tessera-x-item-data
+@findex tessera-x-item-body
+@findex tessera-x-item-note
+@table @code
+@item id
+A backend-local identity.  Use a stable value suitable for @code{equal}.
+
+@item message-id
+A normalized mail or news Message-ID, or @code{nil}.
+
+@item references
+A list of normalized reference identities in the source's order.
+
+@item parent
+An optional inferred native parent, kept separately from References.
+
+@item subject
+The full subject or title.
+
+@item date
+An Emacs time value, or @code{nil} when unknown.
+
+@item metadata
+An alist of printable field labels and values.
+
+@item group
+A provenance or group label for rendering.
+
+@item data
+Opaque backend retrieval data, such as a message path or entry URL.
+
+@item body
+Extracted text, or @code{nil} for no body.
+
+@item note
+An optional explanation of missing content or retrieval behavior.
+@end table
+
+  Construct separate records for a request.  The shared API does not
+recursively copy items or protect their fields from later mutation.
+
+@node Context Objects
+@section Context Objects
+@cindex context objects
+@deftp {Data Type} tessera-x-context
+A request and its eventual result.  Producers normally obtain it from
+@code{tessera-x-context-start}; constructing the structure alone does
+not install a live request in a source buffer.
+@end deftp
+@findex make-tessera-x-context
+@findex tessera-x-context-p
+@findex tessera-x-context-backend
+@findex tessera-x-context-source
+@findex tessera-x-context-scope
+@findex tessera-x-context-items
+@findex tessera-x-context-buffer
+@findex tessera-x-context-created
+@findex tessera-x-context-state
+@findex tessera-x-context-cleanup
+@findex tessera-x-context-error
+@findex tessera-x-context-max-characters
+@findex tessera-x-context-body-max-characters
+  Accessors have the form @samp{tessera-x-context-@var{field}}.  The
+fields @code{backend}, @code{source}, @code{scope}, @code{items}, and
+@code{created} record the backend symbol, source buffer, scope label,
+records, and start time.  @code{state} records the lifecycle state.
+@code{buffer} becomes the published buffer on success; @code{error}
+holds failure data when the request fails.
+
+  The fields @code{max-characters} and @code{body-max-characters} hold
+the budgets captured at start.  @code{cleanup} is a list of no-argument
+resource cleanup functions.  Backend code may update pending items and
+register cleanup; consumers should read ready results without changing
+them.
+
+@node Request Lifecycle
+@section Request Lifecycle
+
+  Start the request before retrieving content, then finish or fail it
+after checking that it is still current.  Register resource cleanup
+during preparation so every completion path can release it.
+
+@defun tessera-x-context-start backend scope items
+Start a request in the current buffer and return its context object.
+@var{backend} is a symbol, @var{scope} describes the selection, and
+@var{items} is a list of snapshotted @code{tessera-x-item} records.
+Cancel this source's previous pending request, retain its latest ready
+snapshot, capture the budgets and time, and arrange cancellation when
+the source is killed or changes major mode.
+@end defun
+
+@defun tessera-x-context-pending-p context
+Return non-@code{nil} only if @var{context} has state @code{pending},
+its source buffer is live, and it is still that source's pending
+request.
+@end defun
+
+  A state test alone is insufficient for a callback.  Use the predicate
+to reject obsolete work, and release any response resources even when
+the work is no longer current.
+
+@defun tessera-x-context-finish context
+Publish @var{context} if it is still pending and current, and return
+@var{context}.  Render its text into a new read-only buffer, set its
+state to @code{ready}, release registered resources, update the source
+reference, and invoke the ready hook.  A stale or finished context is
+returned without being published again.
+@end defun
+
+  Rendering errors kill the incomplete result buffer, fail the request,
+and are signalled to the caller.  A producer should handle errors from
+its own retrieval and completion path.  Completion itself does not
+select a window or move the source's point or region.
+
+@cindex resource cleanup
+@defun tessera-x-context-fail context error-data
+If @var{context} is still current and pending, record @var{error-data},
+set state to @code{failed}, clear the source's pending request, release
+registered resources, and report the failure in the echo area.  Retain
+the previous successful snapshot.  Ignore obsolete requests.
+@end defun
+
+  Register cleanup functions in @code{tessera-x-context-cleanup} as soon
+as resources exist.  They take no arguments and must not assume that the
+current buffer is the source.  Cleanup runs on success, failure, and
+cancellation.  Its list is cleared before invocation, and an error in
+one cleanup function is reported while remaining cleanup functions are
+still attempted.
+
+  A backend should distinguish an unreadable individual body from an
+unusable request.  Retain the item's metadata and a note for the former;
+fail the request when its scope cannot be queried or its result cannot
+be published.
+
+@node Producer Example
+@section A Producer Example
+
+  This small synchronous producer demonstrates ownership and completion.
+It is suitable for evaluating in a scratch buffer after loading
+@code{tessera-x}.  It creates a snapshot for that buffer and invokes any
+configured ready hooks.
+
+@lisp
+(require 'tessera-x)
+(let* ((item (make-tessera-x-item
+              :id "example-1"
+              :subject "Example source"
+              :date (current-time)
+              :body "An example body."))
+       (context (tessera-x-context-start
+                 'example "One example record" (list item))))
+  (condition-case err
+      (tessera-x-context-finish context)
+    (error
+     (tessera-x-context-fail context
+                             (error-message-string err)))))
+@end lisp
+
+@node Content Helper Interfaces
+@chapter Content Helper Interfaces
+
+  Snapshot producers can use these functions to extract text, follow
+message relationships, and select records by date.  They operate on
+supplied text and records rather than display rows.
+
+@menu
+* Reading Raw Messages::  Extracting message headers and body text.
+* Message Relations: Message Relationships.  Identities, descendants, and conversations.
+* Local Day Boundaries::  Finding the current calendar day.
+@end menu
+
+@node Reading Raw Messages
+@section Reading Raw Messages
+
+@defun tessera-x-read-message item reader
+Call the no-argument function @var{reader} in a temporary unibyte
+buffer.  It must insert a complete raw message, including headers.
+Decode available From, To, Cc, Keywords, and X-GM-LABELS fields into
+@var{item}'s metadata and extract its MIME body and attachment
+information.  Record failures as content notes and return @var{item}.
+@end defun
+
+@defun tessera-x-html-text html
+Return a plain-text rendering of the string @var{html}, using the
+conversion behavior described in @ref{HTML Bodies}.
+@end defun
+
+  Neither function selects a source window.  The reader is responsible
+for obtaining its input and must signal an error when it cannot insert a
+usable message.
+
+@node Message Relationships
+@section Message Relationships
+
+  Normalize identities and retain native parent relationships before
+selecting descendants or grouping conversations.  These operations use
+the supplied records; they do not query a mail server or index.
+
+@defun tessera-x-message-ids value
+Normalize message identifiers from a string, list, or vector.  Split
+string members at whitespace, remove surrounding angle brackets from
+each token, ignore non-string members, and return a list of strings.
+This is normalization, not a complete message-header parser.
+@end defun
+
+@defun tessera-x-native-parent-stack identity level stack
+Return an updated native ancestry stack for @var{identity} at
+@var{level}.  @var{stack} contains @code{(LEVEL . IDENTITY)} pairs,
+deepest first.  Remove preceding entries at the same or deeper level and
+push the new pair; the second pair then identifies its parent.
+@end defun
+
+  Visit every native record, including folded and unselected records,
+when using the stack.  Selection must not accidentally reparent a
+record.  Retain native inferred ancestry in @code{parent} without
+rewriting the original References list.
+
+@defun tessera-x-subthread items anchor
+Return @var{anchor} and its descendants among @var{items}, in their
+input order.  The anchor should be an item in that list.  Follow
+References and native parents using Message-ID, falling back to the
+backend identity when it is absent.  Missing intermediate parents do not
+prevent a reference to an earlier ancestor from connecting a record.
+Cycles do not cause an endless traversal.
+@end defun
+
+  This function does not retrieve additional records or infer ancestry
+from equal subjects.  The backend determines whether @var{items} comes
+from loaded results or a wider local index.
+
+@defun tessera-x-group-threads items
+Return @var{items} grouped by connected References and native parent
+identities.  Preserve first-group and within-group order.  Update each
+item's @code{group} field to the first member's subject.  Do not merge
+records solely because their subjects match.
+@end defun
+
+  This operation mutates item group fields and belongs before
+publication.  It preserves separate metadata fields such as the original
+newsgroup or maildir.
+
+@node Local Day Boundaries
+@section Local Day Boundaries
+@cindex local day boundaries
+@defun tessera-x-today-bounds
+Return a cons of local midnight and the following local midnight as
+Emacs time values.  Compute calendar boundaries in the current local
+time zone, rather than adding a fixed number of seconds.
+@end defun
+
+  Gnus and Elfeed use the half-open interval from the first boundary up
+to, but excluding, the second.  mu4e instead delegates date selection to
+its native @samp{date:today..now} query.
+
+@node Troubleshooting
+@chapter Troubleshooting
+
+  Use these topics when a snapshot is unavailable, its text is
+incomplete, or a configured consumer does not run.
+
+@menu
+* No Live Snapshot::    When there is no result to display.
+* Incomplete Text: Incomplete Snapshot Text.  Missing bodies and truncated text.
+* Consumer Failures: Consumer Hook Failures.  Diagnosing completion hooks.
+* Reporting Bugs::      Information to include in a bug report.
+@end menu
+
+@node No Live Snapshot
+@section No Live Snapshot
+
+  If showing a snapshot reports that no live result exists, first check
+that preparation completed in this source buffer.  A failed or cancelled
+request does not create a result, and an explicitly killed result cannot
+be shown again.  Preparing another snapshot can replace the reference.
+
+@node Incomplete Snapshot Text
+@section Incomplete Snapshot Text
+
+  If the text is shorter than expected, inspect content notes and budget
+notices separately.  If the text exceeds the budget, check the size of
+metadata and notices.  They are deliberately retained.
+
+@node Consumer Hook Failures
+@section Consumer Hook Failures
+@cindex hook failures
+  If a consumer is not called, confirm that it was added to the ready
+hook before preparation, that the request became ready, and that no
+earlier hook function signalled an error.  Backend manuals describe
+errors in selection and retrieval.
+
+@node Reporting Bugs
+@section Reporting Bugs
+
+  Report reproducible problems at
+@url{https://github.com/brsvh/emacs-tessera/issues}.  Include the
+package and Emacs versions, backend, command, relevant option values,
+and a small description of the observed and expected behavior.  Include
+source material only when needed and after removing private information.
+
+@node Copying
+@appendix GNU Free Documentation License
+@include fdl.texi
+
+@node Concept Index
+@unnumbered Concept Index
+@printindex cp
+
+@node Symbol Index
+@unnumbered Symbol Index
+@printindex fn
+
+@bye

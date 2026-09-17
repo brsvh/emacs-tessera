@@ -59,11 +59,11 @@
 
                 emacs-tessera =
                   {
-                    alert,
-                    elfeed,
+                    description,
                     lib,
                     melpaBuild,
-                    mu4e,
+                    packageRequires ? [ ],
+                    pname,
                     projectRoot,
                     ...
                   }:
@@ -74,23 +74,24 @@
                       ;
                   in
                   melpaBuild {
-                    files = ''("*.el")'';
+                    inherit
+                      packageRequires
+                      pname
+                      ;
 
-                    packageRequires = [
-                      alert
-                      elfeed
-                      mu4e
-                    ];
+                    files = ''("lisp/${pname}/*.el" "doc/${pname}.texi")'';
 
                     meta = {
-                      description = "Modern interface suite for Emacs communication tools";
+                      inherit
+                        description
+                        ;
+
                       homepage = "https://github.com/brsvh/emacs-tessera";
                       license = licenses.gpl3Plus;
                       maintainers = with maintainers; [ brsvh ];
                     };
 
-                    pname = "tessera";
-                    src = projectRoot + /lisp;
+                    src = projectRoot;
                     version = "0.1.0";
                   };
 
@@ -99,8 +100,76 @@
                     inherit
                       projectRoot
                       ;
+
+                    description = "Modern interfaces for Emacs communication tools";
+
+                    packageRequires = with finalAttrs; [
+                      alert
+                    ];
+
+                    pname = "tessera";
                   };
 
+                  tessera-x = finalAttrs.callPackage emacs-tessera {
+                    inherit
+                      projectRoot
+                      ;
+
+                    description = "Shared experimental features for Tessera";
+
+                    packageRequires = with finalAttrs; [
+                      tessera
+                    ];
+
+                    pname = "tessera-x";
+                  };
+
+                  tessera-x-elfeed = finalAttrs.callPackage emacs-tessera {
+                    inherit
+                      projectRoot
+                      ;
+
+                    description = "Experimental Tessera features for Elfeed";
+
+                    packageRequires = with finalAttrs; [
+                      elfeed
+                      tessera
+                      tessera-x
+                    ];
+
+                    pname = "tessera-x-elfeed";
+                  };
+
+                  tessera-x-gnus = finalAttrs.callPackage emacs-tessera {
+                    inherit
+                      projectRoot
+                      ;
+
+                    description = "Experimental Tessera features for Gnus";
+
+                    packageRequires = with finalAttrs; [
+                      tessera
+                      tessera-x
+                    ];
+
+                    pname = "tessera-x-gnus";
+                  };
+
+                  tessera-x-mu4e = finalAttrs.callPackage emacs-tessera {
+                    inherit
+                      projectRoot
+                      ;
+
+                    description = "Experimental Tessera features for Mu4e";
+
+                    packageRequires = with finalAttrs; [
+                      mu4e
+                      tessera
+                      tessera-x
+                    ];
+
+                    pname = "tessera-x-mu4e";
+                  };
                 };
               in
               {

@@ -35,17 +35,17 @@
   :group 'tessera
   :prefix "tessera-mu4e-")
 
-;;;; Advanced features
+;;;; Experimental context snapshots
 
-(defcustom tessera-mu4e-x-subthread-scope 'results
+(defcustom tessera-x-mu4e-subthread-scope 'results
   "Default source of context subthread members.
 Results includes folded rows.  Local index can supplement replies
 outside the active filter, but cannot include unindexed mail."
   :type '(choice (const results) (const local-index))
   :group 'tessera-mu4e)
 
-(defcustom tessera-mu4e-x-today-query-function
-  'tessera-mu4e-x--today-query
+(defcustom tessera-x-mu4e-today-query-function
+  'tessera-x-mu4e--today-query
   "Function returning the base query for today's context.
 By default use the Headers query or the Main query item at point.
 A custom function may supply an account-specific query."

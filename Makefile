@@ -5,16 +5,40 @@ SHELL := /bin/sh
 
 EMACS ?= emacs
 EMACS_BATCH := $(EMACS) -Q --batch
+EMACS_LOAD_PATH ?=
+INSTALL_INFO ?= install-info
 
 BUILD_FILE := Makefile
 DIST_DIR := dist
-LISP_DIR := lisp
-PACKAGE := tessera
+PACKAGE_DIRS := $(patsubst %/,%,$(wildcard lisp/*/))
+PACKAGES := $(sort $(notdir $(PACKAGE_DIRS)))
+PACKAGE ?=
+
+.PHONY: all archive autoloads clean compile package
+
+ifeq ($(strip $(PACKAGE)),)
+
+all archive autoloads clean compile package:
+	+@set -eu
+	for package in $(PACKAGES); do
+		$(MAKE) PACKAGE="$$package" $@
+	done
+
+else
+
+ifeq ($(filter $(PACKAGE),$(PACKAGES)),)
+$(error Unknown package: $(PACKAGE))
+endif
+
+LISP_DIR := lisp/$(PACKAGE)
 MAIN := $(LISP_DIR)/$(PACKAGE).el
 PKG := $(LISP_DIR)/$(PACKAGE)-pkg.el
 AUTOLOADS := $(LISP_DIR)/$(PACKAGE)-autoloads.el
+INFO := $(DIST_DIR)/manuals/info/$(PACKAGE).info
 ARCHIVE_STAMP := $(DIST_DIR)/.$(PACKAGE)-archive
 LISP_FILES := $(filter-out $(PKG) $(AUTOLOADS),$(wildcard $(LISP_DIR)/*.el))
+COMPILE_DEPS := $(filter-out %-pkg.el %-autoloads.el,\
+	$(wildcard $(addsuffix /*.el,$(PACKAGE_DIRS))))
 ELC_FILES := $(LISP_FILES:.el=.elc)
 GENERATED_FILES := $(PKG) $(AUTOLOADS) $(ELC_FILES)
 
@@ -69,8 +93,6 @@ define CHECK_ARCHIVE_ELISP
 endef
 # bake-format on
 
-.PHONY: all archive autoloads clean compile package
-
 all: package autoloads compile archive
 
 package: $(PKG)
@@ -100,13 +122,17 @@ $(AUTOLOADS): $(LISP_FILES) $(BUILD_FILE)
 		--eval '$(GENERATE_AUTOLOADS_ELISP)'
 	cp "$$temp_dir/$(PACKAGE)-autoloads.el" "$@"
 
-$(ELC_FILES) &: $(LISP_FILES) $(BUILD_FILE)
+$(ELC_FILES) &: $(COMPILE_DEPS) $(BUILD_FILE)
 	$(EMACS_BATCH) \
-		-L $(LISP_DIR) \
+		$(addprefix -L ,$(PACKAGE_DIRS) $(EMACS_LOAD_PATH)) \
 		--eval '(setq byte-compile-error-on-warn t load-prefer-newer t)' \
 		-f batch-byte-compile $(LISP_FILES)
 
-$(ARCHIVE_STAMP): $(LISP_FILES) $(PKG) COPYING $(BUILD_FILE)
+$(INFO): doc/$(PACKAGE).texi doc/fdl.texi doc/Makefile
+	+$(MAKE) -C doc PACKAGE="$(PACKAGE)" \
+		OUTPUT_DIR="$(abspath $(DIST_DIR)/manuals)" info
+
+$(ARCHIVE_STAMP): $(LISP_FILES) $(PKG) $(INFO) COPYING $(BUILD_FILE)
 	@set -eu
 	version=$$(env \
 		PACKAGE_SOURCE="$(MAIN)" \
@@ -118,7 +144,9 @@ $(ARCHIVE_STAMP): $(LISP_FILES) $(PKG) COPYING $(BUILD_FILE)
 	trap 'rm -rf "$$temp_dir"' EXIT HUP INT TERM
 	mkdir -p "$$temp_dir/$$package_dir" "$(DIST_DIR)"
 	cp $(filter %.el,$^) "$$temp_dir/$$package_dir/"
-	cp COPYING "$$temp_dir/$$package_dir/"
+	cp COPYING "$(INFO)" "$$temp_dir/$$package_dir/"
+	$(INSTALL_INFO) "$$temp_dir/$$package_dir/$(PACKAGE).info" \
+		"$$temp_dir/$$package_dir/dir"
 	chmod -R u=rwX,go=rX "$$temp_dir/$$package_dir"
 	tar \
 		--sort=name \
@@ -149,4 +177,6 @@ $(ARCHIVE_STAMP): $(LISP_FILES) $(PKG) COPYING $(BUILD_FILE)
 
 clean:
 	$(RM) $(GENERATED_FILES)
-	rm -rf "$(DIST_DIR)"
+	$(RM) $(ARCHIVE_STAMP) $(DIST_DIR)/$(PACKAGE)-[0-9]*.tar
+
+endif

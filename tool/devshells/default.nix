@@ -63,6 +63,12 @@ in
           tab_width = 2;
         };
 
+        "*.texi" = {
+          indent_size = 2;
+          indent_style = "space";
+          max_line_length = 72;
+        };
+
         "{Makefile,**.mk}" = {
           indent_size = 4;
           indent_style = "tab";
@@ -248,5 +254,6 @@ in
   packages = with pkgs; [
     gnumake
     gnutar
+    texinfo
   ];
 }

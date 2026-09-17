@@ -35,26 +35,26 @@
   :group 'tessera
   :prefix "tessera-elfeed-")
 
-;;;; Advanced features
+;;;; Experimental context snapshots
 
-(defcustom tessera-elfeed-x-fetch-linked-content t
+(defcustom tessera-x-elfeed-fetch-linked-content t
   "Whether selected-entry contexts fetch linked HTTP content.
 Today contexts always use locally stored feed bodies."
   :type 'boolean
   :group 'tessera-elfeed)
 
-(defcustom tessera-elfeed-x-fetch-minimum-characters nil
-  "Skip HTTP when the stored body has at least this many characters.
+(defcustom tessera-x-elfeed-fetch-minimum-characters nil
+  "Skip context HTTP retrieval for stored bodies of this size.
 Nil means fetch every selected HTTP link when fetching is enabled."
   :type '(choice (const nil) natnum)
   :group 'tessera-elfeed)
 
-(defcustom tessera-elfeed-x-fetch-timeout 15
-  "Seconds to wait before falling back to the stored feed body."
+(defcustom tessera-x-elfeed-fetch-timeout 15
+  "Seconds to fetch a context body before using stored feed content."
   :type 'natnum
   :group 'tessera-elfeed)
 
-(defcustom tessera-elfeed-x-fetch-concurrency 4
+(defcustom tessera-x-elfeed-fetch-concurrency 4
   "Maximum simultaneous linked-page requests for one context."
   :type 'natnum
   :group 'tessera-elfeed)

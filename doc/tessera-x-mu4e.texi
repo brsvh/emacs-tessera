@@ -1,0 +1,386 @@
+\input texinfo
+
+@c Copyright (C) 2026 Bingshan Chang.
+@setfilename tessera-x-mu4e.info
+@settitle Tessera X mu4e
+@documentencoding UTF-8
+@set txicodequoteundirected
+@set txicodequotebacktick
+@documentlanguage en
+@set VERSION 0.1.0
+@syncodeindex vr fn
+@syncodeindex tp fn
+
+@copying
+This manual describes tessera-x-mu4e version @value{VERSION}.
+
+Copyright @copyright{} 2026 Bingshan Chang.
+
+@quotation
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3 or
+any later version published by the Free Software Foundation; with no
+Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.  A
+copy of the license is included in the section entitled ``GNU Free
+Documentation License''.
+@end quotation
+@end copying
+
+@dircategory Emacs
+@direntry
+* Tessera X mu4e: (tessera-x-mu4e). Experiments for mu4e.
+@end direntry
+
+@titlepage
+@title Tessera X mu4e
+@subtitle For version @value{VERSION}
+@author Bingshan Chang
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Tessera X mu4e
+
+Experimental Tessera features for mu4e.
+
+@insertcopying
+@end ifnottex
+
+@menu
+* Introduction::        What this package provides.
+* Getting Started::     Installing and using the package.
+* Selecting Messages::  Selecting messages and their replies.
+* Today Queries::       Restricting a local query to today.
+* Local Retrieval::     Querying the index and reading mail files.
+* Completion: Completion and Cancellation.  Waiting for results and stopping work.
+* Troubleshooting::     Diagnosing problems and reporting bugs.
+* Copying::             The GNU Free Documentation License.
+* Concept Index::       Topics covered in this manual.
+* Symbol Index::        Commands, options, faces, and interfaces.
+@end menu
+
+@node Introduction
+@chapter Introduction
+@cindex experimental features
+  Tessera X mu4e prepares independent context snapshots from local mail.
+The @samp{x} means experimental.  This version implements selection,
+subthread, and today snapshots, using native mu4e records and the local
+mu index.
+
+  A snapshot is a read-only buffer containing selected message headers
+and available body text.  The buffer from which you start preparation is
+the @dfn{source buffer}; the selected messages form its @dfn{scope}.
+
+  The commands work without @code{tessera-mu4e-mode}.  Preparing a
+context does not synchronize mail or send a language-model request.  The
+shared result format, size limits, and snapshot commands are described
+in @ref{Top,,, tessera-x, Tessera X}.
+
+@node Getting Started
+@chapter Getting Started
+
+  The package uses mu4e's configured mail paths and mu executable.  Set
+up mu4e and its local index before preparing snapshots.
+
+@menu
+* Requirements::        Required packages and loading libraries.
+* First Context::       Preparing and viewing a snapshot.
+@end menu
+
+@node Requirements
+@section Requirements
+@cindex installation
+  The declared minimum versions are Emacs 30.1, Tessera 0.1.0, Tessera X
+0.1.0, and mu4e 1.14.3.  Tessera also requires Alert 1.2 or later.  For
+a source checkout, add @file{lisp/tessera/}, @file{lisp/tessera-x/}, and
+@file{lisp/tessera-x-mu4e/} to @code{load-path}, together with mu4e's
+own library directory.  Then use:
+
+@lisp
+(require 'tessera-x-mu4e)
+@end lisp
+
+  Use @kbd{M-x customize-group @key{RET} tessera-mu4e @key{RET}} to
+configure the options documented here.  You can also load
+@code{tessera-mu4e} and set them in your initialization file before
+loading the snapshot commands.
+
+@node First Context
+@section Preparing a First Context
+
+  In a mu4e Headers buffer, move point to a message and run @kbd{M-x
+tessera-x-mu4e-prepare-context}.  The command reads the selected local
+message files.  Run @kbd{M-x tessera-x-show-context} in that Headers
+buffer to inspect the successful snapshot.
+
+  For expanded subthreads and today queries, completion can be
+asynchronous.  The show command continues to show an older successful
+snapshot while a replacement is pending.  @xref{Completion and
+Cancellation}.
+
+@node Selecting Messages
+@chapter Selecting Messages
+
+  These commands select messages in the Headers buffer without executing
+pending marked operations or changing read state.
+
+@menu
+* Marks and Regions: Marked Messages and Regions.  Marks, the region, or message at point.
+* Current Subthread::   The current message and its descendants.
+@end menu
+
+@node Marked Messages and Regions
+@section Marked Messages and Regions
+@cindex marks
+@cindex region
+@deffn Command tessera-x-mu4e-prepare-context
+Prepare marked messages in the current Headers buffer; if there are no
+marks, use rows intersecting the active region; otherwise use the
+message at point.  Return a context object.  Signal a user error outside
+Headers or if no message is selected.
+@end deffn
+
+  Marks take precedence over the region.  They identify records; the
+command neither executes nor clears their pending operations.  Folded
+rows remain eligible.  Each selected message is included only once.
+Local bodies are read synchronously before the command returns.
+
+@node Current Subthread
+@section The Current Message and Its Replies
+@cindex subthreads
+@deffn Command tessera-x-mu4e-prepare-subthread-context &optional @
+  local-index
+Prepare the message at point and its descendants.  A non-@code{nil}
+@var{local-index}, or an interactive prefix such as @kbd{C-u}, requests
+supplementary records from the local mu index.  Return a context object.
+Signal a user error outside Headers or when there is no current message.
+@end deffn
+
+  By default, only current results are examined, including folded rows.
+A descendant is a reply to the current message, or a reply to one of its
+replies.  When @code{mu4e-search-threads} is non-@code{nil}, Tessera
+follows mu4e's thread structure together with reply references in
+message headers.  With threading disabled, it uses those references
+alone.  Matching subjects do not by themselves establish a relationship.
+
+  The current message and its descendants are selected, not all
+ancestors or siblings in its conversation.  Without expansion, body
+reading and publication are synchronous.
+
+@cindex local index expansion
+@defopt tessera-x-mu4e-subthread-scope
+The default subthread scope.  Initially @code{results}, it can instead
+be @code{local-index} to supplement replies outside the current result
+filter.  A non-@code{nil} command argument also requests expansion.  A
+prefix does not toggle expansion off when this option enables it.
+@end defopt
+
+  Expansion searches the local mu index for messages related to the
+message at point.  Its @samp{Message-ID} header supplies the identity
+for that search; expansion fails if the identifier is missing.  Tessera
+retains selected descendants already in the current results, adds
+descendants found in the index, and removes duplicates.  The Headers
+search remains unchanged.
+
+  Unindexed mail or unavailable relatives can still be missing from the
+snapshot.  Expansion does not fetch mail from a server.
+
+@node Today Queries
+@chapter Today Queries
+
+  A today snapshot queries the local index within a base scope.  The
+source buffer or a user-supplied query function determines that scope.
+
+@menu
+* Native Today Scopes::  Queries from Headers and Main buffers.
+* Custom Today Scopes::  Supplying a base query function.
+@end menu
+
+@node Native Today Scopes
+@section Native Today Scopes
+
+@deffn Command tessera-x-mu4e-prepare-today-context
+Obtain a base query from @code{tessera-x-mu4e-today-query-function},
+combine it with @samp{date:today..now}, and start an asynchronous local
+index request.  Return the context object.
+@end deffn
+
+  The default base-query function chooses the scope from the source
+buffer:
+
+@table @asis
+@item Headers buffer
+@cindex today, Headers query
+Use the query associated with the buffer.  A missing query is a user
+error.  This consults the index with the query, rather than limiting the
+request to the number of rows currently displayed in Headers.
+
+@item Main buffer
+@cindex today, Main query item
+Use the native bookmark or maildir query item on the current line.
+Point on an unrelated line is a user error; the command does not
+silently choose an account or query all mail.
+@end table
+
+  With a nonempty base query, the resulting expression is
+@samp{(@var{base}) AND (date:today..now)}.  An empty base selects
+@samp{date:today..now} alone.  The date range is interpreted by mu as
+today through now; Tessera does not substitute a fixed 24-hour interval.
+
+  No mailbox synchronization occurs.  An empty index result is a
+successful empty snapshot and still invokes the ready hook.
+
+@node Custom Today Scopes
+@section Custom Today Scopes
+@cindex custom query functions
+@defopt tessera-x-mu4e-today-query-function
+A no-argument function returning the base mu query string.  The default
+function reads the current Headers query or Main query item.  The
+function runs in the source buffer before the request is created.
+@end defopt
+
+  A custom function can supply an account-specific scope or support
+another source buffer.  It must return a string; use the empty string
+only when today's query should have no additional restriction.
+
+  For example, the following user function restricts today to a maildir.
+Replace the maildir with one present in the configured index.
+
+@lisp
+(require 'tessera-mu4e)
+
+(defun my-tessera-today-query ()
+  "Return the mail scope for today's context."
+  "maildir:/personal/Inbox")
+
+(setq tessera-x-mu4e-today-query-function
+      #'my-tessera-today-query)
+@end lisp
+
+  Both backend options can be set globally or given buffer-local values.
+They affect later requests; a running query already has its selected
+scope.
+
+@node Local Retrieval
+@chapter Local Retrieval
+
+  All bodies are read from local message files.  Index access and file
+access can fail independently.
+
+@menu
+* Index Process::       Choosing the mu executable and index.
+* Message Files::       Local bodies, metadata, and missing files.
+@end menu
+
+@node Index Process
+@section The Index Process
+@cindex mu find
+  Queries use @code{mu4e-mu-binary}.  A non-@code{nil}
+@code{mu4e-mu-home} is expanded and passed as @samp{--muhome}; otherwise
+the executable uses its own default.  Results are sorted by date with
+duplicates removed.  Subthread expansion also searches for related
+messages.
+
+  A query with no matches produces an empty snapshot.  If the query
+fails or its output cannot be read, preparation fails and reports the
+error.  The Headers query and result buffer remain unchanged.
+
+@node Message Files
+@section Message Files and Metadata
+@cindex missing message files
+  For each selected record, Tessera resolves its readable local message
+path through mu4e and reads the complete raw message.  It extracts text
+and metadata without displaying the message, altering flags, verifying
+signatures, or decrypting encrypted content.
+
+  A missing or unreadable file becomes a content note on that item.
+Metadata remains available even when the index still refers to a file
+that has moved or disappeared.  @xref{Mail Bodies,,, tessera-x, Tessera
+X}.
+
+@cindex message metadata
+  Items include the full subject, date, names and addresses, maildir,
+labels, tags, flags, Message-ID, and References.  Labels and tags are
+merged without duplicates.  Native inferred parents are recorded
+separately.  Reading raw mail can add or refine available header fields.
+
+  Conversation grouping uses identities and references, retaining the
+input order within each connected conversation.  Display truncation,
+contact abbreviation, and hidden columns do not limit snapshot metadata.
+Character budgets are applied later to the rendered body text.
+@xref{Character Budgets,,, tessera-x, Tessera X}.
+
+@node Completion and Cancellation
+@chapter Completion and Cancellation
+@cindex cancellation
+  Selection and ordinary subthread requests read their files
+synchronously.  Expanded subthreads and today scopes return while a
+separate query can still be pending.  The ready hook runs once after a
+successful snapshot is published, including for zero matches.
+
+  Starting another request in the same source cancels its pending query.
+Killing the source or changing major mode does the same.  Cancellation
+stops the index query.  It does not discard earlier successful snapshots
+or cancel preparation started from other source buffers.  Use @kbd{M-x
+tessera-x-cancel-context} in the source for explicit cancellation.
+@xref{Snapshot Lifecycle,,, tessera-x, Tessera X}.
+
+  The package installs no key bindings.  Bindings and consumers belong
+to user configuration.  For the ready hook and a consumer example, see
+@ref{Consuming Snapshots,,, tessera-x, Tessera X}.
+
+@node Troubleshooting
+@chapter Troubleshooting
+
+  Check the query, index configuration, and message files when
+preparation fails or omits expected content.
+
+@menu
+* Retrieval Failures: Index and File Failures.  Diagnosing queries and unavailable files.
+* Scope Errors: Scope Selection Errors.  Missing identifiers or query items.
+* Reporting Bugs::      Information to include in a bug report.
+@end menu
+
+@node Index and File Failures
+@section Index and File Failures
+
+  For an index-process failure, check @code{mu4e-mu-binary},
+@code{mu4e-mu-home}, and the recorded error.  A different mu home can
+contain different messages even when the query string is identical.  A
+file content note indicates a body-read problem rather than a query
+failure.
+
+@node Scope Selection Errors
+@section Scope Selection Errors
+@cindex missing Message-ID
+  If subthread expansion reports a missing Message-ID, ordinary result
+selection may still work, but a query by that identity cannot be issued.
+If today reports no native query item, use a Headers buffer with a
+query, a Main bookmark or maildir line, or a custom query function.
+
+@node Reporting Bugs
+@section Reporting Bugs
+
+  For hook and snapshot-buffer problems, see @ref{Troubleshooting,,,
+tessera-x, Tessera X}.  Report backend issues at
+@url{https://github.com/brsvh/emacs-tessera/issues}, including Emacs,
+mu4e and package versions, command, scope, and relevant error text.
+
+@node Copying
+@appendix GNU Free Documentation License
+@include fdl.texi
+
+@node Concept Index
+@unnumbered Concept Index
+@printindex cp
+
+@node Symbol Index
+@unnumbered Symbol Index
+@printindex fn
+
+@bye

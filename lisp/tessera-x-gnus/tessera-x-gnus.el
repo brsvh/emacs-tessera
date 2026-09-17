@@ -1,10 +1,13 @@
-;;; tessera-gnus-x.el --- Gnus context snapshots  -*- lexical-binding: t; -*-
+;;; tessera-x-gnus.el --- Experimental Tessera features for Gnus  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Bingshan Chang <chang@bingshan.org>
 
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
-;; Keywords: convenience, news
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "30.1") (tessera "0.1.0") (tessera-x "0.1.0"))
+;; Keywords: convenience, mail, news
+;; URL: https://github.com/brsvh/emacs-tessera
 
 ;; This file is not part of GNU Emacs.
 
@@ -23,7 +26,9 @@
 
 ;;; Commentary:
 
-;; Optional Gnus context construction independent of layout modes.
+;; Experimental Tessera features for Gnus.
+;; The `x' in this package family stands for experimental.
+;; Currently provides context snapshots independent of layout modes.
 
 ;;; Code:
 
@@ -34,7 +39,9 @@
 (require 'gnus-topic)
 (require 'nnheader)
 
-(defun tessera-gnus-x--item (header group)
+;;;; Context snapshots
+
+(defun tessera-x-gnus--item (header group)
   "Snapshot HEADER from GROUP, with complete names and labels."
   (make-tessera-x-item
    :id (cons group (mail-header-number header))
@@ -57,7 +64,7 @@
                      field header)))
             '("To" "Cc")))))
 
-(defun tessera-gnus-x--items (&optional selected)
+(defun tessera-x-gnus--items (&optional selected)
   "Snapshot Summary records, or SELECTED articles, including folds."
   (unless (derived-mode-p 'gnus-summary-mode)
     (user-error "Run this command in Gnus Summary"))
@@ -80,26 +87,26 @@
                    (if gnus-show-threads (gnus-data-level data) 0)
                    stack))
             (when (or (not selected) (gethash number wanted))
-              (let ((item (tessera-gnus-x--item
+              (let ((item (tessera-x-gnus--item
                            header gnus-newsgroup-name)))
                 (setf (tessera-x-item-parent item) (cdadr stack))
                 (push item items)))))))
     (nreverse items)))
 
-(defun tessera-gnus-x--agent-file (group name)
+(defun tessera-x-gnus--agent-file (group name)
   "Return Agent file NAME belonging to GROUP."
   (let ((gnus-command-method (gnus-find-method-for-group group)))
     (gnus-agent-article-name name group)))
 
-(defun tessera-gnus-x--available-p (item)
+(defun tessera-x-gnus--available-p (item)
   "Return non-nil when ITEM has a nonempty Agent body."
   (pcase-let* ((`(,group . ,number) (tessera-x-item-id item))
-               (file (tessera-gnus-x--agent-file
+               (file (tessera-x-gnus--agent-file
                       group (number-to-string number))))
     (and (file-readable-p file)
          (> (file-attribute-size (file-attributes file)) 0))))
 
-(defun tessera-gnus-x--refresh-downloads (items)
+(defun tessera-x-gnus--refresh-downloads (items)
   "Refresh native availability marks for newly cached ITEMS."
   (when (derived-mode-p 'gnus-summary-mode)
     (let ((numbers
@@ -107,7 +114,7 @@
             (cl-loop for item in items
                      for id = (tessera-x-item-id item)
                      when (and (equal (car id) gnus-newsgroup-name)
-                               (tessera-gnus-x--available-p item))
+                               (tessera-x-gnus--available-p item))
                      collect (cdr id))
             #'<)))
       (setq gnus-newsgroup-undownloaded
@@ -118,12 +125,12 @@
           (when (gnus-summary-goto-subject number nil t)
             (gnus-summary-update-download-mark number)))))))
 
-(defun tessera-gnus-x--download (items)
+(defun tessera-x-gnus--download (items)
   "Download missing ITEMS into their native Agent groups.
 Leave failures as content notes so other bodies remain usable."
   (let ((missing (make-hash-table :test #'equal)))
     (dolist (item items)
-      (unless (tessera-gnus-x--available-p item)
+      (unless (tessera-x-gnus--available-p item)
         (push item (gethash
                     (car (tessera-x-item-id item)) missing))))
     (maphash
@@ -143,12 +150,12 @@ Leave failures as content notes so other bodies remain usable."
             (setf (tessera-x-item-note item)
                   (concat "Agent download: "
                           (error-message-string err))))))
-       (tessera-gnus-x--refresh-downloads group-items))
+       (tessera-x-gnus--refresh-downloads group-items))
      missing)))
 
-(defun tessera-gnus-x--read-body (item)
+(defun tessera-x-gnus--read-body (item)
   "Fill ITEM from the Agent, without displaying or marking it read."
-  (if (tessera-gnus-x--available-p item)
+  (if (tessera-x-gnus--available-p item)
       (progn
         (setf (tessera-x-item-note item) nil)
         (tessera-x-read-message
@@ -163,17 +170,18 @@ Leave failures as content notes so other bodies remain usable."
       (setf (tessera-x-item-note item)
             "Body absent from local Agent"))))
 
-(defun tessera-gnus-x--build (items scope local-only)
-  "Prepare ITEMS for SCOPE, downloading unless LOCAL-ONLY forbids it."
+(defun tessera-x-gnus--build-context (items scope local-only)
+  "Build a context from ITEMS for SCOPE.
+Download missing bodies unless LOCAL-ONLY forbids it."
   (unless gnus-agent (user-error "Gnus Agent is not enabled"))
   (let ((context (tessera-x-context-start 'gnus scope items)))
     (condition-case err
         (progn
           (unless (or local-only
-                      (eq tessera-gnus-x-body-policy 'local-only))
+                      (eq tessera-x-gnus-body-policy 'local-only))
             (save-window-excursion
-              (save-excursion (tessera-gnus-x--download items))))
-          (dolist (item items) (tessera-gnus-x--read-body item))
+              (save-excursion (tessera-x-gnus--download items))))
+          (dolist (item items) (tessera-x-gnus--read-body item))
           (setf (tessera-x-context-items context)
                 (tessera-x-group-threads items))
           (tessera-x-context-finish context))
@@ -181,13 +189,13 @@ Leave failures as content notes so other bodies remain usable."
               context (error-message-string err))))
     context))
 
-(defun tessera-gnus-x--overview (groups &optional bounds)
+(defun tessera-x-gnus--overview (groups &optional bounds)
   "Read local Agent overview GROUPS within optional BOUNDS.
 BOUNDS is a pair of Emacs times.  No articles or headers are fetched."
   (let (items)
     (dolist (group (delete-dups (copy-sequence groups)))
       (when (gnus-agent-method-p (gnus-find-method-for-group group))
-        (let ((file (tessera-gnus-x--agent-file group ".overview")))
+        (let ((file (tessera-x-gnus--agent-file group ".overview")))
           (when (file-readable-p file)
             (with-temp-buffer
               (insert-file-contents file)
@@ -195,7 +203,7 @@ BOUNDS is a pair of Emacs times.  No articles or headers are fetched."
               (while (not (eobp))
                 (let* ((header (save-excursion
                                  (nnheader-parse-nov)))
-                       (item (tessera-gnus-x--item header group))
+                       (item (tessera-x-gnus--item header group))
                        (date (tessera-x-item-date item)))
                   (when (and (> (mail-header-number header) 0)
                              (or (not bounds)
@@ -212,47 +220,48 @@ BOUNDS is a pair of Emacs times.  No articles or headers are fetched."
                          (or (tessera-x-item-date right) 0))))))
 
 ;;;###autoload
-(defun tessera-gnus-x-prepare-context ()
+(defun tessera-x-gnus-prepare-context ()
   "Prepare Gnus work articles using native region and process marks.
 When neither is present, use the article at point.  The body policy
 controls downloading to the Agent; no article is marked read."
   (interactive)
-  (let ((items (tessera-gnus-x--items t)))
+  (let ((items (tessera-x-gnus--items t)))
     (unless items (user-error "No Gnus articles selected"))
-    (tessera-gnus-x--build items "Selected Gnus articles" nil)))
+    (tessera-x-gnus--build-context
+     items "Selected Gnus articles" nil)))
 
 ;;;###autoload
-(defun tessera-gnus-x-prepare-subthread-context
+(defun tessera-x-gnus-prepare-subthread-context
     (&optional local-index)
   "Prepare the current article and replies from loaded results.
 With prefix LOCAL-INDEX, supplement replies from this group's Agent
 overview.  That local index may omit articles absent from the Agent."
   (interactive "P")
-  (let* ((items (tessera-gnus-x--items))
+  (let* ((items (tessera-x-gnus--items))
          (id (save-excursion (gnus-summary-article-number)))
          (anchor
           (cl-find (cons gnus-newsgroup-name id) items
                    :key #'tessera-x-item-id :test #'equal))
          (expanded (or local-index
-                       (eq tessera-gnus-x-subthread-scope
+                       (eq tessera-x-gnus-subthread-scope
                            'local-index))))
     (unless anchor (user-error "No current Gnus article"))
     (when expanded
       (let ((seen (make-hash-table :test #'equal)))
         (dolist (item items)
           (puthash (tessera-x-item-id item) t seen))
-        (dolist (item (tessera-gnus-x--overview
+        (dolist (item (tessera-x-gnus--overview
                        (list gnus-newsgroup-name)))
           (unless (gethash (tessera-x-item-id item) seen)
             (push item items)))))
-    (tessera-gnus-x--build
+    (tessera-x-gnus--build-context
      (tessera-x-subthread items anchor)
      (if expanded
          "Subthread; group Agent overview, possibly incomplete"
        "Subthread; current results, including folds")
      nil)))
 
-(defun tessera-gnus-x--topic-groups (topic)
+(defun tessera-x-gnus--topic-groups (topic)
   "Return groups in TOPIC and its descendants."
   (cl-labels
       ((find-node (node)
@@ -268,7 +277,7 @@ overview.  That local index may omit articles absent from the Agent."
         (copy-sequence (cdr (assoc topic gnus-topic-alist)))))))
 
 ;;;###autoload
-(defun tessera-gnus-x-prepare-today-context ()
+(defun tessera-x-gnus-prepare-today-context ()
   "Prepare today's local Agent articles in the native scope.
 Use the Summary group, or the Group buffer's group or topic at point.
 Never download bodies or overview data in this command."
@@ -283,16 +292,16 @@ Never download bodies or overview data in this command."
              ((get-text-property position 'gnus-group)
               (list (get-text-property position 'gnus-group)))
              ((get-text-property position 'gnus-topic)
-              (tessera-gnus-x--topic-groups
+              (tessera-x-gnus--topic-groups
                (get-text-property position 'gnus-topic)))
              (t (user-error
                  "Point is not on a Gnus group or topic"))))
            (t (user-error "Run in Gnus Summary or Group")))))
-    (tessera-gnus-x--build
-     (tessera-gnus-x--overview groups (tessera-x-today-bounds))
+    (tessera-x-gnus--build-context
+     (tessera-x-gnus--overview groups (tessera-x-today-bounds))
      (format "Today; local Agent only; groups: %s"
              (string-join groups ", "))
      t)))
 
-(provide 'tessera-gnus-x)
-;;; tessera-gnus-x.el ends here
+(provide 'tessera-x-gnus)
+;;; tessera-x-gnus.el ends here

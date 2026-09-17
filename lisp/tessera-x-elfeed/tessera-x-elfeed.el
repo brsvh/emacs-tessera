@@ -1,10 +1,13 @@
-;;; tessera-elfeed-x.el --- Elfeed context snapshots  -*- lexical-binding: t; -*-
+;;; tessera-x-elfeed.el --- Experimental Tessera features for Elfeed  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Bingshan Chang <chang@bingshan.org>
 
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
-;; Keywords: convenience, news
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "30.1") (tessera "0.1.0") (tessera-x "0.1.0") (elfeed "4.0.1"))
+;; Keywords: convenience, mail, news
+;; URL: https://github.com/brsvh/emacs-tessera
 
 ;; This file is not part of GNU Emacs.
 
@@ -23,7 +26,9 @@
 
 ;;; Commentary:
 
-;; Optional Elfeed context construction independent of layout modes.
+;; Experimental Tessera features for Elfeed.
+;; The `x' in this package family stands for experimental.
+;; Currently provides context snapshots independent of layout modes.
 
 ;;; Code:
 
@@ -36,15 +41,17 @@
 (defvar url-http-response-status)
 (defvar url-http-end-of-headers)
 
-(cl-defstruct tessera-elfeed-x--request
+;;;; Context snapshots
+
+(cl-defstruct tessera-x-elfeed--request
   "Bounded HTTP work for a context snapshot."
   context queue active dispatching (limit 4) timeout)
 
-(cl-defstruct tessera-elfeed-x--fetch
+(cl-defstruct tessera-x-elfeed--fetch
   "One HTTP transfer, completed at most once."
   request item buffer timer done)
 
-(defun tessera-elfeed-x--item (entry)
+(defun tessera-x-elfeed--item (entry)
   "Snapshot ENTRY and its stored feed content."
   (let* ((feed (elfeed-entry-feed entry))
          (content (or (elfeed-deref (elfeed-entry-content entry)) ""))
@@ -75,7 +82,7 @@
       (setf (tessera-x-item-note item) "No stored feed body"))
     item))
 
-(defun tessera-elfeed-x--group-feeds (items)
+(defun tessera-x-elfeed--group-feeds (items)
   "Group ITEMS by feed identity, retaining their order per feed."
   (let ((groups (make-hash-table :test #'equal)) order)
     (dolist (item items)
@@ -86,55 +93,55 @@
     (cl-mapcan (lambda (key) (nreverse (gethash key groups)))
                (nreverse order))))
 
-(defun tessera-elfeed-x--stop-fetch (fetch)
+(defun tessera-x-elfeed--stop-fetch (fetch)
   "Release FETCH's timer, response buffers and redirected transfers."
-  (when (timerp (tessera-elfeed-x--fetch-timer fetch))
-    (cancel-timer (tessera-elfeed-x--fetch-timer fetch)))
-  (let ((buffer (tessera-elfeed-x--fetch-buffer fetch)))
+  (when (timerp (tessera-x-elfeed--fetch-timer fetch))
+    (cancel-timer (tessera-x-elfeed--fetch-timer fetch)))
+  (let ((buffer (tessera-x-elfeed--fetch-buffer fetch)))
     (while (buffer-live-p buffer)
       (let ((next (buffer-local-value 'url-redirect-buffer buffer)))
         (when-let* ((process (get-buffer-process buffer)))
           (delete-process process))
         (kill-buffer buffer)
         (setq buffer next))))
-  (setf (tessera-elfeed-x--fetch-timer fetch) nil
-        (tessera-elfeed-x--fetch-buffer fetch) nil))
+  (setf (tessera-x-elfeed--fetch-timer fetch) nil
+        (tessera-x-elfeed--fetch-buffer fetch) nil))
 
-(defun tessera-elfeed-x--cancel (request)
+(defun tessera-x-elfeed--cancel (request)
   "Cancel every pending transfer in REQUEST."
-  (setf (tessera-elfeed-x--request-queue request) nil)
-  (dolist (fetch (tessera-elfeed-x--request-active request))
-    (setf (tessera-elfeed-x--fetch-done fetch) t)
-    (tessera-elfeed-x--stop-fetch fetch))
-  (setf (tessera-elfeed-x--request-active request) nil))
+  (setf (tessera-x-elfeed--request-queue request) nil)
+  (dolist (fetch (tessera-x-elfeed--request-active request))
+    (setf (tessera-x-elfeed--fetch-done fetch) t)
+    (tessera-x-elfeed--stop-fetch fetch))
+  (setf (tessera-x-elfeed--request-active request) nil))
 
-(defun tessera-elfeed-x--complete (fetch text note)
+(defun tessera-x-elfeed--complete (fetch text note)
   "Complete FETCH with TEXT or feed fallback and NOTE exactly once."
-  (unless (tessera-elfeed-x--fetch-done fetch)
-    (setf (tessera-elfeed-x--fetch-done fetch) t)
-    (let* ((request (tessera-elfeed-x--fetch-request fetch))
-           (context (tessera-elfeed-x--request-context request))
-           (item (tessera-elfeed-x--fetch-item fetch)))
-      (setf (tessera-elfeed-x--request-active request)
-            (delq fetch (tessera-elfeed-x--request-active request)))
-      (tessera-elfeed-x--stop-fetch fetch)
+  (unless (tessera-x-elfeed--fetch-done fetch)
+    (setf (tessera-x-elfeed--fetch-done fetch) t)
+    (let* ((request (tessera-x-elfeed--fetch-request fetch))
+           (context (tessera-x-elfeed--request-context request))
+           (item (tessera-x-elfeed--fetch-item fetch)))
+      (setf (tessera-x-elfeed--request-active request)
+            (delq fetch (tessera-x-elfeed--request-active request)))
+      (tessera-x-elfeed--stop-fetch fetch)
       (when (tessera-x-context-pending-p context)
         (if (and text (not (string-empty-p text)))
             (setf (tessera-x-item-body item) text
                   (tessera-x-item-note item) "Fetched linked page")
           (setf (tessera-x-item-note item)
                 (concat "Using stored feed content: " note)))
-        (tessera-elfeed-x--dispatch request)))))
+        (tessera-x-elfeed--dispatch request)))))
 
-(defun tessera-elfeed-x--timeout (fetch)
+(defun tessera-x-elfeed--timeout (fetch)
   "Complete timed out FETCH using its stored feed content."
-  (tessera-elfeed-x--complete fetch nil "HTTP timeout"))
+  (tessera-x-elfeed--complete fetch nil "HTTP timeout"))
 
-(defun tessera-elfeed-x--response (status fetch)
+(defun tessera-x-elfeed--response (status fetch)
   "Handle URL STATUS for FETCH without selecting its source."
-  (if (tessera-elfeed-x--fetch-done fetch)
+  (if (tessera-x-elfeed--fetch-done fetch)
       (kill-buffer (current-buffer))
-    (setf (tessera-elfeed-x--fetch-buffer fetch) (current-buffer))
+    (setf (tessera-x-elfeed--fetch-buffer fetch) (current-buffer))
     (condition-case err
         (progn
           (unless (and (not (plist-get status :error))
@@ -162,67 +169,68 @@
             (unless (multibyte-string-p text)
               (setq text (decode-coding-string
                           text (or charset 'utf-8))))
-            (tessera-elfeed-x--complete
+            (tessera-x-elfeed--complete
              fetch (if (equal type "text/plain")
                        (string-trim text)
                      (tessera-x-html-text text))
              "Empty linked page")))
-      (error (tessera-elfeed-x--complete
+      (error (tessera-x-elfeed--complete
               fetch nil (error-message-string err))))))
 
-(defun tessera-elfeed-x--start-fetch (request item)
+(defun tessera-x-elfeed--start-fetch (request item)
   "Start REQUEST's transfer for ITEM, falling back on startup errors."
-  (let ((fetch (make-tessera-elfeed-x--fetch
+  (let ((fetch (make-tessera-x-elfeed--fetch
                 :request request :item item)))
-    (push fetch (tessera-elfeed-x--request-active request))
+    (push fetch (tessera-x-elfeed--request-active request))
     (condition-case err
         (let ((buffer (url-retrieve
                        (tessera-x-item-data item)
-                       #'tessera-elfeed-x--response
+                       #'tessera-x-elfeed--response
                        (list fetch) t t)))
-          (unless (tessera-elfeed-x--fetch-done fetch)
+          (unless (tessera-x-elfeed--fetch-done fetch)
             (unless buffer
               (error "Unable to start HTTP request"))
-            (setf (tessera-elfeed-x--fetch-buffer fetch) buffer
-                  (tessera-elfeed-x--fetch-timer fetch)
+            (setf (tessera-x-elfeed--fetch-buffer fetch) buffer
+                  (tessera-x-elfeed--fetch-timer fetch)
                   (run-at-time
-                   (tessera-elfeed-x--request-timeout request)
-                   nil #'tessera-elfeed-x--timeout fetch))))
-      (error (tessera-elfeed-x--complete
+                   (tessera-x-elfeed--request-timeout request)
+                   nil #'tessera-x-elfeed--timeout fetch))))
+      (error (tessera-x-elfeed--complete
               fetch nil (error-message-string err))))))
 
-(defun tessera-elfeed-x--dispatch (request)
+(defun tessera-x-elfeed--dispatch (request)
   "Start bounded transfers from REQUEST, or publish when done."
-  (let ((context (tessera-elfeed-x--request-context request)))
+  (let ((context (tessera-x-elfeed--request-context request)))
     (when (and (tessera-x-context-pending-p context)
-               (not (tessera-elfeed-x--request-dispatching request)))
-      (setf (tessera-elfeed-x--request-dispatching request) t)
+               (not (tessera-x-elfeed--request-dispatching request)))
+      (setf (tessera-x-elfeed--request-dispatching request) t)
       (unwind-protect
-          (while (and (tessera-elfeed-x--request-queue request)
+          (while (and (tessera-x-elfeed--request-queue request)
                       (< (length
-                          (tessera-elfeed-x--request-active request))
-                         (tessera-elfeed-x--request-limit request)))
-            (tessera-elfeed-x--start-fetch
-             request (pop (tessera-elfeed-x--request-queue request))))
-        (setf (tessera-elfeed-x--request-dispatching request) nil))
-      (unless (or (tessera-elfeed-x--request-active request)
-                  (tessera-elfeed-x--request-queue request))
+                          (tessera-x-elfeed--request-active request))
+                         (tessera-x-elfeed--request-limit request)))
+            (tessera-x-elfeed--start-fetch
+             request (pop (tessera-x-elfeed--request-queue request))))
+        (setf (tessera-x-elfeed--request-dispatching request) nil))
+      (unless (or (tessera-x-elfeed--request-active request)
+                  (tessera-x-elfeed--request-queue request))
         (tessera-x-context-finish context)))))
 
-(defun tessera-elfeed-x--build (entries scope local-only)
-  "Build ENTRIES in SCOPE, suppressing HTTP when LOCAL-ONLY is set."
-  (let* ((items (tessera-elfeed-x--group-feeds
-                 (mapcar #'tessera-elfeed-x--item entries)))
+(defun tessera-x-elfeed--build-context (entries scope local-only)
+  "Build a context from ENTRIES in SCOPE.
+Suppress HTTP retrieval when LOCAL-ONLY is set."
+  (let* ((items (tessera-x-elfeed--group-feeds
+                 (mapcar #'tessera-x-elfeed--item entries)))
          (context (tessera-x-context-start 'elfeed scope items))
-         (threshold tessera-elfeed-x-fetch-minimum-characters)
+         (threshold tessera-x-elfeed-fetch-minimum-characters)
          (request
-          (make-tessera-elfeed-x--request
+          (make-tessera-x-elfeed--request
            :context context
-           :limit (max 1 tessera-elfeed-x-fetch-concurrency)
-           :timeout tessera-elfeed-x-fetch-timeout
+           :limit (max 1 tessera-x-elfeed-fetch-concurrency)
+           :timeout tessera-x-elfeed-fetch-timeout
            :queue
            (unless (or local-only
-                       (not tessera-elfeed-x-fetch-linked-content))
+                       (not tessera-x-elfeed-fetch-linked-content))
              (cl-remove-if-not
               (lambda (item)
                 (and (stringp (tessera-x-item-data item))
@@ -232,13 +240,13 @@
                          (< (length (tessera-x-item-body item))
                             threshold))))
               items)))))
-    (push (apply-partially #'tessera-elfeed-x--cancel request)
+    (push (apply-partially #'tessera-x-elfeed--cancel request)
           (tessera-x-context-cleanup context))
-    (tessera-elfeed-x--dispatch request)
+    (tessera-x-elfeed--dispatch request)
     context))
 
 ;;;###autoload
-(defun tessera-elfeed-x-prepare-context ()
+(defun tessera-x-elfeed-prepare-context ()
   "Prepare marked entries, active region, or the entry at point.
 Fetch linked HTTP content according to the Elfeed context options.
 Return the request; its ready hook runs when fetching completes."
@@ -247,10 +255,10 @@ Return the request; its ready hook runs when fetching completes."
     (user-error "Run this command in Elfeed Search"))
   (let ((entries (elfeed-search-selected)))
     (unless entries (user-error "No Elfeed entries selected"))
-    (tessera-elfeed-x--build entries "Selected entries" nil)))
+    (tessera-x-elfeed--build-context entries "Selected entries" nil)))
 
 ;;;###autoload
-(defun tessera-elfeed-x-prepare-today-context ()
+(defun tessera-x-elfeed-prepare-today-context ()
   "Prepare today's local entries in the current Search or Tree scope.
 Never fetch linked pages.  In Tree, use the native filter at point."
   (interactive)
@@ -278,9 +286,9 @@ Never fetch linked pages.  In Tree, use the native filter at point."
                                    filter entry feed count now))
                          (cl-incf count)
                          (push entry entries))))
-    (tessera-elfeed-x--build
+    (tessera-x-elfeed--build-context
      entries (format "Today, local feed database; filter: %s" scope)
      t)))
 
-(provide 'tessera-elfeed-x)
-;;; tessera-elfeed-x.el ends here
+(provide 'tessera-x-elfeed)
+;;; tessera-x-elfeed.el ends here

@@ -1,0 +1,377 @@
+\input texinfo
+
+@c Copyright (C) 2026 Bingshan Chang.
+@setfilename tessera-x-gnus.info
+@settitle Tessera X Gnus
+@documentencoding UTF-8
+@set txicodequoteundirected
+@set txicodequotebacktick
+@documentlanguage en
+@set VERSION 0.1.0
+@syncodeindex vr fn
+@syncodeindex tp fn
+
+@copying
+This manual describes tessera-x-gnus version @value{VERSION}.
+
+Copyright @copyright{} 2026 Bingshan Chang.
+
+@quotation
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3 or
+any later version published by the Free Software Foundation; with no
+Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.  A
+copy of the license is included in the section entitled ``GNU Free
+Documentation License''.
+@end quotation
+@end copying
+
+@dircategory Emacs
+@direntry
+* Tessera X Gnus: (tessera-x-gnus). Experiments for Gnus.
+@end direntry
+
+@titlepage
+@title Tessera X Gnus
+@subtitle For version @value{VERSION}
+@author Bingshan Chang
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Tessera X Gnus
+
+Experimental Tessera features for Gnus.
+
+@insertcopying
+@end ifnottex
+
+@menu
+* Introduction::        What this package provides.
+* Getting Started::     Installing and using the package.
+* Selecting Articles::  Selecting articles and their replies.
+* Today Contexts::      Selecting today's locally stored content.
+* Body Retrieval::      Reading and downloading Agent bodies.
+* Using the Result::    Viewing snapshots and adding consumers.
+* Troubleshooting::     Diagnosing problems and reporting bugs.
+* Copying::             The GNU Free Documentation License.
+* Concept Index::       Topics covered in this manual.
+* Symbol Index::        Commands, options, faces, and interfaces.
+@end menu
+
+@node Introduction
+@chapter Introduction
+@cindex experimental features
+  Tessera X Gnus prepares context snapshots from Gnus articles.  A
+snapshot contains article metadata and available body text in an
+independent, read-only buffer.  It can be inspected or used by another
+application.  The @samp{x} means experimental; context preparation is
+the experiment provided by this version.
+
+  The buffer in which you start preparation is the @dfn{source buffer}.
+The @dfn{scope} is the set of articles selected for a snapshot.
+
+  The commands work without enabling @code{tessera-gnus-mode}.  They do
+not send language-model requests.  The snapshot format, size limits, and
+commands for viewing and discarding snapshots are described in
+@ref{Top,,, tessera-x, Tessera X}.
+
+@node Getting Started
+@chapter Getting Started
+
+  Before preparing a context, make the packages available to Emacs and
+configure Gnus Agent for the groups you intend to read.
+
+@menu
+* Requirements::        Required packages and loading libraries.
+* First Context::       Preparing and viewing a snapshot.
+@end menu
+
+@node Requirements
+@section Requirements
+@cindex Gnus Agent
+@cindex installation
+  This package requires Emacs 30.1, Tessera 0.1.0, and Tessera X 0.1.0
+or later.  Gnus is included with Emacs.  Tessera also requires Alert 1.2
+or later.  For a source checkout, add @file{lisp/tessera/},
+@file{lisp/tessera-x/}, and @file{lisp/tessera-x-gnus/} to
+@code{load-path}.  Then load the library:
+
+@lisp
+(require 'tessera-x-gnus)
+@end lisp
+
+  All context construction requires @code{gnus-agent} to be enabled.
+Groups must have Agent data for local retrieval; downloading missing
+bodies additionally requires an agentized method.  Requiring this
+library does not configure those facilities.  For Agent setup, see
+@ref{Gnus Unplugged,,, gnus, The Gnus Manual}.
+
+  Use @kbd{M-x customize-group @key{RET} tessera-gnus @key{RET}} to
+configure the options documented here.  You can also load
+@code{tessera-gnus} and set them in your initialization file before
+loading the snapshot commands.
+
+@node First Context
+@section Preparing a First Context
+
+  In a Gnus Summary buffer, move point to an article and run @kbd{M-x
+tessera-x-gnus-prepare-context}.  By default, a missing body may be
+downloaded into the Agent.  To restrict preparation to existing Agent
+bodies, set the following before invoking the command:
+
+@lisp
+(require 'tessera-gnus)
+(setq tessera-x-gnus-body-policy 'local-only)
+@end lisp
+
+  After completion, run @kbd{M-x tessera-x-show-context} in the Summary
+buffer to inspect the result.  This configuration restricts body
+retrieval; it does not make an incomplete Agent cache complete.
+@xref{Body Retrieval}.
+
+@node Selecting Articles
+@chapter Selecting Articles
+
+  Selection commands include articles hidden by thread folding.  They
+retain Gnus marks and article read state.
+
+@menu
+* Work Articles::       Region, process marks, or article at point.
+* Current Subthread::   The current message and its descendants.
+@end menu
+
+@node Work Articles
+@section Work Articles
+@cindex selection
+@deffn Command tessera-x-gnus-prepare-context
+Prepare Gnus work articles from the current Summary buffer and return a
+@code{tessera-x-context}.  Use articles in the active region, if any;
+otherwise use articles with process marks, or the article at point when
+there are no such marks.  Signal a user error outside Summary or when no
+articles are selected.
+@end deffn
+
+  Retrieval and publication run synchronously.  The returned request can
+be ready or failed.  Selecting articles does not remove process marks,
+open articles, or mark them read.  The command's network behavior is
+controlled by @code{tessera-x-gnus-body-policy}.
+
+@node Current Subthread
+@section The Current Article and Its Replies
+@cindex descendants
+@cindex subthreads
+@deffn Command tessera-x-gnus-prepare-subthread-context &optional @
+  local-index
+Prepare the article at point and its descendants.  With a non-@code{nil}
+@var{local-index}, or interactively with a prefix argument such as
+@kbd{C-u}, supplement loaded records from the current group's Agent
+overview.  Return a context object.  Signal a user error outside Summary
+or when there is no current article.
+@end deffn
+
+  The ordinary scope is the current Summary results, including folded
+articles.  A descendant is a reply to the current article, or a reply to
+one of its replies.  When @code{gnus-show-threads} is non-@code{nil},
+Tessera follows Gnus's thread structure together with reply references
+in article headers.  With threading disabled, it uses those references
+alone.  Matching subjects do not by themselves establish a relationship.
+
+  This command selects descendants, not every ancestor or sibling in the
+conversation.  Its retrieval policy is the same as for work articles.
+
+@cindex local index expansion
+@cindex Agent overview
+@defopt tessera-x-gnus-subthread-scope
+The default subthread scope, initially @code{results}.  The alternative
+@code{local-index} also consults the current group's Agent overview.  A
+non-@code{nil} command argument requests expansion regardless of this
+option.  There is no prefix argument for forcing @code{results} when the
+option is @code{local-index}.
+@end defopt
+
+  The Agent overview is its locally stored list of article headers.
+Expansion uses that list to find additional descendants in the current
+group, retaining selected articles already in Summary without adding
+duplicates.  It can include articles outside a Summary filter.  Missing
+or stale overview data makes the selection incomplete.
+
+  This operation does not search a remote server for unknown
+descendants.  It expands the selection locally; subsequent body
+retrieval may still download known articles when the body policy permits
+it.
+
+@node Today Contexts
+@chapter Today Contexts
+
+  The today command reads locally indexed articles for the current
+calendar day.  Its scope comes from the Gnus buffer in which it is run.
+
+@deffn Command tessera-x-gnus-prepare-today-context
+Prepare today's local Agent articles in the native scope and return a
+context object.  In Summary, use the current group.  In a Group buffer,
+use the group or topic at point.  Signal a user error in unsupported
+buffers or on a Group line that identifies neither a group nor a topic.
+@end deffn
+
+  The source buffer determines which groups supply the local records:
+
+@table @asis
+@item Summary buffer
+@cindex today, Summary scope
+The command reads the current group's Agent overview rather than
+restricting itself to the loaded or visible Summary rows.
+
+@item Group buffer
+@cindex today, group and topic scopes
+@cindex topics
+A group line selects that one group.  A topic line selects the topic's
+groups and its descendant topics' groups.  Duplicate groups are read
+only once.
+@end table
+
+  Groups without an agentized method or a readable Agent overview
+contribute no records.  Date selection includes local midnight and
+excludes the following midnight.  Records without a usable date are
+excluded.  The local overview records are sorted by date before
+conversation grouping.
+
+  A group or topic with no matching records produces a valid empty
+snapshot.  An invalid line at point is a selection error instead.
+
+@cindex offline retrieval
+  The today command never downloads bodies or overview data, regardless
+of @code{tessera-x-gnus-body-policy}.  It reads available Agent bodies;
+missing bodies retain metadata and a content note.  It does not
+synchronize the server or broaden the local index to fill gaps.
+
+  The local day's boundaries are computed when the command runs.
+@xref{Local Day Boundaries,,, tessera-x, Tessera X}.
+
+@node Body Retrieval
+@chapter Body Retrieval
+
+  The Agent is the source of article bodies for all three commands.
+Only selection and subthread preparation can request missing bodies.
+
+@menu
+* Download Policy::     Agent downloads and unavailable bodies.
+* Metadata and Text: Metadata and Body Text.  Article headers and extracted content.
+@end menu
+
+@node Download Policy
+@section Download Policy
+@cindex body policy
+@defopt tessera-x-gnus-body-policy
+How work-article and subthread commands obtain bodies.  The initial
+value @code{download} uses native synchronous Agent fetching for bodies
+that are absent or empty.  The value @code{local-only} reads only
+existing Agent bodies.  Today preparation always uses local-only
+retrieval.
+@end defopt
+
+  Downloads are grouped by newsgroup.  When downloads make bodies
+available in the current Summary group, native availability marks are
+updated.  Read marks and process marks are retained.  Downloading does
+not display the articles.  Emacs waits for Agent downloads to finish
+before the command returns.
+
+  Both Gnus options are ordinary user options.  A buffer-local binding
+can restrict a particular source; use Customize or configuration for
+global defaults.  Changes affect subsequent commands, not existing
+snapshot buffers.
+
+@cindex missing bodies
+  An inaccessible Agent body becomes @samp{Body absent from local Agent}
+unless a more specific download failure has already been recorded.
+Failures to fetch a group's bodies are reported as content notes so that
+other bodies can remain usable.  Existing metadata is retained.
+
+  A valid snapshot may contain articles with header information but no
+body text.  For common MIME extraction and budget notices, see
+@ref{Missing Content,,, tessera-x, Tessera X}.
+
+@node Metadata and Body Text
+@section Metadata and Body Text
+@cindex message metadata
+  Items retain the full subject, date, From, available To and Cc fields,
+Message-ID, References, and newsgroup provenance.  Labels combine
+available registry marks, Gmail labels, and Keywords.  Reading raw mail
+can add or refine address and label header metadata.
+
+  Native inferred parents are printed separately from References.
+Connected conversations are grouped without merging unrelated articles
+that merely share a subject.  MIME extraction keeps quotes and
+signatures, lists attachment names and types, and does not verify or
+decrypt security parts.  @xref{Mail Bodies,,, tessera-x, Tessera X}.
+
+@node Using the Result
+@chapter Using the Result
+@cindex snapshot completion
+  A successful command publishes a hidden snapshot buffer and invokes
+@code{tessera-x-context-ready-hook} in the source buffer.  Preparation
+does not select the result window.  The source's
+@code{tessera-x-current-context} refers to its latest successful result.
+For showing, discarding, and retaining old snapshots, see @ref{Snapshot
+Lifecycle,,, tessera-x, Tessera X}.
+
+  No key bindings are installed by this experimental package.  Commands
+can be invoked with @kbd{M-x}; bindings and consumers belong in user
+configuration.  For the ready hook and a consumer example, see
+@ref{Consuming Snapshots,,, tessera-x, Tessera X}.
+
+@node Troubleshooting
+@chapter Troubleshooting
+
+  Check the Agent configuration and the selected groups or articles when
+preparation fails or omits expected content.
+
+@menu
+* Agent Setup Problems::  Enabling and configuring Gnus Agent.
+* Incomplete Scopes::     Articles missing from the local overview.
+* Reporting Bugs::        Information to include in a bug report.
+@end menu
+
+@node Agent Setup Problems
+@section Agent Setup Problems
+@cindex Agent setup errors
+  If preparation reports that the Agent is not enabled, configure Gnus
+Agent before retrying.  If a download note says that the method is not
+agentized, verify that group's native Agent configuration.  Selecting
+@code{local-only} prevents fetching but cannot supply absent data.
+
+@node Incomplete Scopes
+@section Incomplete Scopes
+
+  If replies are missing, distinguish the loaded-result scope from the
+Agent overview scope.  Expansion cannot find records absent from that
+local overview.  If today's result is empty, check the selected group or
+topic, local dates, and overview availability before changing the body
+policy; today ignores that policy's download setting.
+
+@node Reporting Bugs
+@section Reporting Bugs
+
+  For failures involving the shared result hook or buffer lifetime, see
+@ref{Troubleshooting,,, tessera-x, Tessera X}.  Report backend problems
+at @url{https://github.com/brsvh/emacs-tessera/issues} with the Emacs
+and package versions, command, Agent policy, and a minimal reproduction.
+
+@node Copying
+@appendix GNU Free Documentation License
+@include fdl.texi
+
+@node Concept Index
+@unnumbered Concept Index
+@printindex cp
+
+@node Symbol Index
+@unnumbered Symbol Index
+@printindex fn
+
+@bye

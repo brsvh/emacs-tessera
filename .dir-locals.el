@@ -1,23 +1,21 @@
 ;;; Directory Local Variables            -*- no-byte-compile: t -*-
 ;;; For more information see (info "(emacs) Directory Variables")
 
-((auto-mode-alist . (("\\.el\\.in\\'" . emacs-lisp-mode)))
- (emacs-lisp-mode
-  . ((eval
-      . (progn
-          (let* ((c-load-path
-                  (copy-sequence
-                   elisp-flymake-byte-compile-load-path))
-                 (e-load-path (copy-sequence load-path))
-                 (project-directory
-                  (locate-dominating-file default-directory
-                                          ".dir-locals.el"))
-                 (lisp-path
-                  (expand-file-name "lisp/" project-directory)))
-            (setq-local load-path e-load-path
-                        elisp-flymake-byte-compile-load-path
-                        c-load-path)
-            (add-to-list 'elisp-flymake-byte-compile-load-path
-                         lisp-path)
-            (add-to-list 'load-path lisp-path))))))
+((emacs-lisp-mode
+  .
+  ((eval
+    .
+    (progn
+      (let* ((pdir (locate-dominating-file default-directory ".dir-locals.el"))
+             (ldir (expand-file-name "lisp/" pdir))
+             (cpath (copy-sequence elisp-flymake-byte-compile-load-path))
+             (rpath (copy-sequence load-path))
+             (paths (seq-filter #'file-directory-p
+                                (directory-files ldir t "\\`[^.]"))))
+        (setq-local elisp-flymake-byte-compile-load-path cpath
+                    load-path rpath)
+        (dolist (path paths)
+          (add-to-list 'elisp-flymake-byte-compile-load-path path)
+          (add-to-list 'load-path path)))))))
+
  (nil . ((sentence-end-double-space . t))))

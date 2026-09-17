@@ -1,16 +1,17 @@
-;;; tessera-x-tests.el --- Context regressions -*- lexical-binding: t; -*-
+;;; tessera-x-tests.el --- Experimental feature regressions -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; Snapshot ownership, budgets, MIME decoding and backend scope.
+;; Context snapshot ownership, budgets, MIME decoding and scope.
+;; Context snapshots are one feature of the experimental packages.
 
 ;;; Code:
 
 (require 'ert)
 (require 'tessera-x)
-(require 'tessera-elfeed-x)
-(require 'tessera-mu4e-x)
-(require 'tessera-gnus-x)
+(require 'tessera-x-elfeed)
+(require 'tessera-x-mu4e)
+(require 'tessera-x-gnus)
 (require 'tessera-gnus-test-support)
 
 (defun tessera-x-tests--item (id &optional references)
@@ -220,14 +221,14 @@
           (overlay-put overlay 'invisible t))
         (puthash 2 '(flag . nil) mu4e--mark-map)
         (puthash 4 '(flag . nil) mu4e--mark-map)
-        (let ((all (tessera-mu4e-x--items))
-              (factory (symbol-function 'tessera-mu4e-x--item))
+        (let ((all (tessera-x-mu4e--items))
+              (factory (symbol-function 'tessera-x-mu4e--item))
               (count 0) items)
-          (cl-letf (((symbol-function 'tessera-mu4e-x--item)
+          (cl-letf (((symbol-function 'tessera-x-mu4e--item)
                      (lambda (message)
                        (cl-incf count)
                        (funcall factory message))))
-            (setq items (tessera-mu4e-x--items t)))
+            (setq items (tessera-x-mu4e--items t)))
           (should (= (length all) 5))
           (should (= count 2))
           (should (equal (mapcar #'tessera-x-item-id items) '(2 4)))
@@ -239,13 +240,13 @@
         (should (= (point) (point-min)))
         (clrhash mu4e--mark-map)
         (should (equal (mapcar #'tessera-x-item-id
-                               (tessera-mu4e-x--items t)) '(1)))
+                               (tessera-x-mu4e--items t)) '(1)))
         (let ((transient-mark-mode t))
           (forward-line 2)
           (push-mark (line-end-position 2) t t)
           (let ((before (point)) (mark-before (mark)))
             (should (equal (mapcar #'tessera-x-item-id
-                                   (tessera-mu4e-x--items t)) '(3 4)))
+                                   (tessera-x-mu4e--items t)) '(3 4)))
             (should (= (point) before))
             (should (= (mark) mark-before))))))))
 
@@ -253,7 +254,7 @@
   (tessera-x-tests--with-snapshots
     (let* ((directory (make-temp-file "tessera-agent-" t))
            (gnus-agent t)
-           (tessera-gnus-x-body-policy 'download)
+           (tessera-x-gnus-body-policy 'download)
            (item (tessera-x-tests--item "agent"))
            (missing (tessera-x-tests--item "missing"))
            fetched refreshed)
@@ -261,7 +262,7 @@
             (tessera-x-item-id missing) '("group" . 2))
       (unwind-protect
           (cl-letf
-              (((symbol-function 'tessera-gnus-x--agent-file)
+              (((symbol-function 'tessera-x-gnus--agent-file)
                 (lambda (_group name)
                   (expand-file-name name directory)))
                ((symbol-function 'gnus-find-method-for-group)
@@ -284,7 +285,7 @@
                   (insert-file-contents-literally
                    (expand-file-name "1" directory)) t)))
             (with-temp-buffer
-              (let ((context (tessera-gnus-x--build
+              (let ((context (tessera-x-gnus--build-context
                               (list item) "Today" t)))
                 (should-not fetched)
                 (should (eq (tessera-x-context-state context) 'ready))
@@ -295,7 +296,7 @@
               (setq-local gnus-newsgroup-name "group")
               (tessera-tests--gnus-rows '(0 1))
               (setq-local gnus-newsgroup-undownloaded '(1 2))
-              (tessera-gnus-x--build
+              (tessera-x-gnus--build-context
                (list item missing) "Selected" nil)
               (should (equal fetched '(1 2)))
               (should (equal refreshed '(1)))
@@ -318,16 +319,16 @@
     (tessera-tests--gnus-rows '(0 1 0 1 2))
     (setq-local gnus-show-threads t)
     (setq-local gnus-newsgroup-processable '(1 4))
-    (let ((all (tessera-gnus-x--items))
-          (factory (symbol-function 'tessera-gnus-x--item))
+    (let ((all (tessera-x-gnus--items))
+          (factory (symbol-function 'tessera-x-gnus--item))
           (count 0) items)
       (cl-letf (((symbol-function 'gnus-summary-save-process-mark)
                  #'ignore)
-                ((symbol-function 'tessera-gnus-x--item)
+                ((symbol-function 'tessera-x-gnus--item)
                  (lambda (header group)
                    (cl-incf count)
                    (funcall factory header group))))
-        (setq items (tessera-gnus-x--items t)))
+        (setq items (tessera-x-gnus--items t)))
       (should (= count 2))
       (should (equal (mapcar (lambda (item)
                                (cdr (tessera-x-item-id item)))
@@ -346,19 +347,19 @@
       (let* ((item (tessera-x-tests--item "feed"))
              (context (tessera-x-context-start 'elfeed "test"
                                                (list item)))
-             (request (make-tessera-elfeed-x--request
+             (request (make-tessera-x-elfeed--request
                        :context context))
-             (fetch (make-tessera-elfeed-x--fetch
+             (fetch (make-tessera-x-elfeed--fetch
                      :request request :item item))
              (calls 0)
              (tessera-x-context-ready-hook
               (list (lambda (_) (cl-incf calls)))))
-        (setf (tessera-elfeed-x--request-active request) (list fetch))
-        (tessera-elfeed-x--timeout fetch)
+        (setf (tessera-x-elfeed--request-active request) (list fetch))
+        (tessera-x-elfeed--timeout fetch)
         (should (= calls 1))
         (should (string-match-p "HTTP timeout"
                                 (tessera-x-item-note item)))
-        (tessera-elfeed-x--complete fetch "late response" nil)
+        (tessera-x-elfeed--complete fetch "late response" nil)
         (should (= calls 1))
         (should (= (length (tessera-x-item-body item)) 1000))))))
 
@@ -369,14 +370,14 @@
         (let* ((item (tessera-x-tests--item "redirect"))
                (context (tessera-x-context-start
                          'elfeed "redirect" (list item)))
-               (request (make-tessera-elfeed-x--request
+               (request (make-tessera-x-elfeed--request
                          :context context))
                (buffers (cl-loop repeat 3 collect
                                  (generate-new-buffer " *Redirect*")))
                (process (make-pipe-process
                          :name "tessera-redirect" :noquery t
                          :buffer (car (last buffers))))
-               (fetch (make-tessera-elfeed-x--fetch
+               (fetch (make-tessera-x-elfeed--fetch
                        :request request :item item
                        :buffer (car buffers))))
           (unwind-protect
@@ -384,21 +385,21 @@
                 (cl-loop for (buffer next) on buffers
                          do (with-current-buffer buffer
                               (setq-local url-redirect-buffer next)))
-                (setf (tessera-elfeed-x--request-active request)
+                (setf (tessera-x-elfeed--request-active request)
                       (list fetch))
                 (push (apply-partially
-                       #'tessera-elfeed-x--cancel request)
+                       #'tessera-x-elfeed--cancel request)
                       (tessera-x-context-cleanup context))
                 (if cancel
                     (tessera-x-cancel-context)
-                  (tessera-elfeed-x--timeout fetch))
+                  (tessera-x-elfeed--timeout fetch))
                 (should (eq (tessera-x-context-state context)
                             (if cancel 'cancelled 'ready)))
-                (should-not (tessera-elfeed-x--request-active
+                (should-not (tessera-x-elfeed--request-active
                              request))
                 (should-not (cl-some #'buffer-live-p buffers))
                 (should-not (process-live-p process))
-                (tessera-elfeed-x--stop-fetch fetch))
+                (tessera-x-elfeed--stop-fetch fetch))
             (when (process-live-p process) (delete-process process))
             (dolist (buffer buffers)
               (when (buffer-live-p buffer)
@@ -411,12 +412,12 @@
                              (tessera-x-tests--item "feed")))
              (context (tessera-x-context-start
                        'elfeed "failure" items))
-             (request (make-tessera-elfeed-x--request
+             (request (make-tessera-x-elfeed--request
                        :context context
                        :queue (copy-sequence items))))
         (cl-letf (((symbol-function 'url-retrieve)
                    (lambda (&rest _) (error "Offline"))))
-          (tessera-elfeed-x--dispatch request))
+          (tessera-x-elfeed--dispatch request))
         (should (eq (tessera-x-context-state context) 'ready))
         (should (string-match-p
                  "Offline" (tessera-x-item-note (car items))))))))
@@ -434,15 +435,15 @@
           (mu4e-headers-mode)
           (setq-local list-buffers-directory
                       "maildir:/account-b/Inbox")
-          (should (equal (tessera-mu4e-x--today-query)
+          (should (equal (tessera-x-mu4e--today-query)
                          "maildir:/account-b/Inbox")))
-        (should (equal (tessera-mu4e-x--today-query)
+        (should (equal (tessera-x-mu4e--today-query)
                        "maildir:/account-a/Inbox"))
         (setq-local list-buffers-directory nil)
-        (should-error (tessera-mu4e-x--today-query)
+        (should-error (tessera-x-mu4e--today-query)
                       :type 'user-error)
         (setq-local list-buffers-directory "")
-        (should (equal (tessera-mu4e-x--today-query) ""))))))
+        (should (equal (tessera-x-mu4e--today-query) ""))))))
 
 (ert-deftest tessera-x-mu-query-uses-muhome-and-path-identities ()
   (tessera-x-tests--with-snapshots
@@ -476,7 +477,7 @@
               (goto-char 4)
               (let ((context (tessera-x-context-start
                               'mu4e "query test" nil)))
-                (tessera-mu4e-x--query context "date:today..now")
+                (tessera-x-mu4e--query context "date:today..now")
                 (let ((deadline (+ (float-time) 5)))
                   (while (and (tessera-x-context-pending-p context)
                               (< (float-time) deadline))
@@ -505,7 +506,7 @@
                         (list :path message-file)))
                 (setf (tessera-x-item-id anchor) "duplicate"
                       (tessera-x-item-parent child) "root")
-                (tessera-mu4e-x--query context "msgid:root" anchor)
+                (tessera-x-mu4e--query context "msgid:root" anchor)
                 (let ((deadline (+ (float-time) 5)))
                   (while (and (tessera-x-context-pending-p context)
                               (< (float-time) deadline))
@@ -537,12 +538,12 @@
       (let* ((item (tessera-x-tests--item "feed"))
              (context (tessera-x-context-start
                        'elfeed "http parser" (list item)))
-             (request (make-tessera-elfeed-x--request
+             (request (make-tessera-x-elfeed--request
                        :context context))
-             (fetch (make-tessera-elfeed-x--fetch
+             (fetch (make-tessera-x-elfeed--fetch
                      :request request :item item))
              (response (generate-new-buffer " *HTTP fixture*")))
-        (setf (tessera-elfeed-x--request-active request) (list fetch))
+        (setf (tessera-x-elfeed--request-active request) (list fetch))
         (with-current-buffer response
           (set-buffer-multibyte nil)
           (insert "HTTP/1.1 200 OK\r\n"
@@ -552,7 +553,7 @@
           (setq-local url-http-end-of-headers (point-marker))
           (insert (encode-coding-string
                    "<p>café fetched body</p>" 'iso-latin-1))
-          (tessera-elfeed-x--response nil fetch))
+          (tessera-x-elfeed--response nil fetch))
         (should (eq (tessera-x-context-state context) 'ready))
         (should-not (buffer-live-p response))
         (should (equal (tessera-x-item-body item)
@@ -588,7 +589,7 @@
         (setq-local elfeed-search-filter "+keep")
         (cl-letf (((symbol-function 'url-retrieve)
                    (lambda (&rest _) (ert-fail "Unexpected HTTP"))))
-          (let ((context (tessera-elfeed-x-prepare-today-context)))
+          (let ((context (tessera-x-elfeed-prepare-today-context)))
             (should (eq (tessera-x-context-state context) 'ready))
             (should (equal (mapcar #'tessera-x-item-id
                                    (tessera-x-context-items context))
@@ -615,13 +616,13 @@
                (format "<%d@test.invalid>" number)
                "<root@test.invalid>" 100 5 nil
                '((Keywords . "design,review"))))))
-          (cl-letf (((symbol-function 'tessera-gnus-x--agent-file)
+          (cl-letf (((symbol-function 'tessera-x-gnus--agent-file)
                      (lambda (&rest _) file))
                     ((symbol-function 'gnus-find-method-for-group)
                      (lambda (_) '(nnmaildir "fixture")))
                     ((symbol-function 'gnus-agent-method-p)
                      (lambda (_) t)))
-            (let ((items (tessera-gnus-x--overview
+            (let ((items (tessera-x-gnus--overview
                           '("group") bounds)))
               (should (= (length items) 1))
               (should (equal (tessera-x-item-id (car items))

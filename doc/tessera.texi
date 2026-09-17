@@ -1,0 +1,1776 @@
+\input texinfo
+
+@c Copyright (C) 2026 Bingshan Chang.
+@setfilename tessera.info
+@settitle Tessera
+@documentencoding UTF-8
+@set txicodequoteundirected
+@set txicodequotebacktick
+@documentlanguage en
+@set VERSION 0.1.0
+@syncodeindex vr fn
+@syncodeindex tp fn
+
+@copying
+This manual describes tessera version @value{VERSION}.
+
+Copyright @copyright{} 2026 Bingshan Chang.
+
+@quotation
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3 or
+any later version published by the Free Software Foundation; with no
+Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.  A
+copy of the license is included in the section entitled ``GNU Free
+Documentation License''.
+@end quotation
+@end copying
+
+@dircategory Emacs
+@direntry
+* Tessera: (tessera). Layouts for Gnus, mu4e, and Elfeed in Emacs.
+@end direntry
+
+@titlepage
+@title Tessera
+@subtitle For version @value{VERSION}
+@author Bingshan Chang
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Tessera
+
+Layouts for Gnus, mu4e, and Elfeed in Emacs.
+
+@insertcopying
+@end ifnottex
+
+@menu
+* Introduction::          What this package provides.
+* Getting Started::       Installing and using the package.
+* Entry Layouts::         Arranging entries and adjusting spacing.
+* Glyph Appearance::      Choosing symbols, colors, and sizes.
+* Native Threads::        Displaying and folding message threads.
+* Gnus::                  Customizing Gnus Summary rows.
+* mu4e::                  Customizing mu4e Headers rows.
+* Elfeed::                Customizing Elfeed Search rows.
+* Refreshing: Refreshing the Display.  Applying appearance changes.
+* Entry Backends: Writing an Entry Backend.  Adding a display adapter in Lisp.
+* Thread Interfaces: Thread Backend Interfaces.  Adding thread display to an adapter.
+* Native Interfaces: Native Adapter Interfaces.  Format callbacks and fold observation.
+* Troubleshooting::       Diagnosing problems and reporting bugs.
+* Copying::               The GNU Free Documentation License.
+* Concept Index::         Topics covered in this manual.
+* Symbol Index::          Commands, options, faces, and interfaces.
+@end menu
+
+@node Introduction
+@chapter Introduction
+@cindex Tessera
+  Tessera changes how Gnus summaries, mu4e headers, and Elfeed search
+results are displayed in Emacs.  It combines subjects, contacts, dates,
+labels, and state glyphs in layouts that share spacing and highlighting
+rules.  You continue to use Gnus, mu4e, or Elfeed commands for
+searching, marking, reading, navigating, and folding threads.
+
+  An @dfn{adapter} is the Tessera integration for one of these
+applications.  In this manual, @dfn{native} refers to the application's
+own commands, settings, and message information.
+
+  This manual first explains how to enable and customize the existing
+adapters.  Later chapters describe the layout engine for Lisp programs
+that supply their own entries.  Knowledge of ordinary Emacs commands and
+the selected mail or feed application is assumed.
+
+@menu
+* Package Boundaries::  Core and experimental packages.
+* Display Concepts::    Entries, segments, glyphs, and slots.
+@end menu
+
+@node Package Boundaries
+@section Package Boundaries
+
+  The @code{tessera} package contains the common engine and three native
+adapters.  Requiring @code{tessera-gnus}, @code{tessera-mu4e}, or
+@code{tessera-elfeed} exposes that adapter's public settings without
+enabling it.  The corresponding global minor mode activates its view.
+
+  Packages named @code{tessera-x} and @samp{tessera-x-*} provide
+experimental features.  Their @samp{x} means experimental.  The current
+features include context snapshots: buffers containing selected message
+or feed text for inspection or use by another application.  Preparing
+these snapshots does not require a Tessera display mode.  For them, see
+@ref{Top,,, tessera-x, Tessera X}, @ref{Top,,, tessera-x-gnus, Tessera X
+Gnus}, @ref{Top,,, tessera-x-mu4e, Tessera X mu4e}, and @ref{Top,,,
+tessera-x-elfeed, Tessera X Elfeed}.
+
+@node Display Concepts
+@section Display Concepts
+@cindex entries
+@cindex segments
+@cindex glyph slots
+  An @dfn{entry} is one native record, such as a message header or feed
+item.  It occupies one logical buffer line even when the layout shows
+two visual lines.  A @dfn{segment} is a piece of text, such as the
+subject.  A @dfn{glyph} is a state symbol with alternative visual forms.
+A @dfn{glyph slot} reserves a fixed width and selects at most one glyph
+variant for an entry.
+
+  Padding and alignment affect the display without adding blank message
+rows.  Native commands still select and operate on the underlying
+message or feed entry.
+
+@node Getting Started
+@chapter Getting Started
+
+  Install the core package and the native application you use, then
+enable its adapter.  You can enable the adapters independently.
+
+@menu
+* Requirements::         Required packages and loading libraries.
+* Enabling Adapters::    Enabling modes and restoring native views.
+* Customization Scope::  Shared and buffer-local settings.
+@end menu
+
+@node Requirements
+@section Requirements
+@cindex installation
+  Tessera 0.1.0 declares dependencies on Emacs 30.1 or later and Alert
+1.2 or later.  Gnus is bundled with Emacs.  Install mu4e or Elfeed
+separately when using those adapters.  They are optional native
+backends, not requirements for loading the common engine.
+
+  For a source checkout, put @file{lisp/tessera/} on @code{load-path};
+adding only @file{lisp/} is insufficient.  Replace the path below with
+your checkout:
+
+@lisp
+(add-to-list 'load-path "/path/to/emacs-tessera/lisp/tessera/")
+@end lisp
+
+  A package installation normally arranges @code{load-path} and
+autoloads.
+
+@node Enabling Adapters
+@section Enabling and Disabling Adapters
+
+  Load the library and enable its mode in your initialization file.  For
+example:
+
+@lisp
+(require 'tessera-gnus)
+(tessera-gnus-mode 1)
+@end lisp
+
+@noindent
+Use @code{tessera-mu4e} and @code{tessera-mu4e-mode}, or
+@code{tessera-elfeed} and @code{tessera-elfeed-mode}, in the
+corresponding configuration for another backend.  This does not start
+Gnus, mu4e, or Elfeed, or configure accounts and feeds.
+
+  The modes apply to existing matching buffers and install hooks for
+future ones.  Each adapter initially selects @code{two-line} locally.
+Native Gnus or mu4e threading can then select a thread layout instead.
+@xref{Choosing a Layout}.
+
+@cindex restoring native settings
+  Invoke the mode command again to toggle it interactively, or call it
+with @code{-1} in Lisp.  Disabling restores the native settings saved at
+activation, removes the adapter's hooks and decorations, and restores
+the native presentation.  A previously local setting is restored as a
+local setting; an inherited setting returns to its default binding.
+
+  Tessera temporarily replaces whole-line highlighting with its own
+entry highlight in affected buffers.  The prior @code{hl-line-mode}
+state is restored when the adapter is disabled.  Message marks and read
+state are retained.
+
+@node Customization Scope
+@section Customization Scope
+@cindex customization
+  Use @kbd{M-x customize-group @key{RET} tessera @key{RET}} for shared
+options.  The backend groups are @code{tessera-gnus},
+@code{tessera-mu4e}, and @code{tessera-elfeed}.  Faces are
+theme-sensitive and can be customized through the usual Emacs face
+interface.
+
+  Shared layout options are ordinary user options; a buffer-local
+binding can specialize one view.  Set a local layout after the adapter
+has activated, because activation installs its initial local layout.  An
+already rendered Elfeed buffer needs an update to reflect shared option
+changes; Gnus and mu4e track the appearance settings during their normal
+refresh cycle.  @xref{Refreshing the Display}.
+
+@node Entry Layouts
+@chapter Entry Layouts
+
+  The built-in flat layouts arrange the same native records in one or
+two visual lines.  They do not change result membership or read state.
+
+@menu
+* Choosing a Layout::   Selecting one-line or two-line entries.
+* Entry Spacing::       Margins, gaps, and padding.
+* Narrow Windows::      Shrinking or omitting entry fields.
+* Entry Highlighting: Highlighting and Hover.  Highlighting point and mouse targets.
+@end menu
+
+@node Choosing a Layout
+@section Choosing a Layout
+@cindex layout selection
+@defopt tessera-entry-layout
+The symbolic identifier of the ordinary entry layout.  Its global
+initial value is @code{single-line}; built-in adapters also register
+@code{two-line}.  Each adapter sets a local value of @code{two-line}
+when first enabled in a buffer.  An unregistered layout name is an error
+when that backend renders an ordinary entry.
+@end defopt
+
+  For an already active buffer, evaluate the following with @kbd{M-:} to
+select the compact flat layout:
+
+@lisp
+(setq-local tessera-entry-layout 'single-line)
+@end lisp
+
+  Gnus and mu4e use their thread layout whenever their native threading
+is enabled, regardless of this option.  Turn native threading off when
+choosing a flat layout.  There is no additional Tessera thread toggle.
+
+@node Entry Spacing
+@section Entry Spacing
+@cindex padding, horizontal
+  Entry spacing controls the margins, separation between fields, and
+padding above and below the content.  Horizontal and vertical dimensions
+use different units.
+
+  Horizontal dimensions are measured in character columns.  They are
+nonnegative integers.  The outside gap separates the entry surface from
+the window edge; inner padding belongs inside the surface.
+
+@defopt tessera-entry-safe-gap
+Outside gap on each side of an entry, initially @code{1}.
+@end defopt
+
+@defopt tessera-entry-left-padding
+Padding inside the left edge, initially @code{1}.
+@end defopt
+
+@defopt tessera-entry-right-padding
+Padding inside the right edge, initially @code{1}.
+@end defopt
+
+@defopt tessera-entry-segment-gap
+Gap between adjacent visible text segments, initially @code{1}.  It also
+separates leading slots from text and affects thread indentation.
+@end defopt
+
+@defopt tessera-entry-flex-gap-min-width
+Minimum separation between left and right content, initially @code{1}.
+Right content is aligned to the window edge within the right padding and
+outside gap.
+@end defopt
+
+@cindex padding, vertical
+  Vertical padding is measured in normal line heights and accepts
+nonnegative numbers, including fractions.  It is displayed as decoration
+rather than inserted blank logical lines.
+
+@defopt tessera-entry-top-padding
+Height above an ordinary entry, initially @code{0.2}.
+@end defopt
+
+@defopt tessera-entry-bottom-padding
+Height below an ordinary entry, initially @code{0.2}.
+@end defopt
+
+  Thread entries use separate outer and inner padding values.
+@xref{Thread Spacing}.
+
+@node Narrow Windows
+@section Narrow Windows
+@cindex truncation
+  Layouts assign different width policies to their fields.  Subjects and
+other flexible fields can shrink; optional labels or contacts can be
+omitted; dates and fixed glyph channels retain their roles.  Hover help
+can retain information that the visible text abbreviates.
+
+  The renderer does not guarantee that arbitrary fixed fields fit an
+arbitrarily small window.  Width policies are described for extension
+authors in @ref{Segment Widths}.  Deep native threads have an additional
+clipping rule that preserves the positions of the visible tree columns.
+@xref{Deep Threads}.
+
+@node Highlighting and Hover
+@section Highlighting and Hover
+@cindex point highlight
+@cindex mouse hover
+@defvr Face tessera-entry-current-face
+The face for the entry containing point.  It inherits @code{hl-line}
+without extending its face role across unrelated content.
+@end defvr
+
+@defvr Face tessera-entry-hover-face
+The shared hover face, inheriting @code{highlight}.
+@end defvr
+
+  The point highlight preserves native content faces and interactions.
+For a row that also displays a thread heading, it applies only to the
+message line, leaving the heading in its ordinary faces.  In an ordinary
+two-line entry, both content lines are highlighted.
+
+  Hover is per element.  Decorative gaps, margins, empty slots,
+alignment padding, and blank tree indentation do not acquire a hover
+highlight.  Spaces within a subject or contact remain part of that
+content's hover range.  Semantic glyph foregrounds are retained on
+hover.
+
+@node Glyph Appearance
+@chapter Glyph Appearance
+
+  Glyphs provide compact state information.  Their meaning is
+independent of the visual style and of the theme's particular colors.
+
+@menu
+* Glyph Styles::        ASCII, Unicode, and Nerd Icons forms.
+* Glyph Colors::        Color settings and semantic faces.
+* Glyph Widths::        Fixed slots and font scaling.
+@end menu
+
+@node Glyph Styles
+@section Glyph Styles
+
+@defopt tessera-glyph-style
+Preferred glyph style, initially @code{unicode}.  The allowed values are
+@code{ascii}, @code{unicode}, and @code{nerd-icons}.
+@end defopt
+
+  @code{ascii} uses each glyph's ASCII form.  @code{unicode} uses its
+Unicode form on a graphical frame when all characters can be displayed,
+and otherwise falls back to ASCII.  @code{nerd-icons} first tries the
+optional Nerd Icons library and suitable glyph, then Unicode, then
+ASCII.  Install the optional library and fonts separately to use it.
+Terminal frames use the ASCII fallback for these glyph objects.
+
+  Thread connectors have their own simple choice: ASCII connectors when
+the option is @code{ascii}, Unicode connectors otherwise.
+
+@node Glyph Colors
+@section Glyph Colors
+
+@defopt tessera-glyph-color
+Color treatment, initially @code{t}.  A @code{t} value uses semantic
+faces; @code{nil} inherits the surrounding foreground; a color string
+sets a uniform foreground for every glyph.
+@end defopt
+
+  Backend glyph faces can override the shared semantic face when this
+option is @code{t}.  Monochrome and uniform-color settings retain their
+meaning even when a variant supplies such an override.
+
+@cindex semantic faces
+  The following faces inherit theme roles.  Tessera does not assign a
+literal palette or special-case theme names.  Two roles may have the
+same color when their parent faces do.
+
+@defvar tessera-glyph-semantics
+The recognized roles: @code{accent}, @code{attention},
+@code{informational}, @code{muted}, @code{negative}, @code{neutral},
+@code{positive}, and @code{warning}.  This describes the renderer's
+vocabulary, not a user option for installing a new palette.
+@end defvar
+
+@vtable @code
+@item tessera-glyph-accent-face
+New or unread states and distinctive attributes.  Inherits
+@code{font-lock-keyword-face} with bold weight.
+
+@item tessera-glyph-attention-face
+Important or pending actions.  Inherits @code{warning} with bold weight.
+
+@item tessera-glyph-informational-face
+Attributes such as attachments, signatures, and forwarded messages.
+Inherits @code{font-lock-type-face}.
+
+@item tessera-glyph-muted-face
+Read, inactive, and low-priority states.  Inherits @code{shadow}.
+
+@item tessera-glyph-negative-face
+Failures and destructive actions.  Inherits @code{error}.
+
+@item tessera-glyph-neutral-face
+An unaccented glyph.  Inherits @code{default}.
+
+@item tessera-glyph-positive-face
+Completed actions and available content.  Inherits @code{success}.
+
+@item tessera-glyph-warning-face
+Urgent or uncertain states.  Inherits @code{warning}.
+@end vtable
+
+  A signature or encryption glyph indicates content presence, not
+successful verification or decryption.  Pending actions are distinct
+from already completed actions.
+
+@node Glyph Widths
+@section Glyph Widths
+
+  Registered glyph slots have fixed column widths.  Empty slots and
+alignment padding preserve that capacity.  On graphical frames, font
+glyphs that exceed the pixel budget are scaled down; smaller ones retain
+their size and are aligned within the slot.  Oversized forms can still
+signal an error if they cannot fit.
+
+  Built-in mail layouts pack their visible prefix icons toward the right
+edge of the available prefix area.  Inline content icons have
+independent optional slots and do not enlarge that prefix area.
+
+@node Native Threads
+@chapter Native Threads
+@cindex threading
+  Tessera displays the threads in the current Gnus or mu4e results,
+using the application's ordering and reply relationships.  Messages
+absent from those results are not fetched to complete the display.
+Preparing snapshots of a message and its replies is a separate
+experimental feature.
+
+@menu
+* Thread Headings::     Subjects, representatives, and counts.
+* Native Folding::      Using the mail reader's thread commands.
+* Thread Spacing::      Padding around and within threads.
+* Deep Threads::        Clipping long branches in narrow windows.
+@end menu
+
+@node Thread Headings
+@section Thread Headings
+
+  With native threading enabled, one message in each thread carries a
+heading containing unread/total counts and the thread subject.  This
+message is called the @dfn{representative}; its own information follows
+the heading.  Other members use one visual line and omit the subject.
+The representative need not be the original message when that message is
+absent from the current results.
+
+  Counts include folded members of the current result set.  They do not
+claim to count every message on a server.  Heading faces use aggregate
+unread state; each message retains its own read state for its dates and
+other per-message elements.
+
+@node Native Folding
+@section Native Folding
+@cindex folding
+  Use the application's existing thread and folding commands.
+@code{gnus-show-threads} and @code{mu4e-search-threads} are the switches
+that select the thread layout in their respective adapters.  Tessera
+reuses native ordering, parentage, filtering, and fold visibility.
+
+  For mu4e, the native folded-message summary remains present.  Tessera
+adjusts spacing at the fold boundary and includes hidden members in
+counts.  A folded row does not receive separate visible padding.
+
+@node Thread Spacing
+@section Thread Spacing
+@cindex thread padding
+  These options use nonnegative normal line heights.  They replace the
+ordinary entry top and bottom values for entries displayed in a thread
+layout.
+
+@defopt tessera-thread-outer-top-padding
+Space above the representative, initially @code{0.2}.
+@end defopt
+
+@defopt tessera-thread-outer-bottom-padding
+Space below the last visible member, initially @code{0.2}.
+@end defopt
+
+@defopt tessera-thread-inner-top-padding
+Space above other members, initially @code{0.05}.
+@end defopt
+
+@defopt tessera-thread-inner-bottom-padding
+Space below members that are not the last visible member, initially
+@code{0.05}.
+@end defopt
+
+  A completely folded thread uses outer boundaries around its remaining
+visible representation.  Spacing does not insert an extra divider.
+
+@node Deep Threads
+@section Deep Threads
+
+  Branch columns keep their native depth even in a narrow window.
+Tessera clips the right edge of overflowing left content while reserving
+space for right metadata.  An ellipsis indicates the hidden remainder;
+its hover help includes the contact, subject, depth, and parent
+identity.
+
+  If the usual position for point is hidden, navigating to the entry
+places point on the ellipsis.  Widening the window restores that
+position in the message text.  Indentation continues to show the same
+reply relationships.
+
+@node Gnus
+@chapter Gnus
+
+  The Gnus adapter renders Summary entries and observes already prepared
+Article MIME information.  Gnus continues to own article retrieval and
+all ordinary article operations.
+
+@menu
+* Gnus Mode::           Enabling the Gnus adapter.
+* Gnus Row Contents::   Subjects, contacts, dates, and labels.
+* Gnus Marks::          Article state, availability, and scores.
+* Content Indicators: Gnus Content Indicators.  Attachments, signatures, and encryption.
+* Gnus Faces::          Text styling and glyph faces.
+* Gnus Navigation::     Moving through articles and refreshing rows.
+@end menu
+
+@node Gnus Mode
+@section Enabling Gnus Presentation
+
+@deffn Command tessera-gnus-mode &optional arg
+Toggle the global Gnus adapter.  From Lisp, an omitted or @code{nil}
+argument enables it, as does a positive number; a nonpositive number
+disables it.  The symbol @code{toggle} toggles it.  Interactively, no
+prefix toggles it.  Configure existing and future Summary buffers and
+track prepared Article information while enabled.
+@end deffn
+@vindex tessera-gnus-mode-hook
+  The adapter saves @code{gnus-summary-line-format}, installs its native
+user-format entry, sets the local layout to @code{two-line}, and
+suspends local @code{hl-line-mode}.  Disabling restores the saved
+settings and native Summary rows.  Public faces and options remain
+available after disabling.
+
+@node Gnus Row Contents
+@section Gnus Row Contents
+
+  With @code{gnus-show-threads} nil, a single-line row has the score,
+availability, secondary, and status prefix, followed by subject and
+available content icons.  Optional labels and author, then date, occupy
+the right side.
+
+  The two-line layout puts secondary and status icons beside the
+subject, with labels on the right.  Its second line contains score and
+availability icons, the author and content icons, and the date.  The
+initial local layout is two-line.
+
+@cindex labels, Gnus
+  Labels combine enabled registry marks, @samp{X-GM-LABELS}, and
+@samp{Keywords} fields available in the header.  Equal label names are
+shown once; hover help records their sources and the full label list.
+Separators are neutral.  Missing extra headers do not cause Tessera to
+retrieve a message solely to discover labels.
+
+  Contact text uses names without recipient prefixes or address
+suffixes, falling back to addresses when names are absent.  Native
+recipient selection remains effective; a news article without a
+recipient shows its author.  Hover help retains full From and available
+To fields.
+
+@node Gnus Marks
+@section Gnus Marks and Availability
+@cindex Gnus marks
+  Four prefix channels reflect the native summary mark characters:
+status, secondary state, download availability, and score.  They retain
+Gnus's own meaning and classification.  A recognized native mark selects
+a corresponding glyph; the no-mark value leaves an empty channel; an
+unfamiliar mark is shown as unknown rather than rewritten.
+
+  Status covers unread, ticked, dormant, expirable, spam, and the other
+native read or removal states.  Secondary state includes process, cache,
+reply, forward, save, and unseen marks.  Availability distinguishes
+downloaded from undownloaded articles.  Score indicates values above or
+below the native threshold.  Glyph selection does not change these
+marks.
+
+@node Gnus Content Indicators
+@section Gnus Content Indicators
+@cindex MIME observations
+  Attachment indicators become available after Gnus has examined the
+article's MIME parts.  Signature and encryption indicators can also use
+hints in the Content-Type header.  An absent icon can mean that the
+content was not found or that it has not yet been examined.
+
+  Tessera does not verify or decrypt mail.  After Gnus processes
+security parts, hover help can include the results; a processing error
+uses the error face.  The availability of a result does not itself mean
+that verification succeeded.  Encrypted content can still contain
+attachments or signatures that have not been examined.
+
+@node Gnus Faces
+@section Gnus Faces
+@cindex faces, Gnus
+  In flat layouts, subjects retain the face chosen by Gnus's native
+summary highlighting rules, with extra bold emphasis for unread
+articles.  Author and date styling depends on the article's own native
+read classification, independently of special score or mark colors.
+Authors are italic.
+
+  In thread layouts, the subject uses aggregate unread state and remains
+bold.  Each author instead carries its article's complete native state,
+with italics and unread bold emphasis.  Dates still use the individual
+article's read state.  Spam and expirable faces supplement native state
+on ordinary subjects and thread authors.
+
+  The following faces belong to @code{tessera-gnus-summary}.  They
+customize the text and glyph roles used in Summary rows.
+
+@vtable @code
+@item tessera-gnus-summary-subject-face
+@itemx tessera-gnus-summary-unread-subject-face
+Subject adjustment over the native state; unread emphasis inherits
+@code{bold}.  The base subject inherits @code{gnus-header-subject}.
+
+@item tessera-gnus-summary-author-face
+Thread author base, inheriting @code{italic} and
+@code{gnus-header-from}, with normal base weight.
+
+@item tessera-gnus-summary-read-author-face
+@itemx tessera-gnus-summary-unread-author-face
+Flat authors, based on @code{gnus-summary-normal-read} or
+@code{gnus-summary-normal-unread}; both are italic and unread is bold.
+
+@item tessera-gnus-summary-thread-subject-face
+@itemx tessera-gnus-summary-thread-unread-subject-face
+Bold headings based on native normal-read or normal-unread faces,
+selected from the whole thread's unread count.
+
+@item tessera-gnus-summary-date-face
+@itemx tessera-gnus-summary-unread-date-face
+Upright dates based on native normal-read or normal-unread faces.  Read
+dates have normal weight; unread dates are bold.
+
+@item tessera-gnus-summary-label-face
+Labels based on @code{gnus-header-content}, with normal weight and
+slant.
+
+@item tessera-gnus-summary-status-face
+Status glyphs inheriting the shared accent face.
+
+@item tessera-gnus-summary-muted-face
+Read and inactive glyphs inheriting the shared muted face.
+
+@item tessera-gnus-summary-important-face
+Ticked and pending-processing glyphs inheriting attention.
+
+@item tessera-gnus-summary-positive-face
+Availability and completed-action glyphs inheriting positive.
+
+@item tessera-gnus-summary-informational-face
+Informational states inheriting informational.
+
+@item tessera-gnus-summary-warning-face
+@itemx tessera-gnus-summary-error-face
+Uncertain or failed states inheriting the shared warning or negative
+face, respectively.
+
+@item tessera-gnus-summary-spam-face
+@itemx tessera-gnus-summary-expirable-face
+Spam and expirable article states inheriting @code{error} and
+@code{warning}, respectively.  These also style their status icons.
+
+@item tessera-gnus-summary-high-score-face
+@itemx tessera-gnus-summary-low-score-face
+Score glyphs inheriting attention or muted, respectively.
+
+@item tessera-gnus-summary-attachment-face
+@itemx tessera-gnus-summary-signature-face
+Content-presence glyphs inheriting informational.
+
+@item tessera-gnus-summary-encryption-face
+Encryption-presence glyphs inheriting accent.
+
+@item tessera-gnus-summary-thread-tree-face
+Thread branches inheriting @code{shadow}.
+
+@item tessera-gnus-summary-thread-count-face
+Counts inheriting @code{gnus-summary-normal-read} and @code{shadow}.
+
+@item tessera-gnus-summary-thread-unread-count-face
+Counts inheriting @code{gnus-summary-normal-unread} and @code{bold}.
+@end vtable
+
+@node Gnus Navigation
+@section Gnus Navigation and Refresh
+
+  Moving to an article places point on its subject in flat layouts and
+its author in thread layouts.  Updates to marks or row contents preserve
+point's position within the article as far as the new text allows.
+
+  While Tessera is active, Gnus's automatic horizontal recentering is
+suppressed because a virtual heading and its message share a logical
+line.  Native vertical recentering retains
+@code{gnus-auto-center-summary}, including a numeric target row.  Manual
+horizontal scrolling remains available.  Disabling Tessera restores
+native horizontal recentering.
+
+  Summary updates, folds, appearance changes, and window resizing update
+the affected rows.  The adapter evaluates native score, cache, and
+read-state rules rather than maintaining its own parallel rule set.
+
+@node mu4e
+@chapter mu4e
+
+  The mu4e adapter renders Headers rows and adjusts native fold spacing.
+The current query, pending marks, document identities, and native
+navigation continue to belong to mu4e.
+
+@menu
+* mu4e Mode::           Enabling the mu4e adapter.
+* mu4e Row Contents::   Message fields, targets, and labels.
+* State Precedence: mu4e State Precedence.  Choosing among competing message states.
+* mu4e Faces::          Text styling and glyph faces.
+@end menu
+
+@node mu4e Mode
+@section Enabling mu4e Presentation
+
+@deffn Command tessera-mu4e-mode &optional arg
+Toggle the global mu4e Headers adapter, with the usual global minor mode
+argument convention described for @code{tessera-gnus-mode}.  Apply it to
+existing Headers buffers and future Headers mode buffers.
+@end deffn
+@vindex tessera-mu4e-mode-hook
+  The initial local layout is @code{two-line}.  While active, Tessera
+hides the native column header and replaces whole-line highlighting.
+Disabling restores native rows, pending-mark presentation, header line,
+highlighting state, and saved local settings.
+
+@node mu4e Row Contents
+@section mu4e Row Contents
+
+  With @code{mu4e-search-threads} nil, the single-line prefix is
+operation, priority, secondary state, and status.  Subject, optional
+operation target, and content icons follow it; labels, an optional
+contact, and date occupy the right side.
+
+  In two-line layout, operation and status accompany the subject and
+optional target, with labels on the right.  Priority and secondary state
+accompany the contact and content icons on the second line, with date on
+the right.
+
+  With threading enabled, the representative receives a count and
+subject heading; each message line contains its own contact, content,
+labels, and date.  The prefix order is priority, operation, secondary,
+status.
+
+@cindex pending operations, mu4e
+  When @code{mu4e-headers-show-target} is non-@code{nil}, an available
+pending operation target appears beside the subject in flat layouts, or
+after the contact's content icons in thread layouts.  A pending trash or
+delete action uses a destructive-operation face; it does not claim that
+the action has already completed.
+
+  Labels and tags are merged without duplicates.  Each label's help
+identifies whether it came from labels, tags, or both.  Separators
+retain a neutral face.
+
+  Contacts show names with address fallback and retain native recipient
+selection for outgoing mail.  Hover help retains full contact data.
+Dates use native mu4e human-date formatting.
+
+@node mu4e State Precedence
+@section mu4e State Precedence
+@cindex state precedence, mu4e
+  Each prefix slot selects one eligible state.  Earlier states in the
+following list take precedence.  Hover help also lists active eligible
+states that the selected glyph hides.
+
+@table @code
+@item operation
+The pending native mark, including its target when present.
+
+@item priority
+High priority, flagged, then low priority.
+
+@item secondary
+Replied, forwarded, personal, then mailing-list membership.
+
+@item status
+Trashed, draft, new, unread, then read.
+@end table
+
+  Optional flags follow @code{mu4e-headers-visible-flags} both in glyph
+selection and help.  Hiding one can expose the next eligible state.
+Read-state calculations and thread counts still use native unread/new
+membership even when another status glyph takes precedence.
+
+  Each prefix slot is two columns wide.  Four slots occupy eight
+columns; the two-line layout allocates two slots per line.  Thread
+counts can enlarge the shared leading area.  Attachment, signature,
+encryption, and calendar indicators use independent optional content
+slots.
+
+@node mu4e Faces
+@section mu4e Faces
+@cindex faces, mu4e
+  Ordinary subjects preserve mu4e's native message-state styling,
+including strike-through or slant, with bold emphasis for unread/new
+messages.  Flat contacts and dates depend only on read state.  Contacts
+are italic; dates are upright.  Missing unread foreground attributes
+fall back to @code{default}, rather than borrowing the read face's
+foreground.
+
+  Thread subjects are bold and depend on aggregate unread state.  Thread
+contacts preserve each message's native state with italic styling and
+unread/new bold emphasis.  Dates remain per-message.  Labels and content
+attributes are not aggregated across a conversation.
+
+  The following faces belong to @code{tessera-mu4e-headers}.  Semantic
+icon roles use the shared faces from @ref{Glyph Colors}.
+
+@vtable @code
+@item tessera-mu4e-headers-subject-face
+@itemx tessera-mu4e-headers-unread-subject-face
+Ordinary subject adjustments over native message state; the unread
+variant adds bold emphasis without a fallback foreground.
+
+@item tessera-mu4e-headers-read-contact-face
+@itemx tessera-mu4e-headers-unread-contact-face
+Flat contacts based on @code{mu4e-header-face} or
+@code{mu4e-unread-face}, with @code{default} fallback.  Both are italic;
+read is normal weight and unread is bold.
+
+@item tessera-mu4e-headers-thread-subject-face
+@itemx tessera-mu4e-headers-thread-unread-subject-face
+Bold, upright headings based on @code{mu4e-header-face} or
+@code{mu4e-unread-face}, with @code{default} fallback.
+
+@item tessera-mu4e-headers-thread-contact-face
+@itemx tessera-mu4e-headers-thread-unread-contact-face
+Italic adjustments over each message's native state.  The unread variant
+adds bold weight.
+
+@item tessera-mu4e-headers-thread-tree-face
+Thread branches inheriting @code{mu4e-header-face}.
+
+@item tessera-mu4e-headers-thread-count-face
+@itemx tessera-mu4e-headers-thread-unread-count-face
+Counts based on @code{mu4e-header-face} or @code{mu4e-unread-face}, with
+@code{default} fallback and bold unread emphasis.
+
+@item tessera-mu4e-headers-date-face
+@itemx tessera-mu4e-headers-unread-date-face
+Upright read or unread dates, using the corresponding native face and
+@code{default} fallback; unread dates are bold.
+
+@item tessera-mu4e-headers-label-face
+Labels inheriting @code{mu4e-header-value-face}, with normal weight and
+slant.
+
+@item tessera-mu4e-headers-operation-face
+Pending operations inheriting the shared attention face.
+
+@item tessera-mu4e-headers-destructive-operation-face
+Pending trash or deletion, adding the negative face over operation.
+
+@item tessera-mu4e-headers-new-face
+@itemx tessera-mu4e-headers-unread-face
+@itemx tessera-mu4e-headers-personal-face
+@itemx tessera-mu4e-headers-encryption-face
+New, unread, personal, or encrypted-content glyphs inheriting accent.
+
+@item tessera-mu4e-headers-read-face
+@itemx tessera-mu4e-headers-low-priority-face
+Read and low-priority glyphs inheriting muted.
+
+@item tessera-mu4e-headers-draft-face
+@itemx tessera-mu4e-headers-forwarded-face
+@itemx tessera-mu4e-headers-list-face
+@itemx tessera-mu4e-headers-attachment-face
+@itemx tessera-mu4e-headers-signature-face
+Draft, correspondence, and content-presence glyphs inheriting
+informational.
+
+@item tessera-mu4e-headers-trashed-face
+An existing trashed state, inheriting negative.
+
+@item tessera-mu4e-headers-flagged-face
+@itemx tessera-mu4e-headers-calendar-face
+Flagged messages and calendar content, inheriting attention.
+
+@item tessera-mu4e-headers-replied-face
+Replied messages, inheriting positive.
+
+@item tessera-mu4e-headers-high-priority-face
+High-priority messages, inheriting warning.
+@end vtable
+
+@node Elfeed
+@chapter Elfeed
+
+  The Elfeed adapter changes Search rows while retaining native entry,
+feed, tag, and date interactions.  It does not update feeds merely to
+render a row.
+
+@menu
+* Elfeed Mode::           Enabling the Elfeed adapter.
+* Elfeed Row Contents::   Titles, feeds, links, tags, and dates.
+* Elfeed Glyph Options::  Customizing status and enclosure glyphs.
+* Elfeed Faces::          Styling read and unread entries.
+@end menu
+
+@node Elfeed Mode
+@section Enabling Elfeed Presentation
+
+@deffn Command tessera-elfeed-mode &optional arg
+Toggle the global Elfeed Search adapter, with the usual minor mode
+argument convention described for @code{tessera-gnus-mode}.  Configure
+existing and future Search buffers.
+@end deffn
+@vindex tessera-elfeed-mode-hook
+  Activation saves the native print function, layout, separator date
+format, and highlighting state.  It installs the Tessera print function,
+selects local @code{two-line} layout, and sets the separator date format
+to @code{nil}.  Disabling restores those settings and native rendering.
+Existing native separator strings are kept in the default font rather
+than inheriting an adjacent icon font.
+
+@node Elfeed Row Contents
+@section Elfeed Row Contents
+
+  The single-line layout shows read/unread status, title, and date.  The
+two-line layout puts status and title on its first line, with feed title
+on the right.  The second line contains the entry URL, an optional
+enclosure indicator, tags, and date.  Reserved status space aligns the
+second line's content.
+
+  The native title override is respected, with the entry URL as a
+fallback when the title is empty.  The @code{unread} tag controls read
+state and is omitted from the textual tag list.  Other native tag faces
+remain part of title styling.  Tag punctuation remains neutral.
+
+  The enclosure indicator describes available enclosure media types on
+hover; it does not download enclosures.
+
+@node Elfeed Glyph Options
+@section Elfeed Glyph Options
+@cindex glyph customization, Elfeed
+  The following values are five-element lists containing ASCII text,
+Unicode text, Nerd Icons function, Nerd Icons name, and semantic role.
+Set them through Customize or @code{setopt} so their custom setter
+re-registers the glyphs and refreshes active Search buffers.
+
+@defopt tessera-elfeed-search-unread-glyph
+The unread glyph.  Initially:
+@lisp
+("*" "●" nerd-icons-mdicon "nf-md-email" accent)
+@end lisp
+@end defopt
+
+@defopt tessera-elfeed-search-read-glyph
+The read glyph.  Initially:
+@lisp
+("o" "○" nerd-icons-mdicon "nf-md-email_open_outline" muted)
+@end lisp
+@end defopt
+
+@defopt tessera-elfeed-search-enclosure-glyph
+The enclosure glyph.  Initially:
+@lisp
+("@@" "📎" nerd-icons-mdicon "nf-md-paperclip" informational)
+@end lisp
+@end defopt
+
+  The options belong to @code{tessera-elfeed}.  The read and unread
+glyphs must fit the status slot's two-column width.  For example, to
+change the unread Unicode form while retaining its semantic role:
+
+@lisp
+(require 'tessera-elfeed)
+(setopt tessera-elfeed-search-unread-glyph
+        '("*" "•" nerd-icons-mdicon "nf-md-email" accent))
+@end lisp
+
+@node Elfeed Faces
+@section Elfeed Faces
+@cindex faces, Elfeed
+  Title faces follow native Elfeed title and unread-title roles; other
+native tag-driven title faces remain effective.  Feed names and URLs are
+italic, while dates are upright.  Unread feed names, dates, and URLs
+receive unread emphasis.
+
+@vtable @code
+@item tessera-elfeed-search-title-face
+@itemx tessera-elfeed-search-unread-title-face
+Entry titles inheriting the corresponding native Elfeed title faces.
+
+@item tessera-elfeed-search-feed-face
+@itemx tessera-elfeed-search-unread-feed-face
+Feed titles inheriting @code{elfeed-search-feed-face} with italic slant
+and normal read weight.  The unread variant adds bold.
+
+@item tessera-elfeed-search-tag-face
+Tags inheriting @code{elfeed-search-tag-face}.
+
+@item tessera-elfeed-search-date-face
+Read dates using native title and date faces, with normal weight and
+slant.
+
+@item tessera-elfeed-search-unread-date-face
+Unread dates using the unread title color and bold weight, with upright
+slant.
+
+@item tessera-elfeed-search-url-face
+@itemx tessera-elfeed-search-unread-url-face
+URLs using the corresponding date color, with italic slant and no
+underline.  The unread variant retains unread emphasis.
+@end vtable
+
+@node Refreshing the Display
+@chapter Refreshing the Display
+@cindex refreshing
+  Gnus and mu4e track native changes, theme changes, and shared
+appearance options during their normal update cycles.  After manually
+changing individual faces, regenerate the affected native view to
+refresh any resolved hover colors as well as text faces.
+
+  In an active Elfeed Search buffer, force a local display update after
+changing a shared layout option:
+
+@lisp
+(elfeed-search-update :force)
+@end lisp
+
+  This redraws the search display; it is not a feed download.  Elfeed's
+three glyph options have custom setters that also refresh active
+buffers.  Assigning them with @code{setq} bypasses that setter, so
+prefer Customize or @code{setopt}.
+
+@node Writing an Entry Backend
+@chapter Writing an Entry Backend
+
+  This chapter is for Lisp programmers adding a display adapter.  Your
+adapter supplies records, interprets their state, composes faces, and
+refreshes the view.  Tessera validates layouts, allocates widths,
+renders glyphs, and supplies spacing and navigation positions.
+
+  Register a backend, render its records into the intended buffer, and
+attach each entry's layout after inserting the native terminating
+newline.  Keep source navigation and lifecycle behavior in the adapter.
+Private names containing @samp{--} are not supported extension entry
+points.
+
+@menu
+* Entry Contexts::       The data used to render one entry.
+* Registration: Registering a Backend.  Registering providers and layouts.
+* Segment Providers::    Supplying text and its properties.
+* Segment Widths::       Truncation, priorities, and optional fields.
+* Layout Objects::       Placing fields on the content lines.
+* Glyph Definitions::    Defining and rendering state symbols.
+* Glyph Slots::          Selecting glyphs and reserving their space.
+* Entry Insertion: Rendering and Insertion.  Inserting rows and attaching decorations.
+* Navigation Anchors::   Preserving point across display updates.
+* Highlight Lifecycle::  Installing and removing entry highlights.
+* Backend Example::      A small working display adapter.
+@end menu
+
+@node Entry Contexts
+@section Entry Contexts
+@cindex entry contexts
+@deftp {Data Type} tessera-entry-context
+The environment for rendering one native record.  Construct it with
+@code{make-tessera-entry-context} and keyword arguments for the fields
+below.  Accessors have the form
+@samp{tessera-entry-context-@var{field}}.
+@end deftp
+@findex make-tessera-entry-context
+@findex tessera-entry-context-p
+@findex tessera-entry-context-backend
+@findex tessera-entry-context-object
+@findex tessera-entry-context-buffer
+@findex tessera-entry-context-window
+@findex tessera-entry-context-metadata
+@findex tessera-entry-context-thread
+@table @code
+@item backend
+The registered backend symbol.  It must match the renderer's backend.
+
+@item object
+The native record, opaque to the engine.
+
+@item buffer
+The buffer in which rendering occurs.
+
+@item window
+The target window, or @code{nil} when the buffer has no display window.
+
+@item metadata
+Additional adapter-owned data, opaque to the engine.
+
+@item thread
+A @code{tessera-thread-context}, or @code{nil} for an ordinary entry.
+@end table
+
+  An entry context is not a @code{tessera-x-context} snapshot request.
+It holds the environment for rendering one row, not extracted source
+material or asynchronous work.
+
+@node Registering a Backend
+@section Registering a Backend
+@cindex backend registration
+@defun tessera-entry-register backend &key context segments @
+  glyph-slots layouts thread-layout
+Register or replace the definition for the non-@code{nil} symbol
+@var{backend}, returning that symbol.  Validate the new definition
+before installing it; invalid definitions signal an error without
+replacing the previous registration.
+@end defun
+
+  @var{context} is a function called with the native object, current
+buffer, and target window.  It must return a matching entry context.
+@var{segments} is an alist from unique segment symbols to functions of
+one entry context.  @var{glyph-slots} is a list of uniquely named
+@code{tessera-glyph-slot} objects.
+
+  @var{layouts} is a nonempty alist from unique layout symbols to
+@code{tessera-entry-layout} objects.  @var{thread-layout} is optional;
+when present it contains ordinary head and child entry layouts.  All
+references must name registered segments or slots, and property lists
+must use the supported keys and value types.
+
+  Registration does not enable a mode, create a buffer, or refresh an
+existing view.  The adapter must arrange these operations.  Its context
+provider and segment providers should read native state without changing
+message identity, marks, or source content.
+
+@node Segment Providers
+@section Segment Providers
+
+  A segment provider receives one entry context and returns a string or
+@code{nil}.  @code{nil} omits the segment.  A string may contain faces,
+help, keymaps, and other native interaction properties, but it must not
+contain newline or carriage-return characters.  The engine signals an
+error for multiline text or a non-string non-@code{nil} result.
+
+  Use a bare segment symbol in a layout for its natural width.  To give
+it a width policy, use a list whose first element is the symbol and
+whose remaining elements form a property list.  For example:
+
+@lisp
+(subject :grow t :min-width 4 :truncate tail :point t)
+@end lisp
+
+@noindent
+Do not insert alignment spaces into the returned text.  Supply content
+and properties; let the layout allocate decoration around it.
+
+@node Segment Widths
+@section Segment Widths
+@cindex width allocation
+  Segment references accept the following keys.  Unspecified flags are
+@code{nil}; the default minimum and priority are zero.
+
+@table @code
+@item :grow
+A boolean marking a flexible segment.  When truncation is allowed, these
+segments shrink before other truncatable fields.  Freed space can
+restore their text up to natural width; this is not blank filling.
+
+@item :min-width
+A nonnegative integer limiting shrinkage.  It does not pad short text to
+that size.
+
+@item :max-width
+An optional nonnegative integer capping text when @code{:truncate} is
+non-@code{nil}.  It must not be smaller than an explicit minimum.  A cap
+without a truncation method does not cut text.
+
+@item :truncate
+@code{head}, @code{middle}, or @code{tail} removes text at the named
+location when needed.  @code{nil} keeps the text intact.
+
+@item :priority
+An integer, initially zero.  Lower-priority fields shrink or disappear
+first; higher-priority flexible fields regain available space first.
+Equal priorities retain the order of the fields.
+
+@item :optional
+A boolean allowing the entire segment to be removed when space remains
+insufficient after shrinking flexible fields.
+
+@item :point
+A boolean marking the first displayed character as a preferred
+navigation anchor.  @xref{Navigation Anchors}.
+@end table
+
+  Allocation first shrinks flexible truncatable fields, then removes
+optional fields from lower to higher priority.  If omission frees space,
+flexible text can regain it.  Remaining overflow is handled by shrinking
+other truncatable fields.  Fixed untruncatable text is not silently
+discarded by these policies.
+
+@node Layout Objects
+@section Layout Objects
+
+@deftp {Data Type} tessera-entry-layout
+Placement of leading content and left and right segments.  Construct
+with @code{make-tessera-entry-layout} and field keywords.  The fields
+below default to @code{nil}.  Their accessors use the prefix
+@samp{tessera-entry-layout-}.
+@end deftp
+@findex make-tessera-entry-layout
+@findex tessera-entry-layout-p
+@findex tessera-entry-layout-main-glyph-slots
+@findex tessera-entry-layout-main-left-segments
+@findex tessera-entry-layout-main-right-segments
+@findex tessera-entry-layout-extra-glyph-slots
+@findex tessera-entry-layout-extra-left-segments
+@findex tessera-entry-layout-extra-right-segments
+@findex tessera-entry-layout-glyph-slots-align
+@findex tessera-entry-layout-main-leading-segments
+@findex tessera-entry-layout-extra-leading-segments
+@findex tessera-entry-layout-leading-width
+@table @code
+@item main-glyph-slots
+Slot references for the main line's prefix.
+
+@item main-left-segments
+@itemx main-right-segments
+Segment references for the main line's left and right content.
+
+@item extra-glyph-slots
+@itemx extra-left-segments
+@itemx extra-right-segments
+Corresponding references for a second visual line.
+
+@item glyph-slots-align
+@code{nil} preserves individual prefix slot positions.  @code{left} or
+@code{right} packs visible prefix icons toward that edge within the
+slots' capacity.  Inline slot groups are unaffected.
+
+@item main-leading-segments
+@itemx extra-leading-segments
+Segment lists replacing glyph slots in that line's leading area.  A line
+must not specify both leading segments and leading glyph slots.
+
+@item leading-width
+A minimum leading-area width in columns, or a function of one context
+returning that width.  @code{nil} means zero.  Both lines share the
+minimum, which an adapter can compute across a view for alignment.
+@end table
+
+  Any non-@code{nil} extra-line content field adds the second visual
+line.  A layout is still one logical entry.  The option
+@code{tessera-entry-layout} selects its name unless a thread context and
+registered thread layout take precedence.
+
+@node Glyph Definitions
+@section Glyph Definitions
+
+@deftp {Data Type} tessera-glyph
+Alternative visual forms and a semantic role.  Construct with
+@code{make-tessera-glyph}; fields are @code{ascii}, @code{unicode},
+@code{nerd-icons}, and @code{semantic}.
+@end deftp
+@findex make-tessera-glyph
+@findex tessera-glyph-p
+@findex tessera-glyph-ascii
+@findex tessera-glyph-unicode
+@findex tessera-glyph-nerd-icons
+@findex tessera-glyph-semantic
+  The ASCII form must be a nonempty ASCII string.  The Unicode form must
+be a nonempty string.  The Nerd Icons descriptor is a plist with
+@code{:function} naming a non-@code{nil} symbol and @code{:name} holding
+a nonempty string.  All three forms are supplied even when a particular
+installation uses only one.  @code{semantic} must be a recognized role.
+
+  For example:
+
+@lisp
+(make-tessera-glyph
+ :ascii "*" :unicode "●"
+ :nerd-icons '(:function nerd-icons-mdicon :name "nf-md-email")
+ :semantic 'accent)
+@end lisp
+
+@defun tessera-glyph-render glyph context &optional properties
+Return the rendered glyph string for the entry @var{context}, applying
+style fallback, color, hover, and interaction properties.  Validate
+@var{glyph}, @var{context}, and @var{properties}, signalling errors for
+invalid input.
+@end defun
+
+  @var{properties} supports @code{:face}, @code{:mouse-face},
+@code{:help-echo}, @code{:keymap}, @code{:pointer}, and
+@code{:follow-link}.  @code{:face} must name an existing face and is
+used only in semantic-color mode.  Do not pass @code{:glyph} here: the
+glyph is already the first argument.  Standalone rendering does not
+reserve a slot width.
+
+@node Glyph Slots
+@section Glyph Slots
+
+@deftp {Data Type} tessera-glyph-slot
+A fixed-width channel with one selected variant.  Construct with
+@code{make-tessera-glyph-slot}; fields are @code{name}, @code{selector},
+@code{width}, @code{align}, and @code{glyphs}.
+@end deftp
+@findex make-tessera-glyph-slot
+@findex tessera-glyph-slot-p
+@findex tessera-glyph-slot-name
+@findex tessera-glyph-slot-selector
+@findex tessera-glyph-slot-width
+@findex tessera-glyph-slot-align
+@findex tessera-glyph-slot-glyphs
+  The name is a non-@code{nil} symbol unique within its backend.  The
+selector receives an entry context and returns a variant symbol or
+@code{nil}.  Width is a positive integer in columns; alignment is
+@code{left}, @code{center}, or @code{right}.
+
+  The @code{glyphs} field is an alist of unique variant symbols followed
+by property lists.  Each variant requires @code{:glyph}, containing a
+@code{tessera-glyph}; it can also have the interaction properties
+accepted by @code{tessera-glyph-render}.  Its ASCII form must fit the
+slot at registration time; selected visual forms are also checked when
+rendered.
+
+  A @code{nil} selection normally produces empty fixed-width space.  An
+unknown variant produces a warning and an empty slot.  Keep selector
+results within the registered variants.
+
+  A layout can reference a slot by its symbol, or by a list containing
+its name and boolean properties:
+
+@lisp
+(status :reserve t)
+(attachment :optional t)
+@end lisp
+
+@noindent
+@code{:reserve t} hides the selected glyph while reserving its display
+space, which can align a second line with the first.  @code{:optional t}
+omits a slot, including its width, when the selector returns @code{nil}.
+An unknown variant still warns and reserves empty space.
+
+  Within a segment list, @code{(:slots SLOT...)} places a nonempty group
+of fixed-width slots inline with text.  The group behaves as one fixed
+segment.  Prefix packing controlled by @code{glyph-slots-align} does not
+pack these inline slots.
+
+@node Rendering and Insertion
+@section Rendering and Insertion
+@cindex overlay attachment
+  Rendering produces entry text; attaching its layout installs the
+decorations in the destination buffer.  The adapter also maintains or
+removes those decorations when native rows change.
+
+@defun tessera-entry-render backend object &optional window prefix
+Return one logical line of rendered content and its layout metadata for
+@var{object}.  Use the registered @var{backend}.  @var{window} defaults
+to a window displaying the current buffer; a supplied dead window is an
+error.  The context provider runs with the current buffer as its buffer
+argument.
+@end defun
+
+  @var{prefix}, when supplied, is native non-displaying text placed
+before the content.  It is excluded from width allocation and anchors
+layout outside content hover ranges.  The adapter is responsible for
+supplying its non-displaying properties.  Without it, the engine inserts
+a zero-width anchor.  Preserve the result's properties when inserting
+it.
+
+  When there is no display window, the engine cannot allocate fields to
+a window width.  Render again for the intended window when establishing
+a view.  Rendering does not insert a terminating newline or attach
+buffer overlays.
+
+@defun tessera-entry-apply-layout start end
+Attach the rendered layout to content from @var{start} to @var{end} in
+the current buffer.  @var{end} excludes the client's terminating
+newline.  Insert that newline first when bottom padding is nonzero;
+otherwise attachment signals an error.  Reapplying replaces only the
+entry's Tessera layout overlays and preserves native content properties.
+@end defun
+
+  A typical insertion sequence is:
+
+@lisp
+(let ((start (point)))
+  (insert (tessera-entry-render backend object window))
+  (let ((end (point)))
+    (insert "\n")
+    (tessera-entry-apply-layout start end)))
+@end lisp
+
+@noindent
+Here @code{backend}, @code{object}, and @code{window} are supplied by
+the adapter.  This sequence must run with suitable write permission in
+the destination buffer.
+
+@defun tessera-entry-layout-applied-p start
+Return non-@code{nil} when the current rendered layout at @var{start}
+still has its associated live overlay.  Use this after native updates to
+decide whether layout attachment must be restored.
+@end defun
+
+@defun tessera-entry-clear-layout &optional start end
+Remove Tessera layout overlays within the supplied bounds of the current
+buffer.  Omitted bounds select the accessible buffer.  Restore the
+current-entry highlighting first if its range overlaps the cleanup.
+@end defun
+
+  Cleanup does not regenerate native rows.  Disabling an adapter must
+also restore the print settings and native presentation that it owns.
+
+@node Navigation Anchors
+@section Navigation Anchors
+@cindex navigation anchors
+@defun tessera-entry-point &optional string
+Return the first preferred navigation position in @var{string}, or in
+the current logical line when @var{string} is omitted.  String positions
+are zero-based indexes; buffer positions use ordinary Emacs positions.
+Return @code{nil} when no displayed segment has an anchor.
+@end defun
+
+  A segment reference with @code{:point t} marks its first displayed
+character.  This identifies meaningful message text independently of the
+prefix, glyph capacity, and overlay spacing.
+
+@defun tessera-entry-save-point
+Return an opaque snapshot of point within its logical entry.  It
+contains a marker that must later be released through restoration.
+@end defun
+
+@defun tessera-entry-restore-point snapshot
+Restore point from @var{snapshot} in its original buffer when possible.
+An anchored position follows the newly rendered anchor; other positions
+retain their character offset, bounded by the new line end.  Release the
+saved marker even if restoration cannot complete.
+@end defun
+
+  Use @code{unwind-protect} around a redraw so restoration and marker
+release occur even when the redraw signals an error.
+
+@node Highlight Lifecycle
+@section Highlight Lifecycle
+
+@defun tessera-entry-highlight-current
+Highlight the entry at point in the current buffer, restoring the
+previous entry first.  Preserve native faces and interactions and
+exclude vertical padding and virtual thread headings.  This is suitable
+for a buffer-local @code{post-command-hook}.
+@end defun
+
+@defun tessera-entry-clear-current
+Restore the highlighted entry's original faces and saved decorations,
+and release its boundary markers.  Do nothing when no highlight is
+active in the current buffer.
+@end defun
+
+  The adapter is responsible for installing and removing the hook and
+for avoiding a competing native whole-line overlay.  Neither function
+moves point to another native record.
+
+@node Backend Example
+@section A Small Backend Example
+
+  The following example registers a minimal list renderer with a title
+and date.  All @samp{my-} names belong to the example.  It does not
+install a native adapter or modify the built-in backend registrations.
+
+@lisp
+(require 'tessera)
+
+(defun my-tessera-context (object buffer window)
+  "Describe OBJECT in BUFFER and WINDOW."
+  (make-tessera-entry-context
+   :backend 'my-list :object object
+   :buffer buffer :window window))
+
+(defun my-tessera-title (context)
+  "Return the title in CONTEXT."
+  (plist-get (tessera-entry-context-object context) :title))
+
+(defun my-tessera-date (context)
+  "Return the date in CONTEXT."
+  (plist-get (tessera-entry-context-object context) :date))
+
+(tessera-entry-register
+ 'my-list
+ :context #'my-tessera-context
+ :segments '((title . my-tessera-title) (date . my-tessera-date))
+ :layouts
+ (list (cons 'single-line
+             (make-tessera-entry-layout
+              :main-left-segments
+              '((title :grow t :min-width 4
+                       :truncate tail :point t))
+              :main-right-segments '(date)))))
+
+(pop-to-buffer (get-buffer-create "*Tessera Example*"))
+(let ((inhibit-read-only t)
+      (tessera-entry-layout 'single-line))
+  (erase-buffer)
+  (let ((start (point)))
+    (insert (tessera-entry-render
+             'my-list '(:title "One record" :date "2026-09-17")
+             (selected-window)))
+    (let ((end (point)))
+      (insert "\n")
+      (tessera-entry-apply-layout start end))))
+(goto-char (point-min))
+(special-mode)
+@end lisp
+
+  A production adapter must additionally connect native navigation,
+refresh, resizing, point preservation, and reversible activation.
+Registration and one insertion alone do not provide those lifecycle
+operations.
+
+@node Thread Backend Interfaces
+@chapter Thread Backend Interfaces
+
+  These interfaces are for Lisp programmers adding thread display to an
+adapter.  Supply the ordered messages and their reply relationships;
+Tessera uses them to build headings, tree connectors, and spacing.
+These functions do not discover missing messages.
+
+@menu
+* Thread Contexts: Building Thread Contexts.  Deriving counts, paths, and boundaries.
+* Thread Layouts: Thread Layouts and Segments.  Rendering thread headings and branches.
+@end menu
+
+@node Building Thread Contexts
+@section Building Thread Contexts
+
+@defun tessera-thread-build-contexts entries
+Return an @code{equal} hash table from native IDs to thread contexts.
+Each ordered input row is @code{(ID PARENT UNREAD VISIBLE)}.
+@code{PARENT} is @code{nil} for a displayed root or names an earlier
+row; a missing preceding parent signals an error.  Use distinct IDs.
+@end defun
+
+  @code{UNREAD} and @code{VISIBLE} are boolean observations supplied by
+the adapter.  Counts include all rows, including folded ones; the last
+visible row determines the bottom boundary.  The adapter supplies any
+visible representative and root adoption required by the native view.  A
+native root absent from the results is not reconstructed here.
+
+@deftp {Data Type} tessera-thread-context
+The position of one member in a displayed native thread.  Construct with
+@code{make-tessera-thread-context}, or obtain it from
+@code{tessera-thread-build-contexts}.
+@end deftp
+@findex make-tessera-thread-context
+@findex tessera-thread-context-p
+@findex tessera-thread-context-id
+@findex tessera-thread-context-parent
+@findex tessera-thread-context-root
+@findex tessera-thread-context-first
+@findex tessera-thread-context-last
+@findex tessera-thread-context-total
+@findex tessera-thread-context-unread
+  The constructor keywords are @code{:id}, @code{:parent}, @code{:root},
+@code{:path}, @code{:first}, @code{:last}, @code{:total}, and
+@code{:unread}.  IDs are opaque native identifiers.  @code{first}
+identifies the displayed representative; @code{last} identifies the last
+visible member.  @code{total} and @code{unread} count all members in the
+result set, including folded records.
+
+@defun tessera-thread-context-path context
+Return the root-to-child branch path.  Each boolean describes whether
+that branch has a following sibling; the representative itself has no
+branch entry.  This is also a @code{setf} place for updating the path.
+@end defun
+
+  For example, @code{(t nil)} describes a child below an ancestor branch
+that continues, with no following sibling at the child's own level.
+
+@defun tessera-thread-context-key context
+Return the fields affecting the displayed row, or @code{nil} for a
+@code{nil} context.  The key includes boundaries and the branch path;
+counts affect the representative only.  It can be compared with
+@code{equal} to decide whether a native row needs redrawing.
+@end defun
+
+@node Thread Layouts and Segments
+@section Thread Layouts and Segments
+
+@deftp {Data Type} tessera-thread-layout
+A pair of ordinary entry layouts, in fields @code{head} and
+@code{child}.  Construct with @code{make-tessera-thread-layout} and
+register it with @code{tessera-entry-register}'s @code{:thread-layout}
+argument.
+@end deftp
+@findex make-tessera-thread-layout
+@findex tessera-thread-layout-p
+@findex tessera-thread-layout-head
+@findex tessera-thread-layout-child
+  When an entry context supplies thread membership, @code{first} selects
+@code{head}; other members select @code{child}.  A @code{nil} thread
+context selects the ordinary layout.  Both thread layouts are validated
+with the backend's normal segments and slots.
+
+@defun tessera-thread-count context
+Return an unread/total string for the thread in the entry @var{context},
+with default semantic styling and count help.  Return @code{nil} without
+thread membership.
+@end defun
+
+@defun tessera-thread-prefix context
+Return tree connectors for the native member described by entry
+@var{context}, or @code{nil} when there is no branch path.  Respect
+@code{tessera-glyph-style} for connector style and
+@code{tessera-entry-segment-gap} for indentation.
+@end defun
+
+  These functions are segment providers.  Register the tree as fixed
+content: shrinking or omitting it would misrepresent parentage.
+Backend-specific providers may compose native faces over the returned
+strings.  The adapter must also update the display when native folding
+changes which messages are visible.
+
+@node Native Adapter Interfaces
+@chapter Native Adapter Interfaces
+
+  The following public functions connect the built-in adapters to native
+format or fold protocols.  Ordinary users should enable the mode rather
+than installing these functions individually.
+
+@menu
+* Format Callbacks: Native Format Callbacks.  Connecting to Gnus and Elfeed formatters.
+* Fold Observation: Native Fold Observation.  Tracking and padding mu4e folds.
+@end menu
+
+@node Native Format Callbacks
+@section Native Format Callbacks
+
+@defun tessera-gnus-summary-format-entry header
+Return a Tessera representation of the Gnus mail @var{header} using the
+native summary formatter's dynamically supplied mark and contact state.
+Retain the four native mark characters and navigation metadata.  This
+function is a format callback, not a standalone header formatter.
+@end defun
+@findex gnus-user-format-function-tessera
+  @code{gnus-user-format-function-tessera} aliases that callback for
+Gnus's @samp{%u&tessera;} format entry.  The adapter arranges the
+required metadata, registration, and later overlay attachment.
+
+@defun tessera-elfeed-search-print-entry entry
+Insert a Tessera representation of the native Elfeed @var{entry} at
+point in the current Search buffer.  If the native terminating newline
+is already present, attach its layout immediately.  The update hook
+otherwise attaches layouts after Elfeed inserts terminators.
+@end defun
+
+  The Elfeed mode installs this function in
+@code{elfeed-search-print-entry-function}.  Calling it directly requires
+an already registered backend and a writable insertion location.
+
+@node Native Fold Observation
+@section Native Fold Observation
+
+  These mu4e functions follow native fold overlays in the current
+buffer.  They do not implement an independent fold command or thread
+switch.
+
+@defun tessera-mu4e-thread-track enable
+Install advice to observe native fold, unfold, and unfold-all operations
+when @var{enable} is non-@code{nil}; remove that advice otherwise.  The
+adapter manages this shared tracking while its views need it.
+@end defun
+
+@defvar tessera-mu4e-thread-change-hook
+A buffer-local normal hook run after an observed native fold operation.
+Its functions take no arguments.  The Headers adapter uses it to mark
+its view for refresh.
+@end defvar
+
+@defun tessera-mu4e-thread-invalidate
+Invalidate the current buffer's cached fold list after native edits.
+@end defun
+
+@defun tessera-mu4e-thread-folds
+Return native fold overlays in buffer order, rebuilding the cache when
+invalid.  Treat the list and overlays as native state, not as copies
+owned by the caller.
+@end defun
+
+@defun tessera-mu4e-thread-fold-at position
+Return a native folded overlay covering @var{position}, or @code{nil}.
+@end defun
+
+@defun tessera-mu4e-thread-pad-folds contexts
+Replace Tessera's fold-padding overlays using the native docid-to-thread
+hash table @var{contexts}.  Keep native folds and their summary text.
+Use shared inner top and appropriate inner or outer bottom padding.
+@end defun
+
+@node Troubleshooting
+@chapter Troubleshooting
+
+  If the display differs from what you expect, check the active layout,
+message state, and face settings described below.
+
+@menu
+* Layout Changes: Missing Layout Changes.  Checking layout and spacing settings.
+* States and Faces: Unexpected State or Faces.  Checking marks, glyphs, and styling.
+* Reporting Bugs::      Information to include in a bug report.
+@end menu
+
+@node Missing Layout Changes
+@section Missing Layout Changes
+
+  If changing @code{tessera-entry-layout} has no effect, check the
+buffer's local value and whether native threading is active.  Activation
+sets a local two-line default, and threading selects its own layout.
+For Elfeed, force a Search update after changing shared options.
+
+  If an entry appears to have incorrect spacing, check dimensions,
+window width, and the font used by a glyph.  Fixed fields need room;
+thread connectors deliberately retain native depth.  A missing glyph may
+be a fallback or an absent eligible state rather than missing text.
+
+@node Unexpected State or Faces
+@section Unexpected State or Faces
+
+  Compare a glyph with the native marks or flags and its hover help.
+Several states can share one prefix channel.  mu4e also applies native
+flag visibility; Gnus follows its native mark characters and highlight
+rules.  Thread headings use aggregate unread state, while message dates
+use per-message state.
+
+  A content indicator does not certify a signature or decrypt a message.
+An absent Gnus attachment icon can mean that the content has not yet
+been observed.  Inspect the article through Gnus when native observation
+is needed, rather than treating an unknown state as absence.
+
+  After manual face changes, regenerate the native view if resolved
+hover colors are stale.  Disable the corresponding Tessera mode when
+comparing with the native presentation, then enable it again when
+finished.
+
+@node Reporting Bugs
+@section Reporting Bugs
+
+  Report reproducible problems at
+@url{https://github.com/brsvh/emacs-tessera/issues}.  Include Emacs,
+Tessera, and backend versions; the active layout and native thread
+setting; relevant options and theme; and the expected and observed
+behavior.  For a display problem, include whether it occurs in a
+graphical or terminal frame and whether resizing changes it.
+
+  Prefer a small reproducer that demonstrates the state without private
+mail or feed contents.  Experimental selection or retrieval problems
+belong with the corresponding @samp{tessera-x-*} manual's instructions.
+
+@node Copying
+@appendix GNU Free Documentation License
+@include fdl.texi
+
+@node Concept Index
+@unnumbered Concept Index
+@printindex cp
+
+@node Symbol Index
+@unnumbered Symbol Index
+@printindex fn
+
+@bye
