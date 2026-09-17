@@ -66,11 +66,6 @@
   (expand-file-name "elfeed/" tessera-fixtures-state-directory)
   "Elfeed database directory used by the fixtures.")
 
-(defvar tessera-fixtures--mu-flags
-  '(attach calendar draft encrypted flagged list new passed personal
-           replied seen signed trashed unread)
-  "Mu flags covered by the fixture messages.")
-
 (defvar tessera-fixtures-entry-count 240
   "Number of base entries before additional named mail scenarios.")
 
