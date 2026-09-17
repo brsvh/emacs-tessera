@@ -13,11 +13,6 @@
 (require 'tessera-gnus-x)
 (require 'tessera-gnus-test-support)
 
-(defconst tessera-x-tests--fixtures
-  (expand-file-name "fixtures/context/"
-                    (file-name-directory load-file-name))
-  "Directory containing raw context fixtures.")
-
 (defun tessera-x-tests--item (id &optional references)
   "Create a context record with ID and REFERENCES."
   (make-tessera-x-item
@@ -133,11 +128,28 @@
 
 (ert-deftest tessera-x-mime-preserves-unicode-quotes-and-attachments
     ()
-  (let ((item (tessera-x-tests--item "mime"))
-        (fixture (expand-file-name "multilingual.eml"
-                                   tessera-x-tests--fixtures)))
+  (let ((item (tessera-x-tests--item "mime")))
     (tessera-x-read-message
-     item (lambda () (insert-file-contents-literally fixture)))
+     item
+     (lambda ()
+       (insert
+        "MIME-Version: 1.0\n"
+        "Content-Type: multipart/mixed; boundary=mixed\n\n"
+        "--mixed\n"
+        "Content-Type: multipart/alternative; boundary=alt\n\n"
+        "--alt\nContent-Type: text/plain; charset=utf-8\n"
+        "Content-Transfer-Encoding: quoted-printable\n\n"
+        "caf=C3=A9\n"
+        "=E6=97=A5=E6=9C=AC=E8=AA=9E and =E4=B8=AD=E6=96=87\n"
+        "> Keep the quoted context\n--=20\nJos=C3=A9\n"
+        "--alt\nContent-Type: text/html; charset=utf-8\n\n"
+        "<p>HTML alternative</p>\n--alt--\n"
+        "--mixed\nContent-Type: application/pdf\n"
+        "Content-Disposition: attachment; filename=review.pdf\n"
+        "Content-Transfer-Encoding: base64\n\nJVBERi0xLjQK\n"
+        "--mixed\nContent-Type: text/calendar; charset=utf-8\n"
+        "Content-Disposition: attachment; filename=review.ics\n\n"
+        "BEGIN:VCALENDAR\nEND:VCALENDAR\n--mixed--\n")))
     (let ((body (tessera-x-item-body item))
           (attachments (cdr (assoc "Attachments / MIME parts"
                                    (tessera-x-item-metadata item)))))
@@ -152,13 +164,20 @@
 
 (ert-deftest tessera-x-encrypted-body-never-runs-crypto ()
   (let ((item (tessera-x-tests--item "encrypted"))
-        (mm-decrypt-option 'always)
-        (fixture (expand-file-name "encrypted.eml"
-                                   tessera-x-tests--fixtures)))
+        (mm-decrypt-option 'always))
     (cl-letf (((symbol-function 'mml2015-decrypt)
                (lambda (&rest _) (ert-fail "Unexpected decryption"))))
       (tessera-x-read-message
-       item (lambda () (insert-file-contents-literally fixture))))
+       item
+       (lambda ()
+         (insert
+          "MIME-Version: 1.0\n"
+          "Content-Type: multipart/encrypted; boundary=encrypted;\n"
+          " protocol=\"application/pgp-encrypted\"\n\n"
+          "--encrypted\nContent-Type: application/pgp-encrypted\n\n"
+          "Version: 1\n"
+          "--encrypted\nContent-Type: application/octet-stream\n\n"
+          "Opaque test payload\n--encrypted--\n"))))
     (should (string-match-p "not decrypted"
                             (tessera-x-item-body item)))))
 
@@ -235,8 +254,6 @@
     (let* ((directory (make-temp-file "tessera-agent-" t))
            (gnus-agent t)
            (tessera-gnus-x-body-policy 'download)
-           (fixture (expand-file-name "multilingual.eml"
-                                      tessera-x-tests--fixtures))
            (item (tessera-x-tests--item "agent"))
            (missing (tessera-x-tests--item "missing"))
            fetched refreshed)
@@ -254,8 +271,11 @@
                ((symbol-function 'gnus-agent-fetch-articles)
                 (lambda (_group numbers)
                   (setq fetched numbers)
-                  (copy-file
-                   fixture (expand-file-name "1" directory))
+                  (with-temp-file (expand-file-name "1" directory)
+                    (insert
+                     "Content-Type: text/plain; charset=utf-8\n"
+                     "Content-Transfer-Encoding: quoted-printable\n\n"
+                     "caf=C3=A9\n"))
                   (error "Second article unavailable")))
                ((symbol-function 'gnus-summary-update-download-mark)
                 (lambda (number) (push number refreshed)))
@@ -430,15 +450,19 @@
            (mu4e-mu-binary (expand-file-name "mu" directory))
            (mu4e-mu-home
             (expand-file-name "index with space" directory))
-           (fixture (expand-file-name "multilingual.eml"
-                                      tessera-x-tests--fixtures))
-           (record (list :path fixture :message-id "indexed"
+           (message-file (expand-file-name "message.eml" directory))
+           (record (list :path message-file :message-id "indexed"
                          :references '("root")
                          :subject "Local indexed mail"
                          :date '(27000 0)))
            (args (expand-file-name "args" directory)))
       (unwind-protect
           (progn
+            (with-temp-file message-file
+              (insert
+               "Content-Type: text/plain; charset=utf-8\n"
+               "Content-Transfer-Encoding: quoted-printable\n\n"
+               "caf=C3=A9\n"))
             (with-temp-file mu4e-mu-binary
               (insert "#!/bin/sh\n"
                       "printf '%s\\n' \"$@\" > "
@@ -462,7 +486,7 @@
                 (should (equal
                          (tessera-x-item-id
                           (car (tessera-x-context-items context)))
-                         fixture))
+                         message-file))
                 (should (string-match-p
                          "café"
                          (tessera-x-item-body
@@ -478,7 +502,7 @@
                                (list root anchor child))))
                 (dolist (item (list root anchor child))
                   (setf (tessera-x-item-data item)
-                        (list :path fixture)))
+                        (list :path message-file)))
                 (setf (tessera-x-item-id anchor) "duplicate"
                       (tessera-x-item-parent child) "root")
                 (tessera-mu4e-x--query context "msgid:root" anchor)

@@ -20,38 +20,7 @@ in
       pkgs,
       ...
     }:
-    let
-      inherit (lib)
-        getExe
-        ;
-
-      mkEmacsApp =
-        emacs: description:
-        let
-          launcher = pkgs.callPackage (projectRoot + /tool/apps/emacs.nix) {
-            inherit
-              emacs
-              projectRoot
-              ;
-          };
-        in
-        {
-          meta = {
-            inherit
-              description
-              ;
-          };
-
-          program = getExe launcher;
-          type = "app";
-        };
-    in
     {
-      apps = {
-        emacs = mkEmacsApp pkgs.emacs31 "Launch Emacs 31";
-        emacs31 = mkEmacsApp pkgs.emacs31 "Launch Emacs 31";
-      };
-
       devshells = {
         default = import ./devshells/default.nix {
           inherit

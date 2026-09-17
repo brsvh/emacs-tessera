@@ -110,7 +110,6 @@
         };
 
         partitionedAttrs = {
-          apps = "tool";
           devShells = "tool";
           formatter = "tool";
         };
