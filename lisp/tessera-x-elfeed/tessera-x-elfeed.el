@@ -5,7 +5,8 @@
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1") (tessera "0.1.0") (tessera-x "0.1.0") (elfeed "4.0.1"))
+;; Package-Requires: ((emacs "30.1") (tessera "0.1.0")
+;;                   (tessera-x "0.1.0") (elfeed "4.0.1"))
 ;; Keywords: convenience, mail, news
 ;; URL: https://github.com/brsvh/emacs-tessera
 
@@ -40,6 +41,36 @@
 (defvar elfeed-tree-filter)
 (defvar url-http-response-status)
 (defvar url-http-end-of-headers)
+
+(defgroup tessera-x-elfeed nil
+  "Experimental Tessera features for Elfeed."
+  :group 'tessera-x
+  :group 'tessera-elfeed
+  :prefix "tessera-x-elfeed-")
+
+;;;; Context options
+
+(defcustom tessera-x-elfeed-fetch-linked-content t
+  "Whether selected-entry contexts fetch linked HTTP content.
+Today contexts always use locally stored feed bodies."
+  :type 'boolean
+  :group 'tessera-x-elfeed)
+
+(defcustom tessera-x-elfeed-fetch-minimum-characters nil
+  "Skip context HTTP retrieval for stored bodies of this size.
+Nil means fetch every selected HTTP link when fetching is enabled."
+  :type '(choice (const nil) natnum)
+  :group 'tessera-x-elfeed)
+
+(defcustom tessera-x-elfeed-fetch-timeout 15
+  "Seconds to fetch a context body before using stored feed content."
+  :type 'natnum
+  :group 'tessera-x-elfeed)
+
+(defcustom tessera-x-elfeed-fetch-concurrency 4
+  "Maximum simultaneous linked-page requests for one context."
+  :type 'natnum
+  :group 'tessera-x-elfeed)
 
 ;;;; Context snapshots
 
@@ -180,7 +211,8 @@
 (defun tessera-x-elfeed--start-fetch (request item)
   "Start REQUEST's transfer for ITEM, falling back on startup errors."
   (let ((fetch (make-tessera-x-elfeed--fetch
-                :request request :item item)))
+                :request request
+                :item item)))
     (push fetch (tessera-x-elfeed--request-active request))
     (condition-case err
         (let ((buffer (url-retrieve

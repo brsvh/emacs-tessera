@@ -108,10 +108,10 @@ its dependencies.  Load:
 extension using @code{elfeed-tree-mode}.  Select a line with an
 associated Elfeed filter.  Tessera does not provide the Tree interface.
 
-  Use @kbd{M-x customize-group @key{RET} tessera-elfeed @key{RET}} to
-configure the options documented here.  You can also load
-@code{tessera-elfeed} and set them in your initialization file before
-loading the snapshot commands.
+  Use @kbd{M-x customize-group @key{RET} tessera-x-elfeed @key{RET}}
+to configure this package.  Its options are defined in
+@code{tessera-x-elfeed}; load that library before setting them in your
+initialization file.
 
 @node First Context
 @section Preparing a First Context
@@ -122,8 +122,8 @@ linked HTTP or HTTPS pages.  To use stored feed bodies only, configure
 the following before preparation:
 
 @lisp
-(require 'tessera-elfeed)
-(setq tessera-x-elfeed-fetch-linked-content nil)
+(require 'tessera-x-elfeed)
+(setopt tessera-x-elfeed-fetch-linked-content nil)
 @end lisp
 
   Once ready, inspect the result with @kbd{M-x tessera-x-show-context}

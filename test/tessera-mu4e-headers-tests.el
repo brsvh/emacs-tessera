@@ -18,38 +18,39 @@
           '(draft trashed flagged replied passed personal list
                   attach signed encrypted calendar))
          (mu4e--mark-map (make-hash-table))
-         (message '(:docid 42 :priority high
-                           :flags (new unread draft trashed flagged
-                                       replied passed personal list
-                                       attach signed encrypted
-                                       calendar)))
+         (message '( :docid 42
+                     :priority high
+                     :flags (new unread draft trashed flagged
+                                 replied passed personal list
+                                 attach signed encrypted
+                                 calendar)))
          (original (copy-tree message))
          (context (tessera-mu4e-headers--context message nil nil)))
     (puthash 42 '(move . "/archive") mu4e--mark-map)
     (with-temp-buffer
       (insert (propertize "Message" 'msg message))
       (dolist (spec
-               '((status ?T tessera-mu4e-headers-trashed-face
+               '((status ?T tessera-glyph-negative-face
                          ("Trashed" "Draft" "New" "Unread") negative)
-                 (priority ?H tessera-mu4e-headers-high-priority-face
+                 (priority ?H tessera-glyph-warning-face
                            ("High priority" "Flagged") warning)
-                 (secondary ?R tessera-mu4e-headers-replied-face
+                 (secondary ?R tessera-glyph-positive-face
                             ("Replied" "Forwarded" "Personal"
                              "Mailing list") positive)
-                 (operation ?m tessera-mu4e-headers-operation-face
+                 (operation ?m tessera-glyph-attention-face
                             ("Move: /archive") attention)))
         (let* ((slot (tessera-mu4e-headers--slot (car spec)))
                (text (tessera--render-glyph-slot slot context t))
                (position (text-property-not-all
                           0 (length text)
-                          'tessera-glyph-semantic nil text))
+                          'tessera-glyph nil text))
                (help (get-text-property position 'help-echo text)))
           (should (= (aref text position) (nth 1 spec)))
           (should (equal (get-text-property position 'face text)
                          (nth 2 spec)))
           (should (eq (get-text-property
-                       position 'tessera-glyph-semantic text)
-                      (nth 4 spec)))
+                       position 'tessera-glyph text)
+                      t))
           (should (equal (funcall help nil (current-buffer) 1)
                          (string-join (nth 3 spec) "; ")))))
       (dolist (slot '(attach signed encrypted calendar))
@@ -71,13 +72,13 @@
                (text (tessera--render-glyph-slot slot context t))
                (position (text-property-not-all
                           0 (length text)
-                          'tessera-glyph-semantic nil text)))
+                          'tessera-glyph nil text)))
           (should (eq (get-text-property
-                       position 'tessera-glyph-semantic text)
-                      'negative))
+                       position 'tessera-glyph text)
+                      t))
           (should
            (eq (get-text-property position 'face text)
-               'tessera-mu4e-headers-destructive-operation-face))))
+               'tessera-glyph-negative-face))))
       (puthash 42 '(unread) mu4e--mark-map)
       (should (eq 'mark-unread (tessera-mu4e-headers--state
                                 'operation context)))
@@ -125,7 +126,8 @@
                   "李明, José")
                  ((:name "Self" :email "self@example.test")
                   ((:email "li@example.test")) "li@example.test")))
-        (let* ((message (list :from (list (car spec)) :to (cadr spec)
+        (let* ((message (list :from (list (car spec))
+                              :to (cadr spec)
                               :flags '(unread)))
                (context (tessera-mu4e-headers--context
                          message nil nil))
@@ -146,11 +148,14 @@
         (mu4e-headers-mode-hook nil)
         (mu4e-headers-fields '((:subject)))
         (mu4e-search-hide-enabled nil)
-        (message '(:docid 42 :subject "Native subject"
-                          :from ((:name "Sender"
-                                        :email "a@example.test"))
-                          :date (27000 0) :flags (unread attach)
-                          :priority high :tags ("foo" "bar"))))
+        (message '( :docid 42
+                    :subject "Native subject"
+                    :from (( :name "Sender"
+                             :email "a@example.test"))
+                    :date (27000 0)
+                    :flags (unread attach)
+                    :priority high
+                    :tags ("foo" "bar"))))
     (with-temp-buffer
       (mu4e-headers-mode)
       (let ((inhibit-read-only t)
@@ -175,7 +180,7 @@
             (tessera-mu4e-headers--refresh)
             (should (equal (gethash 42 mu4e--mark-map)
                            '(move . "/archive")))
-            (should (string-match-p "→ /archive" (buffer-string)))
+            (should (string-match-p "> /archive" (buffer-string)))
             (tessera-mu4e-headers--disable)
             (should (cl-some (lambda (overlay)
                                (overlay-get overlay 'mu4e-mark))
@@ -220,7 +225,8 @@
                      (lambda (&rest _) buffer)))
             (dotimes (index 4)
               (mu4e~headers-insert-header
-               (list :docid (1+ index) :subject "Subject"
+               (list :docid (1+ index)
+                     :subject "Subject"
                      :from '((:name "Sender" :email "a@example.test"))
                      :date '(27000 0)
                      :flags (cons 'unread (nth 2 settings))
@@ -288,9 +294,11 @@
                    (lambda (&rest _) buffer)))
           (dotimes (index 3)
             (mu4e~headers-insert-header
-             (list :docid (1+ index) :subject "Subject"
+             (list :docid (1+ index)
+                   :subject "Subject"
                    :from '((:name "Author" :email "a@example.test"))
-                   :date '(27000 0) :flags '(seen))
+                   :date '(27000 0)
+                   :flags '(seen))
              (point-max)))
           (dolist (local '(nil t))
             (when local
@@ -328,8 +336,9 @@
 
 (ert-deftest tessera-mu4e-headers-labels-keep-neutral-separators ()
   (let* ((mu4e--mark-map (make-hash-table))
-         (message '(:flags (seen) :labels ("foo" "bar")
-                           :tags ("bar" "baz")))
+         (message '( :flags (seen)
+                     :labels ("foo" "bar")
+                     :tags ("bar" "baz")))
          (context (tessera-mu4e-headers--context message nil nil))
          (text (tessera-mu4e-headers--field 'labels context)))
     (should (equal text "foo,bar,baz"))

@@ -35,6 +35,310 @@
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-thread)
 
+(defgroup tessera-mu4e-headers nil
+  "Tessera message headers for mu4e."
+  :group 'tessera-mu4e
+  :prefix "tessera-mu4e-headers-")
+
+;;;; Glyph options
+
+(defvar tessera-mu4e-headers--glyph-defaults
+  '((status-trashed
+     :ascii "T"
+     :unicode "⌫"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-trash_can_outline")
+     :face tessera-glyph-negative-face)
+    (status-draft
+     :ascii "D"
+     :unicode "✎"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email_edit_outline")
+     :face tessera-glyph-informational-face)
+    (status-new
+     :ascii "N"
+     :unicode "✦"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-new_box")
+     :face tessera-glyph-accent-face)
+    (status-unread
+     :ascii "u"
+     :unicode "●"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email")
+     :face tessera-glyph-accent-face)
+    (status-seen
+     :ascii "S"
+     :unicode "○"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email_open_outline")
+     :face tessera-glyph-muted-face)
+    (priority-high
+     :ascii "H"
+     :unicode "↑"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-arrow_up_bold")
+     :face tessera-glyph-warning-face)
+    (priority-flagged
+     :ascii "F"
+     :unicode "★"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-star")
+     :face tessera-glyph-attention-face)
+    (priority-low
+     :ascii "L"
+     :unicode "↓"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-arrow_down_bold")
+     :face tessera-glyph-muted-face)
+    (operation-move
+     :ascii "m"
+     :unicode "→"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-folder_move_outline")
+     :face tessera-glyph-attention-face)
+    (operation-refile
+     :ascii "r"
+     :unicode "↧"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-archive_arrow_down_outline")
+     :face tessera-glyph-attention-face)
+    (operation-trash
+     :ascii "d"
+     :unicode "⌫"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-trash_can_outline")
+     :face tessera-glyph-negative-face)
+    (operation-untrash
+     :ascii "="
+     :unicode "↶"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-restore")
+     :face tessera-glyph-attention-face)
+    (operation-delete
+     :ascii "D"
+     :unicode "×"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-delete_forever_outline")
+     :face tessera-glyph-negative-face)
+    (operation-flag
+     :ascii "+"
+     :unicode "☆"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-star_plus_outline")
+     :face tessera-glyph-attention-face)
+    (operation-unflag
+     :ascii "-"
+     :unicode "⊖"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-star_minus_outline")
+     :face tessera-glyph-attention-face)
+    (operation-read
+     :ascii "!"
+     :unicode "○"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email_open_outline")
+     :face tessera-glyph-attention-face)
+    (operation-mark-unread
+     :ascii "?"
+     :unicode "●"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email")
+     :face tessera-glyph-attention-face)
+    (operation-label
+     :ascii "l"
+     :unicode "+"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-tag_plus_outline")
+     :face tessera-glyph-attention-face)
+    (operation-unlabel
+     :ascii "L"
+     :unicode "−"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-tag_remove_outline")
+     :face tessera-glyph-attention-face)
+    (operation-action
+     :ascii "a"
+     :unicode "▶"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-play_circle_outline")
+     :face tessera-glyph-attention-face)
+    (operation-something
+     :ascii "*"
+     :unicode "◆"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-clipboard_clock_outline")
+     :face tessera-glyph-attention-face)
+    (secondary-replied
+     :ascii "R"
+     :unicode "↶"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-reply")
+     :face tessera-glyph-positive-face)
+    (secondary-passed
+     :ascii "P"
+     :unicode "↷"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-forward")
+     :face tessera-glyph-informational-face)
+    (secondary-personal
+     :ascii "p"
+     :unicode "♙"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-account_outline")
+     :face tessera-glyph-accent-face)
+    (secondary-list
+     :ascii "l"
+     :unicode "≡"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-format_list_bulleted")
+     :face tessera-glyph-informational-face)
+    (attachment
+     :ascii "a"
+     :unicode "📎"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-paperclip")
+     :face tessera-glyph-informational-face)
+    (signature
+     :ascii "S"
+     :unicode "✍︎"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-file_sign")
+     :face tessera-glyph-informational-face)
+    (encryption
+     :ascii "E"
+     :unicode "🔒"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-lock_outline")
+     :face tessera-glyph-accent-face)
+    (calendar
+     :ascii "c"
+     :unicode "▦"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-calendar")
+     :face tessera-glyph-attention-face)
+    (target
+     :ascii ">"
+     :unicode "→"
+     :face tessera-glyph-attention-face))
+  "Default glyph representations and shared semantic faces.")
+
+(defun tessera-mu4e-headers--set-glyphs
+    (symbol value)
+  "Set glyph option SYMBOL to validated VALUE and refresh views."
+  (tessera--set-glyphs
+   symbol value tessera-mu4e-headers--glyph-defaults))
+
+(defcustom tessera-mu4e-headers-glyphs nil
+  "Overrides for the named fields of this view's glyphs.
+Each alist entry maps a glyph ID to a property list.  Missing fields
+keep their defaults.  Use :ascii, :unicode, :nerd-icons, :face, and
+:hidden; see `tessera-glyph-resolve'.  Customize and `setopt' redraw
+active views.  After `setq', call `tessera-refresh-glyphs'."
+  :type (tessera--glyph-custom-type
+         tessera-mu4e-headers--glyph-defaults)
+  :initialize #'custom-initialize-default
+  :set #'tessera-mu4e-headers--set-glyphs
+  :group 'tessera-mu4e-headers)
+
+;;;; Faces
+
+(defface tessera-mu4e-headers-subject-face
+  '((t :extend nil))
+  "Subject adjustments composed over native message state."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-unread-subject-face
+  '((t :inherit (bold tessera-mu4e-headers-subject-face)
+       :extend nil))
+  "Unread emphasis over the native subject state."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-read-contact-face
+  '((t :inherit (mu4e-header-face default)
+       :weight normal
+       :slant italic
+       :extend nil))
+  "Read contacts, independent of special message states."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-unread-contact-face
+  '((t :inherit (mu4e-unread-face default)
+       :weight bold
+       :slant italic
+       :extend nil))
+  "Unread contacts, independent of special message states."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-subject-face
+  '((t :inherit (mu4e-header-face default)
+       :weight bold
+       :slant normal
+       :extend nil))
+  "Subjects of threads with no unread messages."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-unread-subject-face
+  '((t :inherit (mu4e-unread-face default)
+       :weight bold
+       :slant normal
+       :extend nil))
+  "Subjects of threads containing unread messages."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-contact-face
+  '((t :slant italic :extend nil))
+  "Contact adjustments over each message's native state."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-unread-contact-face
+  '((t :inherit tessera-mu4e-headers-thread-contact-face
+       :weight bold
+       :extend nil))
+  "Unread contacts retaining their native state and italics."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-count-face
+  '((t :inherit (mu4e-header-face default) :extend nil))
+  "Counts of threads with no unread messages."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-thread-unread-count-face
+  '((t :inherit (mu4e-unread-face default)
+       :weight bold
+       :extend nil))
+  "Counts of threads containing unread messages."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-date-face
+  '((t :inherit (mu4e-header-face default)
+       :weight normal
+       :slant normal
+       :extend nil))
+  "Read message dates."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-unread-date-face
+  '((t :inherit (mu4e-unread-face default)
+       :weight bold
+       :slant normal
+       :extend nil))
+  "Unread message dates."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-label-face
+  '((t :inherit mu4e-header-value-face
+       :weight normal
+       :slant normal
+       :extend nil))
+  "Individual classification labels, excluding separators."
+  :group 'tessera-mu4e-headers)
+
+(defface tessera-mu4e-headers-operation-face
+  '((t :inherit tessera-glyph-attention-face :extend nil))
+  "Pending actions, separate from current message state."
+  :group 'tessera-mu4e-headers)
+
 (defvar mu4e-search-threads)
 (defvar mu4e-headers-visible-flags)
 (defvar mu4e-headers-show-target)
@@ -102,76 +406,49 @@ aggregate unread state, while contacts retain native message state."
     (add-face-text-property 0 (length result) face nil result)
     result))
 
-(defun tessera-mu4e-headers--glyph-face (slot variant)
-  "Return the face for glyph VARIANT in SLOT.
-Pending operation marks take precedence over matching flag names."
-  (let ((role
-         (if (eq slot 'operation)
-             (if (memq variant '(trash delete))
-                 'destructive-operation
-               'operation)
-           (pcase variant
-             ('seen 'read)
-             ('passed 'forwarded)
-             ('high 'high-priority)
-             ('low 'low-priority)
-             ('attach 'attachment)
-             ('signed 'signature)
-             ('encrypted 'encryption)
-             ((or 'new 'unread 'draft 'trashed 'flagged 'replied
-                  'list 'personal 'calendar)
-              variant)
-             (_ (error "Unknown mu4e glyph variant: %S" variant))))))
-    (intern (format "tessera-mu4e-headers-%s-face" role))))
-
 ;;;; Glyphs and header fields
 
-(defconst tessera-mu4e-headers--icons
+(defvar tessera-mu4e-headers--states
   '((status
-     (trashed "T" "⌫" "trash-can-outline" "Trashed" negative)
-     (draft "D" "✎" "email-edit-outline" "Draft" informational)
-     (new "N" "✦" "new-box" "New" accent)
-     (unread "u" "●" "email" "Unread" accent)
-     (seen "S" "○" "email-open-outline" "Read" muted))
+     (trashed "Trashed")
+     (draft "Draft")
+     (new "New")
+     (unread "Unread")
+     (seen "Read"))
     (priority
-     (high "H" "↑" "arrow-up-bold" "High priority" warning)
-     (flagged "F" "★" "star" "Flagged" attention)
-     (low "L" "↓" "arrow-down-bold" "Low priority" muted))
+     (high "High priority")
+     (flagged "Flagged")
+     (low "Low priority"))
     (operation
-     (move "m" "→" "folder-move-outline" "Move" attention)
-     (refile "r" "↧" "archive-arrow-down-outline" "Refile" attention)
-     (trash "d" "⌫" "trash-can-outline" "Trash action" negative)
-     (untrash "=" "↶" "restore" "Untrash action" attention)
-     (delete "D" "×" "delete-forever-outline" "Delete action"
-             negative)
-     (flag "+" "☆" "star-plus-outline" "Flag action" attention)
-     (unflag "-" "⊖" "star-minus-outline" "Unflag action" attention)
-     (read "!" "○" "email-open-outline" "Read action" attention)
-     (mark-unread "?" "●" "email" "Unread action" attention)
-     (label "l" "+" "tag-plus-outline" "Add/remove labels" attention)
-     (unlabel "L" "−" "tag-remove-outline" "Clear labels" attention)
-     (action "a" "▶" "play-circle-outline" "Custom action" attention)
-     (something "*" "◆" "clipboard-clock-outline" "Deferred"
-                attention))
+     (move "Move")
+     (refile "Refile")
+     (trash "Trash action")
+     (untrash "Untrash action")
+     (delete "Delete action")
+     (flag "Flag action")
+     (unflag "Unflag action")
+     (read "Read action")
+     (mark-unread "Unread action")
+     (label "Add/remove labels")
+     (unlabel "Clear labels")
+     (action "Custom action")
+     (something "Deferred"))
     (secondary
-     (replied "R" "↶" "reply" "Replied" positive)
-     (passed "P" "↷" "forward" "Forwarded" informational)
-     (personal "p" "♙" "account-outline" "Personal" accent)
-     (list "l" "≡" "format-list-bulleted" "Mailing list"
-           informational))
+     (replied "Replied")
+     (passed "Forwarded")
+     (personal "Personal")
+     (list "Mailing list"))
     (attach
-     (attach "a" "📎" "paperclip" "Attachment present" informational))
+     (attach "Attachment present"))
     (signed
-     (signed "S" "✍\uFE0E" "file-sign" "Signed; not verified"
-             informational))
+     (signed "Signed; not verified"))
     (encrypted
-     (encrypted "E" "🔒" "lock-outline" "Encrypted" accent))
+     (encrypted "Encrypted"))
     (calendar
-     (calendar "c" "▦" "calendar" "Calendar invitation" attention)))
-  "Glyph variants grouped by their native message or action slot.
-Each variant lists its ID, ASCII, Unicode, icon, help, and semantic.")
+     (calendar "Calendar invitation")))
+  "Native glyph variants and help labels, grouped by slot.")
 
-(defconst tessera-mu4e-headers--auxiliary
+(defvar tessera-mu4e-headers--auxiliary
   '((status trashed draft)
     (priority flagged)
     (secondary replied passed personal list))
@@ -245,8 +522,10 @@ for padding purposes.  Threading follows `mu4e-search-threads'."
 (defun tessera-mu4e-headers--context (object buffer window)
   "Build a context for native OBJECT in BUFFER and WINDOW."
   (make-tessera-entry-context
-   :backend 'mu4e-headers :object object
-   :buffer buffer :window window
+   :backend 'mu4e-headers
+   :object object
+   :buffer buffer
+   :window window
    :thread (tessera-mu4e-headers--thread-context object)))
 
 (defun tessera-mu4e-headers--mark (message)
@@ -303,10 +582,9 @@ visibility settings.  Pending operations also show their target."
                         (format "%s: %s" label (cdr mark)) label))
                 (mapconcat
                  (lambda (state)
-                   (nth 4 (assq state
-                                (cdr (assq
-                                      slot
-                                      tessera-mu4e-headers--icons)))))
+                   (cadr (assq state
+                               (alist-get
+                                slot tessera-mu4e-headers--states))))
                  (tessera-mu4e-headers--states
                   slot (tessera-mu4e-headers--context
                         message buffer window))
@@ -314,33 +592,36 @@ visibility settings.  Pending operations also show their target."
             label))
       label)))
 
-(defun tessera-mu4e-headers--glyph (spec)
-  "Make the shared renderer glyph for SPEC."
-  (make-tessera-glyph
-   :ascii (nth 1 spec) :unicode (nth 2 spec)
-   :nerd-icons
-   (list :function 'nerd-icons-mdicon
-         :name (concat "nf-md-"
-                       (replace-regexp-in-string "-" "_"
-                                                 (nth 3 spec))))
-   :semantic (nth 5 spec)))
+(defun tessera-mu4e-headers--glyph (slot variant)
+  "Return the configured glyph for native SLOT and VARIANT."
+  (tessera-glyph-resolve
+   (pcase slot
+     ('attach 'attachment)
+     ('signed 'signature)
+     ('encrypted 'encryption)
+     ('calendar 'calendar)
+     (_ (intern (format "%s-%s" slot variant))))
+   tessera-mu4e-headers--glyph-defaults
+   tessera-mu4e-headers-glyphs))
 
 (defun tessera-mu4e-headers--slot (name)
   "Make semantic or content glyph slot NAME."
   (make-tessera-glyph-slot
-   :name name :width 2 :align 'center
+   :name name
+   :width 2
+   :align 'center
    :selector (apply-partially #'tessera-mu4e-headers--state name)
    :glyphs
    (mapcar
     (lambda (spec)
-      (list (car spec) :glyph (tessera-mu4e-headers--glyph spec)
-            :face (tessera-mu4e-headers--glyph-face name (car spec))
+      (list (car spec)
+            :glyph (tessera-mu4e-headers--glyph name (car spec))
             :help-echo
             (if (memq name '(status priority secondary operation))
                 (apply-partially #'tessera-mu4e-headers--help
-                                 name (nth 4 spec))
-              (nth 4 spec))))
-    (cdr (assq name tessera-mu4e-headers--icons)))))
+                                 name (nth 1 spec))
+              (nth 1 spec))))
+    (cdr (assq name tessera-mu4e-headers--states)))))
 
 (defun tessera-mu4e-headers--contact (message)
   "Return contact names for MESSAGE, falling back to email addresses.
@@ -391,10 +672,8 @@ Use recipients for personal outgoing mail, as native mu4e does."
       ('thread-tree
        (when-let* ((text (tessera-thread-prefix context)))
          (propertize text
-                     'face 'tessera-mu4e-headers-thread-tree-face
                      'tessera--overflow-help
-                     #'tessera-mu4e-headers--overflow-help
-                     'mouse-face 'tessera-entry-hover-face)))
+                     #'tessera-mu4e-headers--overflow-help)))
       ('thread-count
        (when-let* ((text (tessera-thread-count context)))
          (propertize
@@ -422,11 +701,19 @@ Use recipients for personal outgoing mail, as native mu4e does."
       ('target
        (let ((mark (tessera-mu4e-headers--mark message)))
          (when (and mu4e-headers-show-target (cdr mark))
-           (propertize (format "→ %s" (cdr mark))
-                       'face 'tessera-mu4e-headers-operation-face
-                       'help-echo
-                       (format "%s: %s" (car mark) (cdr mark))
-                       'mouse-face 'tessera-entry-hover-face))))
+           (let ((indicator
+                  (tessera-glyph-render
+                   (tessera-glyph-resolve
+                    'target tessera-mu4e-headers--glyph-defaults
+                    tessera-mu4e-headers-glyphs) context)))
+             (concat
+              (unless (string-empty-p indicator)
+                (concat indicator (propertize " " 'face 'default)))
+              (propertize (cdr mark)
+                          'face 'tessera-mu4e-headers-operation-face
+                          'help-echo
+                          (format "%s: %s" (car mark) (cdr mark))
+                          'mouse-face 'tessera-entry-hover-face))))))
       (_
        (let* ((text
                (pcase role
@@ -463,15 +750,25 @@ Use recipients for personal outgoing mail, as native mu4e does."
 
 (defun tessera-mu4e-headers--register ()
   "Register the native mu4e headers backend."
+  (tessera--validate-glyph-overrides
+   tessera-mu4e-headers--glyph-defaults
+   tessera-mu4e-headers-glyphs 2)
   (let* ((content '(:slots (attach :optional t) (signed :optional t)
                            (encrypted :optional t)
                            (calendar :optional t)))
          (subject '(subject :grow t :min-width 4 :truncate tail))
          (entry-subject (append subject '(:point t)))
-         (target '(target :grow t :max-width 24 :min-width 0
-                          :truncate tail :optional t))
-         (labels '(labels :grow t :max-width 24 :min-width 0
-                          :truncate tail :priority -1 :optional t)))
+         (target '(target :grow t
+                          :max-width 24
+                          :min-width 0
+                          :truncate tail
+                          :optional t))
+         (labels '(labels :grow t
+                          :max-width 24
+                          :min-width 0
+                          :truncate tail
+                          :priority -1
+                          :optional t)))
     (tessera-entry-register
      'mu4e-headers :context #'tessera-mu4e-headers--context
      :segments
@@ -483,11 +780,13 @@ Use recipients for personal outgoing mail, as native mu4e does."
      :glyph-slots
      (mapcar (lambda (spec)
                (tessera-mu4e-headers--slot (car spec)))
-             tessera-mu4e-headers--icons)
+             tessera-mu4e-headers--states)
      :thread-layout
      (let ((leading (tessera-mu4e-headers--prefix 'thread nil))
            (left (list 'thread-tree
-                       '(contact :grow t :min-width 4 :truncate tail
+                       '(contact :grow t
+                                 :min-width 4
+                                 :truncate tail
                                  :point t)
                        content target))
            (right (list labels 'date)))
@@ -499,13 +798,15 @@ Use recipients for personal outgoing mail, as native mu4e does."
          :main-leading-segments '(thread-count)
          :main-left-segments (list subject)
          :extra-glyph-slots leading
-         :extra-left-segments left :extra-right-segments right)
+         :extra-left-segments left
+         :extra-right-segments right)
         :child
         (make-tessera-entry-layout
          :glyph-slots-align 'right
          :leading-width #'tessera-mu4e-headers--width
          :main-glyph-slots leading
-         :main-left-segments left :main-right-segments right)))
+         :main-left-segments left
+         :main-right-segments right)))
      :layouts
      (list
       (cons 'single-line
@@ -516,7 +817,8 @@ Use recipients for personal outgoing mail, as native mu4e does."
              (tessera-mu4e-headers--prefix 'single-line nil)
              :main-left-segments (list entry-subject target content)
              :main-right-segments
-             (list labels '(contact :max-width 20 :truncate tail
+             (list labels '(contact :max-width 20
+                                    :truncate tail
                                     :optional t) 'date)))
       (cons 'two-line
             (make-tessera-entry-layout
@@ -870,6 +1172,24 @@ message only while it remains selected after the native update."
                 'tessera-mu4e-headers--active buffer))
              (buffer-list))
       (tessera-mu4e-headers--navigation nil))))
+
+(defun tessera-mu4e-headers--glyphs-changed (option)
+  "Refresh active mu4e views after glyph OPTION changes.
+Nil means explicitly refresh all glyphs and their hover faces."
+  (when (or (null option)
+            (memq option '(tessera-mu4e-headers-glyphs
+                           tessera-thread-glyphs
+                           tessera-entry-ellipsis
+                           tessera-glyph-style tessera-glyph-color)))
+    (when (gethash 'mu4e-headers tessera--entry-backends)
+      (tessera-mu4e-headers--register))
+    (save-window-excursion
+      (dolist (buffer (buffer-list))
+        (with-current-buffer buffer
+          (when tessera-mu4e-headers--active
+            (tessera-entry-clear-current)
+            (setq tessera-mu4e-headers--appearance nil)
+            (tessera-mu4e-headers--refresh)))))))
 
 (provide 'tessera-mu4e-headers)
 ;;; tessera-mu4e-headers.el ends here

@@ -34,7 +34,8 @@
   (list :marks
         (string (if unread gnus-unread-mark gnus-read-mark)
                 gnus-no-mark gnus-no-mark gnus-no-mark)
-        :author "Test Author" :group "nnmaildir+test:inbox"))
+        :author "Test Author"
+        :group "nnmaildir+test:inbox"))
 
 (defun tessera-gnus-tests--insert ()
   "Insert two test articles with native identifiers."

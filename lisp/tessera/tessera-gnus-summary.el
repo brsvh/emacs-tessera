@@ -24,9 +24,8 @@
 ;;; Commentary:
 
 ;; Follow `gnus-sum' for labels, cached article properties, native
-;; thread contexts, and summary rendering.  Public faces live in
-;; `tessera-gnus'; parsed MIME observations come from the article
-;; adapter.  Four native marks
+;; thread contexts, options, faces, and summary rendering.  Parsed
+;; MIME observations come from the article adapter.  Four native marks
 ;; remain at fixed offsets and share the first status glyph.
 ;; The visible entry is refreshed from those marks after changes.
 
@@ -40,6 +39,332 @@
 (require 'subr-x)
 (require 'seq)
 
+(defgroup tessera-gnus-summary nil
+  "Tessera entries in Gnus summary buffers."
+  :group 'tessera-gnus
+  :prefix "tessera-gnus-summary-")
+
+;;;; Glyph options
+
+(defvar tessera-gnus-summary--glyph-defaults
+  '((status-unread
+     :ascii nil
+     :unicode "●"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email")
+     :face tessera-glyph-accent-face)
+    (status-ticked
+     :ascii nil
+     :unicode "★"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-star")
+     :face tessera-glyph-attention-face)
+    (status-dormant
+     :ascii nil
+     :unicode "◇"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-sleep")
+     :face tessera-glyph-muted-face)
+    (status-expirable
+     :ascii nil
+     :unicode "◷"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-calendar_clock_outline")
+     :face tessera-glyph-warning-face)
+    (status-spam
+     :ascii nil
+     :unicode "!"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-shield_alert_outline")
+     :face tessera-glyph-negative-face)
+    (status-downloadable
+     :ascii nil
+     :unicode "↓"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-download")
+     :face tessera-glyph-informational-face)
+    (status-unsendable
+     :ascii nil
+     :unicode "↛"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email_off_outline")
+     :face tessera-glyph-negative-face)
+    (status-killed
+     :ascii nil
+     :unicode "×"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-close_circle_outline")
+     :face tessera-glyph-muted-face)
+    (status-kill-file
+     :ascii nil
+     :unicode "⊗"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-filter_remove")
+     :face tessera-glyph-muted-face)
+    (status-low-score
+     :ascii nil
+     :unicode "⇣"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-filter_check_outline")
+     :face tessera-glyph-muted-face)
+    (status-catchup
+     :ascii nil
+     :unicode "✓"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-playlist_check")
+     :face tessera-glyph-muted-face)
+    (status-ancient
+     :ascii nil
+     :unicode "◌"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-file_clock_outline")
+     :face tessera-glyph-muted-face)
+    (status-sparse
+     :ascii nil
+     :unicode "⋯"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-file_hidden")
+     :face tessera-glyph-muted-face)
+    (status-canceled
+     :ascii nil
+     :unicode "⊘"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-cancel")
+     :face tessera-glyph-negative-face)
+    (status-duplicate
+     :ascii nil
+     :unicode "⧉"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-content_copy")
+     :face tessera-glyph-muted-face)
+    (status-del
+     :ascii nil
+     :unicode "○"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email_open_outline")
+     :face tessera-glyph-muted-face)
+    (status-read
+     :ascii nil
+     :unicode "○"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email_open_outline")
+     :face tessera-glyph-muted-face)
+    (secondary-processable
+     :ascii nil
+     :unicode "◆"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-clipboard_clock_outline")
+     :face tessera-glyph-attention-face)
+    (secondary-cached
+     :ascii nil
+     :unicode "▣"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-database")
+     :face tessera-glyph-positive-face)
+    (secondary-replied
+     :ascii nil
+     :unicode "↶"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-reply")
+     :face tessera-glyph-positive-face)
+    (secondary-forwarded
+     :ascii nil
+     :unicode "↷"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-forward")
+     :face tessera-glyph-informational-face)
+    (secondary-saved
+     :ascii nil
+     :unicode "▣"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-content_save")
+     :face tessera-glyph-positive-face)
+    (secondary-unseen
+     :ascii nil
+     :unicode "✦"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-new_box")
+     :face tessera-glyph-accent-face)
+    (availability-undownloaded
+     :ascii nil
+     :unicode "↓"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-cloud_outline")
+     :face tessera-glyph-muted-face)
+    (availability-downloaded
+     :ascii nil
+     :unicode "✓"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-cloud_download")
+     :face tessera-glyph-positive-face)
+    (score-low
+     :ascii nil
+     :unicode "↓"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-arrow_down_bold")
+     :face tessera-glyph-muted-face)
+    (score-high
+     :ascii nil
+     :unicode "↑"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-arrow_up_bold")
+     :face tessera-glyph-attention-face)
+    (unknown
+     :ascii "?"
+     :unicode "?"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-help_circle")
+     :face tessera-glyph-warning-face)
+    (attachment-present
+     :ascii "a"
+     :unicode "📎"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-paperclip")
+     :face tessera-glyph-informational-face)
+    (signature-present
+     :ascii "S"
+     :unicode "✍︎"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-file_sign")
+     :face tessera-glyph-informational-face)
+    (signature-processed
+     :ascii "S"
+     :unicode "✍︎"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-file_sign")
+     :face tessera-glyph-informational-face)
+    (signature-error
+     :ascii "!"
+     :unicode "!"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-alert_circle_outline")
+     :face tessera-glyph-negative-face)
+    (encryption-present
+     :ascii "E"
+     :unicode "🔒"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-lock_outline")
+     :face tessera-glyph-accent-face)
+    (encryption-processed
+     :ascii "E"
+     :unicode "🔒"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-lock_outline")
+     :face tessera-glyph-accent-face)
+    (encryption-error
+     :ascii "!"
+     :unicode "!"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-alert_circle_outline")
+     :face tessera-glyph-negative-face))
+  "Default glyph representations and shared semantic faces.")
+
+(defun tessera-gnus-summary--set-glyphs
+    (symbol value)
+  "Set glyph option SYMBOL to validated VALUE and refresh views."
+  (tessera--set-glyphs
+   symbol value tessera-gnus-summary--glyph-defaults))
+
+(defcustom tessera-gnus-summary-glyphs nil
+  "Overrides for the named fields of this view's glyphs.
+Each alist entry maps a glyph ID to a property list.  Missing fields
+keep their defaults.  Use :ascii, :unicode, :nerd-icons, :face, and
+:hidden; see `tessera-glyph-resolve'.  Customize and `setopt' redraw
+active views.  After `setq', call `tessera-refresh-glyphs'."
+  :type (tessera--glyph-custom-type
+         tessera-gnus-summary--glyph-defaults)
+  :initialize #'custom-initialize-default
+  :set #'tessera-gnus-summary--set-glyphs
+  :group 'tessera-gnus-summary)
+
+;;;; Faces
+
+(defface tessera-gnus-summary-subject-face
+  '((t :inherit gnus-header-subject :extend nil))
+  "Base face for article subjects, below the native state face."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-unread-subject-face
+  '((t :inherit (bold tessera-gnus-summary-subject-face)
+       :extend nil))
+  "Face for unread article subjects."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-subject-face
+  '((t :inherit (bold gnus-summary-normal-read) :extend nil))
+  "Face for subjects of threads with no unread articles."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-unread-subject-face
+  '((t :inherit (bold gnus-summary-normal-unread) :extend nil))
+  "Face for subjects of threads containing unread articles."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-author-face
+  '((t :inherit (italic gnus-header-from)
+       :weight normal
+       :extend nil))
+  "Face for article authors."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-read-author-face
+  '((t :inherit gnus-summary-normal-read
+       :weight normal
+       :slant italic
+       :extend nil))
+  "Face for read authors outside thread layouts."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-unread-author-face
+  '((t :inherit (bold gnus-summary-normal-unread)
+       :slant italic
+       :extend nil))
+  "Face for unread authors outside thread layouts."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-date-face
+  '((t :inherit gnus-summary-normal-read
+       :weight normal
+       :slant normal
+       :extend nil))
+  "Face for read article dates."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-unread-date-face
+  '((t :inherit (bold gnus-summary-normal-unread)
+       :slant normal
+       :extend nil))
+  "Face for unread article dates."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-label-face
+  '((t :inherit gnus-header-content
+       :weight normal
+       :slant normal
+       :extend nil))
+  "Face for article labels from every supported source."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-spam-face
+  '((t :inherit tessera-glyph-negative-face :extend nil))
+  "Spam article state, supplementing the native summary face."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-expirable-face
+  '((t :inherit tessera-glyph-warning-face :extend nil))
+  "Expirable article state, supplementing the native summary face."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-count-face
+  '((t :inherit (gnus-summary-normal-read shadow) :extend nil))
+  "Thread counts with no unread articles."
+  :group 'tessera-gnus-summary)
+
+(defface tessera-gnus-summary-thread-unread-count-face
+  '((t :inherit (gnus-summary-normal-unread bold) :extend nil))
+  "Thread counts containing unread articles."
+  :group 'tessera-gnus-summary)
+
 (defvar gnus-registry-db)
 
 (declare-function gnus-registry-get-id-key "gnus-registry")
@@ -52,68 +377,40 @@
 
 ;;;; Native marks and glyphs
 
-(defconst tessera-gnus-summary--states
+(defvar tessera-gnus-summary--states
   '((status 0
-            (unread gnus-unread-mark "●" "email" accent "Unread")
-            (ticked gnus-ticked-mark "★" "star" attention "Ticked")
-            (dormant gnus-dormant-mark "◇" "sleep" muted "Dormant")
-            (expirable gnus-expirable-mark
-                       "◷" "calendar-clock-outline"
-                       warning "Expirable")
-            (spam gnus-spam-mark "!" "shield-alert-outline"
-                  negative "Spam")
-            (downloadable gnus-downloadable-mark "↓" "download"
-                          informational "Downloadable")
-            (unsendable gnus-unsendable-mark "↛" "email-off-outline"
-                        negative "Unsendable")
-            (killed gnus-killed-mark "×" "close-circle-outline"
-                    muted "Killed")
-            (kill-file gnus-kill-file-mark "⊗" "filter-remove"
-                       muted "Killed by rule")
-            (low-score gnus-low-score-mark "⇣" "filter-check-outline"
-                       muted "Read by score")
-            (catchup gnus-catchup-mark "✓" "playlist-check"
-                     muted "Caught up")
-            (ancient gnus-ancient-mark
-                     "◌" "file-clock-outline"
-                     muted "Ancient")
-            (sparse gnus-sparse-mark "⋯" "file-hidden"
-                    muted "Sparse")
-            (canceled gnus-canceled-mark "⊘" "cancel"
-                      negative "Canceled")
-            (duplicate gnus-duplicate-mark "⧉" "content-copy"
-                       muted "Duplicate")
-            (del gnus-del-mark "○" "email-open-outline"
-                 muted "Marked as read")
-            (read gnus-read-mark "○" "email-open-outline"
-                  muted "Read"))
+            (unread gnus-unread-mark "Unread")
+            (ticked gnus-ticked-mark "Ticked")
+            (dormant gnus-dormant-mark "Dormant")
+            (expirable gnus-expirable-mark "Expirable")
+            (spam gnus-spam-mark "Spam")
+            (downloadable gnus-downloadable-mark "Downloadable")
+            (unsendable gnus-unsendable-mark "Unsendable")
+            (killed gnus-killed-mark "Killed")
+            (kill-file gnus-kill-file-mark "Killed by rule")
+            (low-score gnus-low-score-mark "Read by score")
+            (catchup gnus-catchup-mark "Caught up")
+            (ancient gnus-ancient-mark "Ancient")
+            (sparse gnus-sparse-mark "Sparse")
+            (canceled gnus-canceled-mark "Canceled")
+            (duplicate gnus-duplicate-mark "Duplicate")
+            (del gnus-del-mark "Marked as read")
+            (read gnus-read-mark "Read"))
     (secondary 1
-               (processable gnus-process-mark
-                            "◆" "clipboard-clock-outline"
-                            attention "Marked for processing")
-               (cached gnus-cached-mark "▣" "database"
-                       positive "Cached")
-               (replied gnus-replied-mark "↶" "reply"
-                        positive "Replied")
-               (forwarded gnus-forwarded-mark "↷" "forward"
-                          informational "Forwarded")
-               (saved gnus-saved-mark "▣" "content-save"
-                      positive "Saved")
-               (unseen gnus-unseen-mark "✦" "new-box"
-                       accent "Unseen"))
+               (processable gnus-process-mark "Marked for processing")
+               (cached gnus-cached-mark "Cached")
+               (replied gnus-replied-mark "Replied")
+               (forwarded gnus-forwarded-mark "Forwarded")
+               (saved gnus-saved-mark "Saved")
+               (unseen gnus-unseen-mark "Unseen"))
     (availability 2
                   (undownloaded gnus-undownloaded-mark
-                                "↓" "cloud-outline"
-                                muted "Not downloaded")
-                  (downloaded gnus-downloaded-mark
-                              "✓" "cloud-download"
-                              positive "Downloaded"))
+                                "Not downloaded")
+                  (downloaded gnus-downloaded-mark "Downloaded"))
     (score 3
-           (low gnus-score-below-mark "↓" "arrow-down-bold"
-                muted "Below default score")
-           (high gnus-score-over-mark "↑" "arrow-up-bold"
-                 attention "Above default score")))
-  "Native mark variables and visual variants, grouped by slot.")
+           (low gnus-score-below-mark "Below default score")
+           (high gnus-score-over-mark "Above default score")))
+  "Native mark variables and help labels, grouped by slot.")
 
 ;;;; Buffer state
 
@@ -299,8 +596,10 @@ parents and adopted roots.  Threading follows `gnus-show-threads'."
 (defun tessera-gnus-summary--context (header buffer window)
   "Return the entry context for HEADER in BUFFER and WINDOW."
   (make-tessera-entry-context
-   :backend 'gnus-summary :object header
-   :buffer buffer :window window
+   :backend 'gnus-summary
+   :object header
+   :buffer buffer
+   :window window
    :metadata tessera-gnus-summary--metadata
    :thread (plist-get tessera-gnus-summary--metadata :thread)))
 
@@ -324,25 +623,6 @@ parents and adopted roots.  Threading follows `gnus-show-threads'."
   (not (gnus-read-mark-p
         (aref (plist-get (tessera-entry-context-metadata context)
                          :marks) 0))))
-
-(defun tessera-gnus-summary--glyph-face (slot variant semantic)
-  "Return the Gnus face for SLOT, VARIANT, and SEMANTIC role."
-  (cond
-   ((eq slot 'score)
-    (if (eq variant 'high) 'tessera-gnus-summary-high-score-face
-      'tessera-gnus-summary-low-score-face))
-   ((eq variant 'spam) 'tessera-gnus-summary-spam-face)
-   ((eq variant 'expirable) 'tessera-gnus-summary-expirable-face)
-   (t
-    (alist-get
-     semantic
-     '((accent . tessera-gnus-summary-status-face)
-       (attention . tessera-gnus-summary-important-face)
-       (muted . tessera-gnus-summary-muted-face)
-       (positive . tessera-gnus-summary-positive-face)
-       (informational . tessera-gnus-summary-informational-face)
-       (warning . tessera-gnus-summary-warning-face)
-       (negative . tessera-gnus-summary-error-face))))))
 
 (defun tessera-gnus-summary--face-index ()
   "Index native scores and uncached articles for one batch update.
@@ -401,10 +681,9 @@ Spam and expirable faces take precedence over native attributes."
             (and native (list native)) (list base))))
 
 (defun tessera-gnus-summary--thread-tree (context)
-  "Return CONTEXT's thread branches using the Gnus tree face."
+  "Return CONTEXT's configured thread branches."
   (when-let* ((text (tessera-thread-prefix context)))
-    (propertize text 'face 'tessera-gnus-summary-thread-tree-face
-                'tessera--overflow-help
+    (propertize text 'tessera--overflow-help
                 #'tessera-gnus-summary--overflow-help)))
 
 (defun tessera-gnus-summary--overflow-help (window object position)
@@ -452,39 +731,32 @@ value.  Signal an error if neither value is an ASCII character."
     (char-to-string character)))
 
 (defun tessera-gnus-summary--slot (spec)
-  "Build a native status slot from SPEC."
+  "Build a native status slot from SPEC and configured glyphs."
   (make-tessera-glyph-slot
-   :name (car spec) :width 2 :align 'center
+   :name (car spec)
+   :width 2
+   :align 'center
    :selector (apply-partially #'tessera-gnus-summary--state
                               (car spec))
    :glyphs
    (append
     (mapcar
      (lambda (entry)
-       (pcase-let ((`(,id ,mark ,unicode ,icon ,semantic ,help)
-                    entry))
+       (pcase-let ((`(,id ,mark ,help) entry))
          (list id
-               :glyph (make-tessera-glyph
-                       :ascii (tessera-gnus-summary--ascii-mark mark)
-                       :unicode unicode
-                       :nerd-icons
-                       (list :function 'nerd-icons-mdicon
-                             :name
-                             (concat "nf-md-"
-                                     (string-replace "-" "_" icon)))
-                       :semantic semantic)
-               :face (tessera-gnus-summary--glyph-face
-                      (car spec) id semantic)
+               :glyph
+               (tessera-glyph-resolve
+                (intern (format "%s-%s" (car spec) id))
+                tessera-gnus-summary--glyph-defaults
+                tessera-gnus-summary-glyphs
+                (tessera-gnus-summary--ascii-mark mark))
                :help-echo help)))
      (cddr spec))
     (list
      (list 'unknown :glyph
-           (make-tessera-glyph
-            :ascii "?" :unicode "?"
-            :nerd-icons '(:function nerd-icons-mdicon
-                                    :name "nf-md-help_circle")
-            :semantic 'warning)
-           :face 'tessera-gnus-summary-warning-face
+           (tessera-glyph-resolve
+            'unknown tessera-gnus-summary--glyph-defaults
+            tessera-gnus-summary-glyphs)
            :help-echo "Unrecognized Gnus mark")))))
 
 ;;;; Rendered fields
@@ -602,50 +874,33 @@ value.  Signal an error if neither value is an ASCII character."
            "\n"))))))
 
 (defun tessera-gnus-summary--content-slots ()
-  "Return independent attachment, signature, and encryption slots."
+  "Return configured attachment, signature, and encryption slots."
   (mapcar
    (lambda (spec)
-     (pcase-let* ((`(,name ,key ,ascii ,unicode ,icon ,label
-                           ,semantic)
-                   spec)
-                  (glyph
-                   (make-tessera-glyph
-                    :ascii ascii :unicode unicode
-                    :nerd-icons (list :function 'nerd-icons-mdicon
-                                      :name icon)
-                    :semantic semantic))
-                  (face (intern (format "tessera-gnus-summary-%s-face"
-                                        name)))
+     (pcase-let* ((`(,name ,key ,label) spec)
                   (help (apply-partially
                          #'tessera-gnus-summary--content-help
                          key label)))
        (make-tessera-glyph-slot
-        :name name :width 2 :align 'center
+        :name name
+        :width 2
+        :align 'center
         :selector (apply-partially
                    #'tessera-gnus-summary--content-state key)
         :glyphs
-        (append
-         (list (list 'present :glyph glyph :face face
-                     :help-echo help))
-         (unless (eq key :attachment)
-           (list
-            (list 'processed :glyph glyph :face face :help-echo help)
-            (list 'error
-                  :glyph
-                  (make-tessera-glyph
-                   :ascii "!" :unicode "!"
-                   :nerd-icons
-                   '(:function nerd-icons-mdicon
-                               :name "nf-md-alert_circle_outline")
-                   :semantic 'negative)
-                  :face 'tessera-gnus-summary-error-face
-                  :help-echo help)))))))
-   '((attachment :attachment "a" "📎" "nf-md-paperclip" "Attachment"
-                 informational)
-     (signature :signature "S" "✍\uFE0E" "nf-md-file_sign" "Signature"
-                informational)
-     (encryption :encryption "E" "🔒" "nf-md-lock_outline"
-                 "Encrypted content" accent))))
+        (mapcar
+         (lambda (state)
+           (list state :glyph
+                 (tessera-glyph-resolve
+                  (intern (format "%s-%s" name state))
+                  tessera-gnus-summary--glyph-defaults
+                  tessera-gnus-summary-glyphs)
+                 :help-echo help))
+         (if (eq key :attachment) '(present)
+           '(present processed error))))))
+   '((attachment :attachment "Attachment")
+     (signature :signature "Signature")
+     (encryption :encryption "Encrypted content"))))
 
 ;;;; Layout registration
 
@@ -657,27 +912,38 @@ value.  Signal an error if neither value is an ASCII character."
                  (:slots (attachment :optional t)
                          (signature :optional t)
                          (encryption :optional t))))
-         (right '((labels :grow t :max-width 24 :min-width 0
-                          :truncate tail :priority -1 :optional t)
+         (right '((labels :grow t
+                          :max-width 24
+                          :min-width 0
+                          :truncate tail
+                          :priority -1
+                          :optional t)
                   date))
          (width #'tessera-gnus-summary--thread-leading-width))
     (make-tessera-thread-layout
      :head
      (make-tessera-entry-layout
-      :glyph-slots-align 'right :leading-width width
+      :glyph-slots-align 'right
+      :leading-width width
       :main-leading-segments '(thread-count)
       :main-left-segments
       '((subject :grow t :min-width 4 :truncate tail))
-      :extra-glyph-slots slots :extra-left-segments left
+      :extra-glyph-slots slots
+      :extra-left-segments left
       :extra-right-segments right)
      :child
      (make-tessera-entry-layout
-      :glyph-slots-align 'right :leading-width width
-      :main-glyph-slots slots :main-left-segments left
+      :glyph-slots-align 'right
+      :leading-width width
+      :main-glyph-slots slots
+      :main-left-segments left
       :main-right-segments right))))
 
 (defun tessera-gnus-summary--register ()
   "Register the Gnus summary entry backend."
+  (tessera--validate-glyph-overrides
+   tessera-gnus-summary--glyph-defaults
+   tessera-gnus-summary-glyphs 2)
   (tessera-entry-register
    'gnus-summary :context #'tessera-gnus-summary--context
    :segments
@@ -705,8 +971,12 @@ value.  Signal an error if neither value is an ASCII character."
                      (signature :optional t)
                      (encryption :optional t)))
            :main-right-segments
-           '((labels :grow t :max-width 24 :min-width 0
-                     :truncate tail :priority -1 :optional t)
+           '((labels :grow t
+                     :max-width 24
+                     :min-width 0
+                     :truncate tail
+                     :priority -1
+                     :optional t)
              (author :max-width 20 :truncate tail :optional t)
              date)))
     (cons 'two-line
@@ -716,8 +986,12 @@ value.  Signal an error if neither value is an ASCII character."
            :main-left-segments
            '((subject :grow t :min-width 4 :truncate tail :point t))
            :main-right-segments
-           '((labels :grow t :max-width 24 :min-width 0
-                     :truncate tail :priority -1 :optional t))
+           '((labels :grow t
+                     :max-width 24
+                     :min-width 0
+                     :truncate tail
+                     :priority -1
+                     :optional t))
            :extra-glyph-slots '(score availability)
            :extra-left-segments
            '((author :grow t :min-width 4 :truncate tail)
@@ -1076,6 +1350,24 @@ FACE-INDEX supplies native face data during a batch update."
     (tessera-gnus-summary--refresh)
     (hl-line-mode (if tessera-gnus-summary--saved-hl-line 1 -1))
     (setq tessera-gnus-summary--saved-hl-line nil)))
+
+(defun tessera-gnus-summary--glyphs-changed (option)
+  "Refresh active gnus views after glyph OPTION changes.
+Nil means explicitly refresh all glyphs and their hover faces."
+  (when (or (null option)
+            (memq option '(tessera-gnus-summary-glyphs
+                           tessera-thread-glyphs
+                           tessera-entry-ellipsis
+                           tessera-glyph-style tessera-glyph-color)))
+    (when (gethash 'gnus-summary tessera--entry-backends)
+      (tessera-gnus-summary--register))
+    (save-window-excursion
+      (dolist (buffer (buffer-list))
+        (with-current-buffer buffer
+          (when tessera-gnus-summary--active
+            (tessera-entry-clear-current)
+            (tessera-gnus-summary--sync-buffer t)
+            (tessera-entry-highlight-current)))))))
 
 (provide 'tessera-gnus-summary)
 ;;; tessera-gnus-summary.el ends here

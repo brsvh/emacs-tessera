@@ -14,7 +14,7 @@
 (unless noninteractive
   (user-error "Run this file in a batch Emacs process"))
 
-(defconst tessera-tests--libraries
+(defvar tessera-tests--libraries
   '("tessera" "tessera-x"
     "tessera-gnus" "tessera-gnus-article" "tessera-gnus-summary"
     "tessera-x-gnus"

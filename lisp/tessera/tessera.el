@@ -35,6 +35,7 @@
 (require 'gv)
 (require 'seq)
 (require 'subr-x)
+(require 'wid-edit)
 
 ;;;; Customization
 
@@ -138,6 +139,8 @@
           (const :tag "Unicode" unicode)
           (const :tag "Nerd Icons" nerd-icons))
   :safe #'symbolp
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-glyph-appearance
   :group 'tessera)
 
 (defcustom tessera-glyph-color t
@@ -150,6 +153,8 @@ to every glyph."
           (const :tag "Monochrome" nil)
           (const :tag "Semantic colors" t)
           (color :tag "Uniform color"))
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-glyph-appearance
   :group 'tessera)
 
 (defface tessera-entry-current-face
@@ -164,7 +169,7 @@ to every glyph."
 
 (defface tessera-glyph-accent-face
   '((t :inherit font-lock-keyword-face :weight bold))
-  "Theme emphasis for new, unread, and distinctive glyphs."
+  "Theme emphasis for new, unread, and distinctive content."
   :group 'tessera)
 
 (defface tessera-glyph-attention-face
@@ -179,7 +184,7 @@ to every glyph."
 
 (defface tessera-glyph-muted-face
   '((t :inherit shadow))
-  "Face used for muted Tessera glyphs."
+  "Face used for muted Tessera content."
   :group 'tessera)
 
 (defface tessera-glyph-negative-face
@@ -189,7 +194,7 @@ to every glyph."
 
 (defface tessera-glyph-neutral-face
   '((t :inherit default))
-  "Face used for neutral Tessera glyphs."
+  "Face used for neutral Tessera content."
   :group 'tessera)
 
 (defface tessera-glyph-positive-face
@@ -218,11 +223,6 @@ to every glyph."
         (kill-local-variable variable)))))
 
 ;;;; Data model
-
-(defvar tessera-glyph-semantics
-  '( accent attention informational muted negative neutral positive
-     warning)
-  "Semantic roles available to Tessera glyphs.")
 
 (cl-defstruct tessera-entry-context
   "Describe one backend entry and its display environment.
@@ -290,11 +290,8 @@ displayed tree, including those outside the current window."
   head child)
 
 (cl-defstruct tessera-glyph
-  "Describe the visual forms and semantic role of a glyph."
-  ascii
-  unicode
-  nerd-icons
-  semantic)
+  "Describe a glyph's forms, FACE, and optional HIDDEN state."
+  ascii unicode nerd-icons face hidden)
 
 (cl-defstruct tessera-glyph-slot
   "Describe a fixed-width, single-choice glyph channel.
@@ -361,7 +358,7 @@ returning one, shared by both lines."
   "Properties accepted in a layout glyph slot reference.")
 
 (defvar tessera--glyph-variant-properties
-  '(:glyph :face :mouse-face :help-echo :keymap :pointer :follow-link)
+  '(:glyph :mouse-face :help-echo :keymap :pointer :follow-link)
   "Properties accepted in a glyph variant specification.")
 
 (defun tessera--ensure-list (value description)
@@ -379,12 +376,14 @@ returning one, shared by both lines."
 
 (defun tessera--ensure-plist-keys (plist allowed description)
   "Ensure PLIST uses ALLOWED keys for DESCRIPTION."
-  (unless (and (plistp plist)
+  (unless (and (proper-list-p plist) (plistp plist)
                (cl-loop for (key _)
                         on plist
                         by #'cddr
                         always (memq key allowed)))
-    (error "%s contains invalid properties" description)))
+    (error "%s contains invalid properties" description))
+  (tessera--ensure-unique
+   (cl-loop for (key _) on plist by #'cddr collect key) description))
 
 (defun tessera--validate-glyph (glyph description)
   "Validate GLYPH described by DESCRIPTION."
@@ -392,24 +391,213 @@ returning one, shared by both lines."
     (error "%s must contain a Tessera glyph" description))
   (let ((ascii (tessera-glyph-ascii glyph))
         (unicode (tessera-glyph-unicode glyph))
-        (nerd-icons (tessera-glyph-nerd-icons glyph))
-        (semantic (tessera-glyph-semantic glyph)))
-    (unless (and (stringp ascii)
-                 (> (length ascii) 0)
-                 (cl-every (lambda (character)
-                             (< character 128))
-                           ascii))
-      (error "%s has an invalid ASCII representation" description))
-    (unless (and (stringp unicode) (> (length unicode) 0))
-      (error "%s has an invalid Unicode representation" description))
-    (unless (and (plistp nerd-icons)
-                 (plist-get nerd-icons :function)
-                 (symbolp (plist-get nerd-icons :function))
-                 (stringp (plist-get nerd-icons :name))
-                 (> (length (plist-get nerd-icons :name)) 0))
-      (error "%s has an invalid Nerd Icons descriptor" description))
-    (unless (memq semantic tessera-glyph-semantics)
-      (error "%s has unknown semantic `%s'" description semantic))))
+        (icons (tessera-glyph-nerd-icons glyph))
+        (face (tessera-glyph-face glyph)))
+    (unless (and (tessera--glyph-string-p ascii)
+                 (cl-every (lambda (char) (< char 128)) ascii))
+      (error "%s has an invalid :ascii representation" description))
+    (unless (or (null unicode) (tessera--glyph-string-p unicode))
+      (error "%s has an invalid :unicode representation" description))
+    (when icons
+      (tessera--ensure-plist-keys
+       icons '(:function :name) description)
+      (unless (and (plist-get icons :function)
+                   (symbolp (plist-get icons :function))
+                   (stringp (plist-get icons :name))
+                   (not (string-empty-p (plist-get icons :name))))
+        (error "%s has an invalid :nerd-icons descriptor"
+               description)))
+    (unless (or (null face) (facep face))
+      (error "%s has an invalid :face: %S" description face))
+    (unless (memq (tessera-glyph-hidden glyph) '(nil t))
+      (error "%s has an invalid :hidden value" description))))
+
+;;;; Glyph configuration
+
+(defvar tessera--glyph-change-functions nil
+  "Functions called with a changed glyph option, or nil for all.
+Modes install these callbacks only while enabled.")
+
+(defun tessera--glyph-string-p (value)
+  "Return non-nil for nonempty, single-line display text VALUE."
+  (and (stringp value) (> (string-width value) 0)
+       (not (string-match-p "[[:cntrl:]]" value))))
+
+(define-widget 'tessera-glyph-spec 'plist
+  "Overrides for the named fields of a Tessera glyph."
+  :options
+  '((:ascii (choice :tag "ASCII"
+                    (const :tag "Native mark" nil) string))
+    (:unicode (choice :tag "Unicode"
+                      (const :tag "Use ASCII" nil) string))
+    (:nerd-icons
+     (choice :tag "Nerd Icons"
+             (const :tag "Use Unicode or ASCII" nil)
+             (plist :options
+                    ((:function (symbol :tag "Function"))
+                     (:name (string :tag "Icon name"))))))
+    (:face (choice :tag "Face"
+                   (const :tag "Inherit surrounding text" nil) face))
+    (:hidden boolean)))
+
+(defun tessera--glyph-custom-type (defaults)
+  "Return a Customize type for overrides of DEFAULTS."
+  `(alist :key-type
+          (choice ,@(mapcar (lambda (entry) `(const ,(car entry)))
+                            defaults))
+          :value-type tessera-glyph-spec))
+
+(defun tessera--glyph-definition (id defaults overrides)
+  "Merge the named fields of glyph ID in DEFAULTS and OVERRIDES."
+  (let ((base (assq id defaults)))
+    (unless base (error "Unknown glyph: %S" id))
+    (tessera--ensure-plist-keys
+     (cdr base) '(:ascii :unicode :nerd-icons :face :hidden)
+     (format "Default glyph `%s'" id))
+    (let ((definition (copy-tree (cdr base)))
+          (override (cdr (assq id overrides))))
+      (tessera--ensure-plist-keys
+       override '(:ascii :unicode :nerd-icons :face :hidden)
+       (format "Glyph `%s'" id))
+      (cl-loop for (key value) on override by #'cddr
+               do
+               (when (and (eq key :nerd-icons) value)
+                 (tessera--ensure-plist-keys
+                  value '(:function :name) (format "Glyph `%s'" id))
+                 (let ((icons (copy-tree
+                               (plist-get definition :nerd-icons))))
+                   (cl-loop for (field setting) on value by #'cddr
+                            do (setq icons
+                                     (plist-put icons field setting)))
+                   (setq value icons)))
+               (setq definition (plist-put definition key value)))
+      definition)))
+
+(defun tessera-glyph-resolve (id defaults overrides &optional ascii)
+  "Return glyph ID from DEFAULTS merged with OVERRIDES.
+Both tables are alists mapping symbols to glyph property lists.
+Missing fields inherit defaults; explicit nil values are retained.
+Nerd Icons descriptors merge their named fields as well.  ASCII
+supplies the native fallback when the default :ascii value is nil.
+Signal an error for invalid representations, faces, or properties."
+  (let* ((definition
+          (tessera--glyph-definition id defaults overrides))
+         (text (plist-get definition :ascii))
+         (glyph
+          (make-tessera-glyph
+           :ascii (if (and (null text)
+                           (null (plist-get (cdr (assq id defaults))
+                                            :ascii)))
+                      ascii text)
+           :unicode (plist-get definition :unicode)
+           :nerd-icons (plist-get definition :nerd-icons)
+           :face (plist-get definition :face)
+           :hidden (plist-get definition :hidden))))
+    (tessera--validate-glyph glyph (format "Glyph `%s'" id))
+    glyph))
+
+(defun tessera--validate-glyph-overrides (defaults value width)
+  "Validate glyph overrides VALUE against DEFAULTS and WIDTH.
+WIDTH is a maximum column count or an alist of counts by glyph ID."
+  (tessera--ensure-list value "Glyph overrides")
+  (dolist (entry value)
+    (unless (and (consp entry) (assq (car entry) defaults))
+      (error "Unknown glyph override: %S" entry)))
+  (tessera--ensure-unique (mapcar #'car value) "Glyph overrides")
+  (dolist (entry defaults)
+    (let* ((id (car entry))
+           (glyph (tessera-glyph-resolve id defaults value "?"))
+           (limit (if (numberp width) width (alist-get id width))))
+      (dolist (text (list (tessera-glyph-ascii glyph)
+                          (tessera-glyph-unicode glyph)))
+        (when (and text limit (> (string-width text) limit))
+          (error "Glyph `%s' exceeds its %d-column width"
+                 id limit))))))
+
+(defun tessera--set-glyphs (symbol value defaults &optional width)
+  "Set glyph option SYMBOL to VALUE using DEFAULTS and WIDTH.
+Validate before changing the option or notifying active adapters."
+  (tessera--validate-glyph-overrides defaults value (or width 2))
+  (set-default symbol value)
+  (run-hook-with-args 'tessera--glyph-change-functions symbol))
+
+(defun tessera--validate-glyph-appearance (symbol value)
+  "Validate appearance option SYMBOL with proposed VALUE."
+  (unless
+      (pcase symbol
+        ('tessera-glyph-style
+         (memq value '(ascii unicode nerd-icons)))
+        ('tessera-glyph-color
+         (or (memq value '(nil t))
+             (and (stringp value) (color-defined-p value))))
+        ('tessera-entry-ellipsis (tessera--glyph-string-p value)))
+    (error "Invalid %s value: %S" symbol value)))
+
+(defun tessera--set-glyph-appearance (symbol value)
+  "Validate appearance option SYMBOL, set VALUE, and redraw glyphs."
+  (tessera--validate-glyph-appearance symbol value)
+  (set-default symbol value)
+  (run-hook-with-args 'tessera--glyph-change-functions symbol))
+
+(defvar tessera--thread-glyph-defaults
+  '((branch :ascii "+-" :unicode "├─" :face tessera-glyph-muted-face)
+    (last :ascii "`-" :unicode "└─" :face tessera-glyph-muted-face)
+    (vertical :ascii "|" :unicode "│" :face tessera-glyph-muted-face))
+  "Default thread connectors, with fixed two- and one-column widths.")
+
+(defun tessera--validate-thread-glyphs (value)
+  "Validate thread connector overrides VALUE and their geometry."
+  (tessera--validate-glyph-overrides
+   tessera--thread-glyph-defaults value
+   '((branch . 2) (last . 2) (vertical . 1)))
+  (dolist (id '(branch last vertical))
+    (let* ((glyph (tessera-glyph-resolve
+                   id tessera--thread-glyph-defaults value))
+           (width (if (eq id 'vertical) 1 2)))
+      (when (or (tessera-glyph-hidden glyph)
+                (tessera-glyph-nerd-icons glyph))
+        (error "Thread glyph `%s' must be visible text" id))
+      (dolist (text (list (tessera-glyph-ascii glyph)
+                          (tessera-glyph-unicode glyph)))
+        (when (and text (/= (string-width text) width))
+          (error "Thread glyph `%s' must occupy %d columns"
+                 id width))))))
+
+(defun tessera--set-thread-glyphs (symbol value)
+  "Set thread glyph option SYMBOL to validated VALUE."
+  (tessera--validate-thread-glyphs value)
+  (tessera--set-glyphs symbol value tessera--thread-glyph-defaults))
+
+(defcustom tessera-thread-glyphs nil
+  "Overrides for thread connectors, as an alist of glyph plists.
+IDs are `branch', `last', and `vertical'.  Omitted fields keep their
+defaults.  Branch and last occupy two columns; vertical occupies
+one.  Connectors cannot be hidden or use Nerd Icons.  See
+`tessera-glyph-resolve' for the common fields."
+  :type (tessera--glyph-custom-type tessera--thread-glyph-defaults)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-thread-glyphs
+  :group 'tessera)
+
+(defcustom tessera-entry-ellipsis "…"
+  "Text indicating truncated entry content.
+Use nonempty single-line text.  Narrow areas may clip this marker."
+  :type 'string
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-glyph-appearance
+  :group 'tessera)
+
+;;;###autoload
+(defun tessera-refresh-glyphs ()
+  "Validate glyph settings and redraw all active Tessera views.
+Use after `setq' or face customization.  Customize and `setopt'
+refresh affected views automatically.  Disabled adapters stay off."
+  (interactive)
+  (tessera--validate-thread-glyphs tessera-thread-glyphs)
+  (dolist (option '(tessera-glyph-style tessera-glyph-color
+                                        tessera-entry-ellipsis))
+    (tessera--validate-glyph-appearance option (symbol-value option)))
+  (run-hook-with-args 'tessera--glyph-change-functions nil))
 
 (defun tessera--validate-glyph-variant (variant slot-name)
   "Validate VARIANT belonging to SLOT-NAME and return its glyph."
@@ -424,9 +612,6 @@ returning one, shared by both lines."
     (tessera--ensure-plist-keys properties
                                 tessera--glyph-variant-properties
                                 description)
-    (when-let* ((face (plist-get properties :face)))
-      (unless (facep face)
-        (error "%s has an invalid face" description)))
     (unless (plist-member properties :glyph)
       (error "%s has no :glyph property" description))
     (let ((glyph (plist-get properties :glyph)))
@@ -650,7 +835,8 @@ Return BACKEND."
             :context context
             :segments segments
             :glyph-slots glyph-slots
-            :layouts layouts :thread-layout thread-layout)))
+            :layouts layouts
+            :thread-layout thread-layout)))
       (puthash backend definition tessera--entry-backends)))
   backend)
 
@@ -677,7 +863,9 @@ from IDs to contexts with counts, branch paths, and boundaries."
           (error "Thread parent %S must precede child %S"
                  parent-id id))
         (let ((node (make-tessera-thread-context
-                     :id id :parent parent-id :root root
+                     :id id
+                     :parent parent-id
+                     :root root
                      :first (null parent))))
           (puthash id node contexts)
           (push node nodes))
@@ -736,29 +924,34 @@ from IDs to contexts with counts, branch paths, and boundaries."
      'help-echo "Unread / total, including folded messages")))
 
 (defun tessera-thread-prefix (context)
-  "Return the tree prefix for the native member in CONTEXT.
+  "Return the configured tree prefix for native member CONTEXT.
 Align each branch with its parent text using the segment gap.
 Preserve every ancestor column.  Spaces become layout overlays."
   (when-let* ((thread (tessera-entry-context-thread context))
               (tail (tessera--thread-path-tail thread)))
-    (let* ((ascii (eq tessera-glyph-style 'ascii))
-           (path (reverse tail))
-           (branch (if (car (last path))
-                       (if ascii "+-" "├─")
-                     (if ascii "`-" "└─")))
-           (indent (+ (string-width branch)
-                      tessera-entry-segment-gap)))
+    (let* ((path (reverse tail))
+           (branch
+            (tessera-glyph-render
+             (tessera-glyph-resolve
+              (if (car (last path)) 'branch 'last)
+              tessera--thread-glyph-defaults tessera-thread-glyphs)
+             context))
+           (vertical
+            (tessera-glyph-render
+             (tessera-glyph-resolve
+              'vertical tessera--thread-glyph-defaults
+              tessera-thread-glyphs) context))
+           (indent (+ 2 tessera-entry-segment-gap)))
       (concat
        (mapconcat
         (lambda (continues)
           (concat
-           (when continues
-             (propertize (if ascii "|" "│") 'face 'shadow))
+           (when continues vertical)
            (propertize
             (make-string (if continues (1- indent) indent) ?\s)
             'tessera--layout-space t)))
         (butlast path) "")
-       (propertize branch 'face 'shadow)))))
+       branch))))
 
 (defun tessera--make-entry-context
     (definition object window)
@@ -974,6 +1167,13 @@ Return the number of columns still overflowing."
        (and (tessera--rendered-segment-visible segment)
             (tessera--rendered-segment-truncate segment))))))
 
+(defun tessera--ellipsis (width)
+  "Return the configured truncation marker within WIDTH columns.
+Use a period if the marker's first character is too wide to fit."
+  (let ((text (truncate-string-to-width
+               tessera-entry-ellipsis width)))
+    (if (and (> width 0) (string-empty-p text)) "." text)))
+
 (defun tessera--truncate-string (string width method)
   "Truncate STRING to WIDTH columns according to METHOD."
   (let ((natural-width (string-width string)))
@@ -983,9 +1183,10 @@ Return the number of columns still overflowing."
      ((<= width 0)
       "")
      ((eq method 'tail)
-      (truncate-string-to-width string width nil nil t))
+      (truncate-string-to-width
+       string width nil nil (tessera--ellipsis width)))
      (t
-      (let* ((ellipsis "…")
+      (let* ((ellipsis (tessera--ellipsis width))
              (ellipsis-width (string-width ellipsis))
              (content-width (max 0 (- width ellipsis-width))))
         (if (<= width ellipsis-width)
@@ -1058,17 +1259,6 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
 
 ;;;; Glyph rendering
 
-(defvar tessera--glyph-semantic-faces
-  '((accent . tessera-glyph-accent-face)
-    (attention . tessera-glyph-attention-face)
-    (informational . tessera-glyph-informational-face)
-    (muted . tessera-glyph-muted-face)
-    (negative . tessera-glyph-negative-face)
-    (neutral . tessera-glyph-neutral-face)
-    (positive . tessera-glyph-positive-face)
-    (warning . tessera-glyph-warning-face))
-  "Map glyph semantics to their faces.")
-
 (defvar tessera--glyph-interaction-properties
   '((:mouse-face . mouse-face)
     (:help-echo . help-echo)
@@ -1095,7 +1285,7 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
 (defun tessera--unicode-glyph-text (glyph frame)
   "Return GLYPH's Unicode text when it can display on FRAME."
   (let ((text (tessera-glyph-unicode glyph)))
-    (when (and (display-graphic-p frame)
+    (when (and text (display-graphic-p frame)
                (tessera--glyph-string-displayable-p
                 text frame))
       text)))
@@ -1115,7 +1305,8 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
 
 (defun tessera--nerd-icons-glyph-text (glyph frame)
   "Return GLYPH's Nerd Icons text when it can display on FRAME."
-  (when (and (display-graphic-p frame)
+  (when (and (tessera-glyph-nerd-icons glyph)
+             (display-graphic-p frame)
              (tessera--nerd-icons-available-p))
     (let* ((descriptor (tessera-glyph-nerd-icons glyph))
            (function (plist-get descriptor :function))
@@ -1123,8 +1314,7 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
       (when (fboundp function)
         (condition-case nil
             (let ((text (funcall function name)))
-              (when (and (stringp text)
-                         (> (length text) 0)
+              (when (and (tessera--glyph-string-p text)
                          (tessera--glyph-string-displayable-p
                           text frame))
                 text))
@@ -1147,13 +1337,10 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
        (error "Unknown Tessera glyph style `%s'"
               tessera-glyph-style)))))
 
-(defun tessera--glyph-color-face (glyph &optional override)
-  "Return GLYPH color, using OVERRIDE in semantic color mode."
+(defun tessera--glyph-color-face (glyph)
+  "Return GLYPH's face under the current color preference."
   (cond
-   ((eq tessera-glyph-color t)
-    (or override
-        (alist-get (tessera-glyph-semantic glyph)
-                   tessera--glyph-semantic-faces)))
+   ((eq tessera-glyph-color t) (tessera-glyph-face glyph))
    ((stringp tessera-glyph-color)
     `(:foreground ,tessera-glyph-color))))
 
@@ -1165,15 +1352,13 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
                          (tessera--glyph-frame context) 'default))
     face))
 
-(defun tessera--apply-glyph-color (text glyph context &optional face)
-  "Apply GLYPH color and metadata to TEXT in CONTEXT.
-Optional FACE overrides its semantic color."
-  (let* ((face (tessera--glyph-color-face glyph face))
+(defun tessera--apply-glyph-color (text glyph context)
+  "Apply GLYPH color and metadata to TEXT in CONTEXT."
+  (let* ((face (tessera--glyph-color-face glyph))
          (hover-face (and face
                           (tessera--glyph-hover-color-face
                            face context))))
-    (put-text-property 0 (length text) 'tessera-glyph-semantic
-                       (tessera-glyph-semantic glyph) text)
+    (put-text-property 0 (length text) 'tessera-glyph t text)
     (when face
       (add-face-text-property 0 (length text) face t text)
       (put-text-property 0 (length text) 'mouse-face
@@ -1183,8 +1368,7 @@ Optional FACE overrides its semantic color."
 
 (defun tessera--apply-glyph-interaction (text properties glyph)
   "Apply variant PROPERTIES for GLYPH to TEXT."
-  (let ((color-face (tessera--glyph-color-face
-                     glyph (plist-get properties :face))))
+  (let ((color-face (tessera--glyph-color-face glyph)))
     (dolist (entry tessera--glyph-interaction-properties)
       (let ((keyword (car entry))
             (property (cdr entry)))
@@ -1202,8 +1386,8 @@ Optional FACE overrides its semantic color."
   "Render GLYPH for CONTEXT with optional interaction PROPERTIES.
 
 PROPERTIES accepts the keys supported by registered glyph variants.
-Optional :face names a face used in semantic color mode.  Monochrome
-and uniform color modes retain their normal behavior."
+Color comes from GLYPH and `tessera-glyph-color'.  Hidden glyphs
+render as an empty string."
   (tessera--validate-glyph glyph "Glyph")
   (unless (tessera-entry-context-p context)
     (error "Glyph context must be a Tessera entry context"))
@@ -1212,18 +1396,16 @@ and uniform color modes retain their normal behavior."
                               "Glyph interaction properties")
   (when (plist-member properties :glyph)
     (error "Glyph interaction properties must not contain :glyph"))
-  (when-let* ((face (plist-get properties :face)))
-    (unless (facep face)
-      (error "Invalid glyph face: %S" face)))
   (tessera--render-glyph glyph context properties))
 
 (defun tessera--render-glyph (glyph context properties)
-  "Render validated GLYPH and PROPERTIES in CONTEXT."
-  (let ((text (copy-sequence (tessera--glyph-text glyph context))))
-    (tessera--apply-glyph-color
-     text glyph context (plist-get properties :face))
-    (tessera--apply-glyph-interaction text properties glyph)
-    (tessera--prepare-hover text)))
+  "Render validated GLYPH and interaction PROPERTIES in CONTEXT."
+  (if (tessera-glyph-hidden glyph)
+      ""
+    (let ((text (copy-sequence (tessera--glyph-text glyph context))))
+      (tessera--apply-glyph-color text glyph context)
+      (tessera--apply-glyph-interaction text properties glyph)
+      (tessera--prepare-hover text))))
 
 (defun tessera--glyph-slot-padding
     (slot content-width &optional target-width)
@@ -1265,7 +1447,10 @@ Return nil when the selector returns nil and OMIT-EMPTY is non-nil."
                (assq variant-id
                      (tessera-glyph-slot-glyphs slot)))))
     (cond
-     ((null variant-id)
+     ((or (null variant-id)
+          (and variant
+               (tessera-glyph-hidden
+                (plist-get (cdr variant) :glyph))))
       (unless omit-empty
         (tessera--space (tessera-glyph-slot-width slot))))
      ((null variant)
@@ -1348,7 +1533,7 @@ keep their individual positions.  Each selector runs once."
           (if (and align
                    (not (text-property-not-all
                          0 (length text)
-                         'tessera-glyph-semantic nil text)))
+                         'tessera-glyph nil text)))
               (push text hidden)
             (push text visible)))))
     (when (or visible hidden)
@@ -1374,8 +1559,13 @@ keep their individual positions.  Each selector runs once."
                      references definition context)))
     (let ((width (cdr area)))
       (tessera--make-rendered-segment
-       :string (car area) :width width :target-width width
-       :min-width width :max-width width :priority 0 :visible t))))
+       :string (car area)
+       :width width
+       :target-width width
+       :min-width width
+       :max-width width
+       :priority 0
+       :visible t))))
 
 ;;;; Entry rendering
 
@@ -1401,17 +1591,20 @@ ellipsis.  Keep layout whitespace outside its mouse hover range."
         (width (max 1 width)))
     (if (or (not help) (<= (string-width text) width))
         text
-      (let* ((prefix (truncate-string-to-width text (1- width)))
+      (let* ((marker (tessera--ellipsis width))
+             (remaining (- width (string-width marker)))
+             (prefix (truncate-string-to-width text remaining))
              (ellipsis
-              (propertize "…" 'tessera--overflow t
+              (propertize marker 'tessera--overflow t
                           'face 'tessera-glyph-muted-face
                           'mouse-face (list 'tessera-entry-hover-face)
                           'help-echo help)))
         (when (and (tessera-entry-point text)
                    (not (tessera-entry-point prefix)))
-          (put-text-property 0 1 'tessera-entry-point t ellipsis))
+          (put-text-property 0 (length ellipsis)
+                             'tessera-entry-point t ellipsis))
         (concat prefix
-                (tessera--space (- (1- width) (string-width prefix)))
+                (tessera--space (- remaining (string-width prefix)))
                 ellipsis)))))
 
 (defun tessera--render-line

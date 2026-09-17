@@ -30,9 +30,12 @@
 
 (ert-deftest tessera-hover-elfeed-elements-and-tag-separators ()
   (let* ((entry (elfeed-entry--create
-                 :id '("feed" . "entry") :feed-id "feed"
-                 :title "TITLE" :link "https://entry.invalid"
-                 :date 0 :tags '(unread foo bar)
+                 :id '("feed" . "entry")
+                 :feed-id "feed"
+                 :title "TITLE"
+                 :link "https://entry.invalid"
+                 :date 0
+                 :tags '(unread foo bar)
                  :enclosures '(("file" "text/plain" 1))))
          (elfeed-db '(:version 4))
          (elfeed-db-feeds (make-hash-table :test #'equal))
@@ -65,7 +68,8 @@
 (ert-deftest tessera-hover-gnus-elements-in-all-layouts ()
   (let* ((header (make-full-mail-header
                   1 "SUBJECT" "AUTHOR" "DATE" "<id@test.invalid>"))
-         (metadata (list :author "AUTHOR" :marks
+         (metadata (list :author "AUTHOR"
+                         :marks
                          (string gnus-unread-mark gnus-replied-mark
                                  gnus-downloaded-mark
                                  gnus-score-over-mark)))
@@ -76,8 +80,9 @@
     (cl-letf (((symbol-function 'tessera-gnus-summary--label-data)
                (lambda (_) '(("foo" "test") ("bar" "test"))))
               ((symbol-function 'tessera-gnus-summary--content-data)
-               (lambda (_) '(:attachment present :signature present
-                                         :encryption present)))
+               (lambda (_) '( :attachment present
+                              :signature present
+                              :encryption present)))
               ((symbol-function 'gnus-user-date)
                (lambda (_) "DATE")))
       (dolist (kind '(single-line two-line head child))
@@ -85,8 +90,10 @@
                 (if (memq kind '(head child)) 'two-line kind))
                (node (when (memq kind '(head child))
                        (make-tessera-thread-context
-                        :first (eq kind 'head) :last t
-                        :total 2 :unread 1
+                        :first (eq kind 'head)
+                        :last t
+                        :total 2
+                        :unread 1
                         :path (when (eq kind 'child) '(nil)))))
                (text
                 (cl-letf (((symbol-function
@@ -113,8 +120,10 @@
     (let* ((source (propertize "Long Title" 'mouse-face 'highlight))
            (text (tessera--render-segment-group
                   (list (tessera--make-rendered-segment
-                         :string source :target-width 6
-                         :truncate method :visible t)))))
+                         :string source
+                         :target-width 6
+                         :truncate method
+                         :visible t)))))
       (tessera-hover-tests--elements
        text (list (substring-no-properties text)))
       (should (equal (get-text-property 0 'mouse-face text)

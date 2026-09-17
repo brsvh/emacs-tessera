@@ -112,10 +112,10 @@ bodies additionally requires an agentized method.  Requiring this
 library does not configure those facilities.  For Agent setup, see
 @ref{Gnus Unplugged,,, gnus, The Gnus Manual}.
 
-  Use @kbd{M-x customize-group @key{RET} tessera-gnus @key{RET}} to
-configure the options documented here.  You can also load
-@code{tessera-gnus} and set them in your initialization file before
-loading the snapshot commands.
+  Use @kbd{M-x customize-group @key{RET} tessera-x-gnus @key{RET}}
+to configure this package.  Its options are defined in
+@code{tessera-x-gnus}; load that library before setting them in your
+initialization file.
 
 @node First Context
 @section Preparing a First Context
@@ -126,8 +126,8 @@ downloaded into the Agent.  To restrict preparation to existing Agent
 bodies, set the following before invoking the command:
 
 @lisp
-(require 'tessera-gnus)
-(setq tessera-x-gnus-body-policy 'local-only)
+(require 'tessera-x-gnus)
+(setopt tessera-x-gnus-body-policy 'local-only)
 @end lisp
 
   After completion, run @kbd{M-x tessera-x-show-context} in the Summary

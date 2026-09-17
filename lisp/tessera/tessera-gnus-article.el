@@ -45,14 +45,15 @@
 
 ;;;; Observed MIME properties
 
-(defconst tessera-gnus-article--control-types
+(defvar tessera-gnus-article--control-types
   '("application/pgp-signature" "application/pgp-encrypted"
     "application/pkcs7-signature" "application/x-pkcs7-signature")
   "MIME control parts that do not count as attachments.")
 
 (defun tessera-gnus-article--unknown-content ()
   "Return a fresh set of unknown content properties."
-  (list :attachment 'unknown :signature 'unknown
+  (list :attachment 'unknown
+        :signature 'unknown
         :encryption 'unknown))
 
 (defun tessera-gnus-article--merge-state (old new)
@@ -66,7 +67,8 @@ A processed security part has native result details, not necessarily
 successful verification.  Never infer trust from a result string."
   (if (null handles)
       (tessera-gnus-article--unknown-content)
-    (let ((result (list :attachment nil :signature nil
+    (let ((result (list :attachment nil
+                        :signature nil
                         :encryption nil))
           opaque)
       (cl-labels

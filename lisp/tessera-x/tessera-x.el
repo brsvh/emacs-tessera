@@ -126,8 +126,11 @@ successful snapshot.  Return the new `tessera-x-context'."
   (tessera-x-cancel-context)
   (setq tessera-x--pending-context
         (make-tessera-x-context
-         :backend backend :source (current-buffer) :scope scope
-         :items items :created (current-time)
+         :backend backend
+         :source (current-buffer)
+         :scope scope
+         :items items
+         :created (current-time)
          :max-characters tessera-x-context-max-characters
          :body-max-characters tessera-x-context-body-max-characters))
   (add-hook 'kill-buffer-hook #'tessera-x-cancel-context nil t)

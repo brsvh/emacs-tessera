@@ -5,7 +5,8 @@
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1") (tessera "0.1.0") (tessera-x "0.1.0") (mu4e "1.14.3"))
+;; Package-Requires: ((emacs "30.1") (tessera "0.1.0")
+;;                   (tessera-x "0.1.0") (mu4e "1.14.3"))
 ;; Keywords: convenience, mail, news
 ;; URL: https://github.com/brsvh/emacs-tessera
 
@@ -38,6 +39,29 @@
 (require 'mu4e-message)
 (require 'mu4e-server)
 (require 'mu4e-query-items)
+
+(defgroup tessera-x-mu4e nil
+  "Experimental Tessera features for mu4e."
+  :group 'tessera-x
+  :group 'tessera-mu4e
+  :prefix "tessera-x-mu4e-")
+
+;;;; Context options
+
+(defcustom tessera-x-mu4e-subthread-scope 'results
+  "Default source of context subthread members.
+Results includes folded rows.  Local index can supplement replies
+outside the active filter, but cannot include unindexed mail."
+  :type '(choice (const results) (const local-index))
+  :group 'tessera-x-mu4e)
+
+(defcustom tessera-x-mu4e-today-query-function
+  'tessera-x-mu4e--today-query
+  "Function returning the base query for today's context.
+By default use the Headers query or the Main query item at point.
+A custom function may supply an account-specific query."
+  :type 'function
+  :group 'tessera-x-mu4e)
 
 ;;;; Context snapshots
 
@@ -202,8 +226,10 @@ With ANCHOR, include related messages and keep descendants."
                  (list query)))
                (process
                 (make-process :name "tessera-mu-context"
-                              :command command :buffer output
-                              :stderr errors :noquery t
+                              :command command
+                              :buffer output
+                              :stderr errors
+                              :noquery t
                               :coding 'utf-8-unix
                               :connection-type 'pipe
                               :sentinel #'ignore)))

@@ -6,9 +6,11 @@
   ((eval
     .
     (progn
-      (let* ((pdir (locate-dominating-file default-directory ".dir-locals.el"))
+      (let* ((pdir (locate-dominating-file
+                    default-directory ".dir-locals.el"))
              (ldir (expand-file-name "lisp/" pdir))
-             (cpath (copy-sequence elisp-flymake-byte-compile-load-path))
+             (cpath
+              (copy-sequence elisp-flymake-byte-compile-load-path))
              (rpath (copy-sequence load-path))
              (paths (seq-filter #'file-directory-p
                                 (directory-files ldir t "\\`[^.]"))))

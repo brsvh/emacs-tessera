@@ -64,7 +64,8 @@
           (set-face-attribute 'default nil :foreground "blue")
           (set-face-attribute 'mu4e-header-face nil :foreground "red")
           (set-face-attribute 'mu4e-unread-face nil
-                              :foreground 'unspecified :inherit nil)
+                              :foreground 'unspecified
+                              :inherit nil)
           (dolist (flags '((seen draft) (seen trashed) (seen flagged)
                            (unread draft) (unread trashed)
                            (new seen)))

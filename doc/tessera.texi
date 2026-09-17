@@ -98,8 +98,11 @@ the selected mail or feed application is assumed.
 
   The @code{tessera} package contains the common engine and three native
 adapters.  Requiring @code{tessera-gnus}, @code{tessera-mu4e}, or
-@code{tessera-elfeed} exposes that adapter's public settings without
-enabling it.  The corresponding global minor mode activates its view.
+@code{tessera-elfeed} makes its global minor mode available.  View options
+and faces are defined by @code{tessera-gnus-summary},
+@code{tessera-mu4e-headers}, and @code{tessera-elfeed-search}, respectively.
+Load the corresponding view library before configuring it.  Requiring
+these libraries does not enable an adapter; its mode activates the view.
 
   Packages named @code{tessera-x} and @samp{tessera-x-*} provide
 experimental features.  Their @samp{x} means experimental.  The current
@@ -339,6 +342,8 @@ independent of the visual style and of the theme's particular colors.
 @menu
 * Glyph Styles::        ASCII, Unicode, and Nerd Icons forms.
 * Glyph Colors::        Color settings and semantic faces.
+* Customizing Glyphs::  Changing individual glyph definitions.
+* Thread Connectors::   Configuring native thread branches.
 * Glyph Widths::        Fixed slots and font scaling.
 @end menu
 
@@ -357,8 +362,8 @@ optional Nerd Icons library and suitable glyph, then Unicode, then
 ASCII.  Install the optional library and fonts separately to use it.
 Terminal frames use the ASCII fallback for these glyph objects.
 
-  Thread connectors have their own simple choice: ASCII connectors when
-the option is @code{ascii}, Unicode connectors otherwise.
+  Thread connectors follow the same Unicode and ASCII fallback. They do
+not use Nerd Icons.  @xref{Thread Connectors}.
 
 @node Glyph Colors
 @section Glyph Colors
@@ -369,21 +374,15 @@ faces; @code{nil} inherits the surrounding foreground; a color string
 sets a uniform foreground for every glyph.
 @end defopt
 
-  Backend glyph faces can override the shared semantic face when this
-option is @code{t}.  Monochrome and uniform-color settings retain their
-meaning even when a variant supplies such an override.
+  With @code{t}, each glyph uses its configured @code{:face}.  A
+@code{nil} face inherits surrounding text.  Monochrome and uniform-color
+settings override the configured face.  @xref{Customizing Glyphs}.
 
 @cindex semantic faces
   The following faces inherit theme roles.  Tessera does not assign a
 literal palette or special-case theme names.  Two roles may have the
-same color when their parent faces do.
-
-@defvar tessera-glyph-semantics
-The recognized roles: @code{accent}, @code{attention},
-@code{informational}, @code{muted}, @code{negative}, @code{neutral},
-@code{positive}, and @code{warning}.  This describes the renderer's
-vocabulary, not a user option for installing a new palette.
-@end defvar
+same color when their parent faces do.  These faces also apply to
+non-glyph content that uses the same visual meaning.
 
 @vtable @code
 @item tessera-glyph-accent-face
@@ -404,7 +403,7 @@ Read, inactive, and low-priority states.  Inherits @code{shadow}.
 Failures and destructive actions.  Inherits @code{error}.
 
 @item tessera-glyph-neutral-face
-An unaccented glyph.  Inherits @code{default}.
+Unaccented content.  Inherits @code{default}.
 
 @item tessera-glyph-positive-face
 Completed actions and available content.  Inherits @code{success}.
@@ -416,6 +415,99 @@ Urgent or uncertain states.  Inherits @code{warning}.
   A signature or encryption glyph indicates content presence, not
 successful verification or decryption.  Pending actions are distinct
 from already completed actions.
+
+@node Customizing Glyphs
+@section Customizing Individual Glyphs
+@cindex glyph customization
+
+  Each view has a global glyph option:
+@code{tessera-gnus-summary-glyphs}, @code{tessera-mu4e-headers-glyphs},
+or @code{tessera-elfeed-search-glyphs}.  Its value is an association
+list mapping glyph names to property lists.  Initially each option is
+@code{nil}, which keeps every built-in definition.  These options apply
+to all buffers of their respective views.
+
+  Supply only the fields you want to change.  Unlisted glyphs and
+omitted fields retain their defaults.  For example, change the unread
+mu4e indicator and hide the attachment indicator:
+
+@lisp
+(require 'tessera-mu4e-headers)
+(setopt tessera-mu4e-headers-glyphs
+        '((status-unread :unicode "◉"
+                         :face tessera-glyph-warning-face)
+          (attachment :hidden t)))
+@end lisp
+
+@noindent
+Changing these definitions does not alter native states, their display
+priority, or which messages an operation affects.  Customize provides a
+choice of glyph names and editors for their fields.  Each glyph name and
+each field may occur only once.
+
+@table @code
+@item :ascii
+Nonempty ASCII text without control characters.  This form is the final
+fallback.  Gnus mark glyphs also accept @code{nil} to follow the native
+mark; other glyphs require a string.  @xref{Gnus Glyph Options}.
+
+@item :unicode
+Nonempty Unicode text without control characters, or @code{nil} to use
+ASCII.  The frame must be graphical and able to display every character.
+Plain ASCII characters are also valid here.
+
+@item :nerd-icons
+A property list with @code{:function} naming an icon function and
+@code{:name} containing its icon name.  The function receives that name
+as its sole argument and returns a string.  Missing descriptor fields
+retain their defaults, so @code{(:nerd-icons (:name "nf-md-star"))}
+changes only the icon name.  A @code{nil} descriptor skips Nerd Icons.
+Missing libraries or functions, errors, and undisplayable results fall
+back to Unicode or ASCII.
+
+@item :face
+An existing face, or @code{nil} to inherit surrounding text.  This is
+the glyph's only face setting; there is no separate semantic-role field.
+The shared semantic faces are suitable defaults, but any existing face
+is accepted.  @xref{Glyph Colors}.
+
+@item :hidden
+@code{t} hides the glyph; @code{nil} displays it.  An optional slot then
+collapses when its layout allows that; a fixed slot retains its blank
+space.  Hiding a glyph does not change its native state or select a
+lower-priority state in its place.
+@end table
+
+  Explicit @code{nil} differs from omitting a field.  For example,
+@code{(:face nil)} suppresses that glyph's semantic face, whereas an
+omitted @code{:face} keeps its default.  To restore all built-in glyphs,
+set the view's glyph option to @code{nil}.
+
+  Built-in view glyphs allow at most two columns in their ASCII and
+Unicode forms.  Customize and @code{setopt} validate an entire change
+before storing it, then redraw active views without enabling disabled
+adapters.  After assigning with @code{setq}, use
+@code{tessera-refresh-glyphs}.  @xref{Refreshing the Display}.
+
+@node Thread Connectors
+@section Customizing Thread Connectors
+
+  Gnus and mu4e share the connectors that draw native thread branches.
+Their geometry records parentage, so connectors have stricter limits
+than status indicators.
+
+@defopt tessera-thread-glyphs
+Global connector overrides using the format in @ref{Customizing Glyphs},
+initially @code{nil}.  The names are @code{branch}, @code{last}, and
+@code{vertical}.  Their default ASCII forms are @samp{+-}, @samp{`-},
+and @samp{|}; their Unicode forms are @samp{├─}, @samp{└─}, and
+@samp{│}.  All use @code{tessera-glyph-muted-face}.
+@end defopt
+
+  Branch and last-child forms must occupy exactly two columns; vertical
+forms must occupy one.  Connectors cannot be hidden or use Nerd Icons.
+They follow the shared style, color, and fallback settings.  Changing
+these forms does not alter native threading or folding.
 
 @node Glyph Widths
 @section Glyph Widths
@@ -429,6 +521,15 @@ signal an error if they cannot fit.
   Built-in mail layouts pack their visible prefix icons toward the right
 edge of the available prefix area.  Inline content icons have
 independent optional slots and do not enlarge that prefix area.
+
+@defopt tessera-entry-ellipsis
+Text marking truncated entry content, initially @samp{…}.  Use nonempty
+single-line text without control characters.  For example, @samp{...}
+uses ASCII punctuation.  The marker is itself clipped when necessary to
+fit a narrow area; thread overflow retains its help and navigation
+anchor on the marker.  If its first character is too wide to fit,
+Tessera uses a period instead.
+@end defopt
 
 @node Native Threads
 @chapter Native Threads
@@ -526,7 +627,8 @@ all ordinary article operations.
 * Gnus Row Contents::   Subjects, contacts, dates, and labels.
 * Gnus Marks::          Article state, availability, and scores.
 * Content Indicators: Gnus Content Indicators.  Attachments, signatures, and encryption.
-* Gnus Faces::          Text styling and glyph faces.
+* Gnus Glyph Options::  Configuring marks and content indicators.
+* Gnus Faces::          Styling message text.
 * Gnus Navigation::     Moving through articles and refreshing rows.
 @end menu
 
@@ -603,6 +705,61 @@ uses the error face.  The availability of a result does not itself mean
 that verification succeeded.  Encrypted content can still contain
 attachments or signatures that have not been examined.
 
+@node Gnus Glyph Options
+@section Gnus Glyph Options
+@cindex glyph customization, Gnus
+
+  Gnus selects glyphs from its native marks and the observed content
+state.  The following option changes their appearance independently of
+those native rules.
+
+@defopt tessera-gnus-summary-glyphs
+Global Gnus glyph overrides, initially @code{nil}.  Use the property
+list format described in @ref{Customizing Glyphs}.
+@end defopt
+
+@table @code
+@item status-
+Append one of @code{unread}, @code{ticked}, @code{dormant},
+@code{expirable}, @code{spam}, @code{downloadable}, @code{unsendable},
+@code{killed}, @code{kill-file}, @code{low-score}, @code{catchup},
+@code{ancient}, @code{sparse}, @code{canceled}, @code{duplicate},
+@code{del}, or @code{read}; for example, @code{status-unread}.
+
+@item secondary-
+Append @code{processable}, @code{cached}, @code{replied},
+@code{forwarded}, @code{saved}, or @code{unseen}.
+
+@item availability-
+Append @code{undownloaded} or @code{downloaded}.
+
+@item score-
+Append @code{low} or @code{high}.
+
+@item unknown
+The fallback for an unrecognized native mark, initially a question mark
+using @code{tessera-glyph-warning-face}.
+
+@item attachment-present
+The attachment indicator, initially a paperclip with
+@code{tessera-glyph-informational-face} and ASCII @samp{a}.
+
+@item signature-
+@itemx encryption-
+Append @code{present}, @code{processed}, or @code{error}. Signature
+presence and processed results use a signing glyph with
+@code{tessera-glyph-informational-face} and ASCII @samp{S}.  Encryption
+uses a lock with @code{tessera-glyph-accent-face} and ASCII @samp{E}.
+Both error variants use an alert glyph with
+@code{tessera-glyph-negative-face} and ASCII @samp{!}.  A processed
+result does not imply successful verification.
+@end table
+
+  For the four native mark channels, the default @code{:ascii} is
+@code{nil}: use the current native mark when it is ASCII, otherwise its
+declared standard value.  An explicit string overrides this fallback.
+The native mark continues to determine which state is selected.
+
 @node Gnus Faces
 @section Gnus Faces
 @cindex faces, Gnus
@@ -619,7 +776,8 @@ article's read state.  Spam and expirable faces supplement native state
 on ordinary subjects and thread authors.
 
   The following faces belong to @code{tessera-gnus-summary}.  They
-customize the text and glyph roles used in Summary rows.
+customize the text roles used in Summary rows.  Glyphs use the shared
+faces from @ref{Glyph Colors}.
 
 @vtable @code
 @item tessera-gnus-summary-subject-face
@@ -650,44 +808,11 @@ dates have normal weight; unread dates are bold.
 Labels based on @code{gnus-header-content}, with normal weight and
 slant.
 
-@item tessera-gnus-summary-status-face
-Status glyphs inheriting the shared accent face.
-
-@item tessera-gnus-summary-muted-face
-Read and inactive glyphs inheriting the shared muted face.
-
-@item tessera-gnus-summary-important-face
-Ticked and pending-processing glyphs inheriting attention.
-
-@item tessera-gnus-summary-positive-face
-Availability and completed-action glyphs inheriting positive.
-
-@item tessera-gnus-summary-informational-face
-Informational states inheriting informational.
-
-@item tessera-gnus-summary-warning-face
-@itemx tessera-gnus-summary-error-face
-Uncertain or failed states inheriting the shared warning or negative
-face, respectively.
-
 @item tessera-gnus-summary-spam-face
 @itemx tessera-gnus-summary-expirable-face
-Spam and expirable article states inheriting @code{error} and
-@code{warning}, respectively.  These also style their status icons.
-
-@item tessera-gnus-summary-high-score-face
-@itemx tessera-gnus-summary-low-score-face
-Score glyphs inheriting attention or muted, respectively.
-
-@item tessera-gnus-summary-attachment-face
-@itemx tessera-gnus-summary-signature-face
-Content-presence glyphs inheriting informational.
-
-@item tessera-gnus-summary-encryption-face
-Encryption-presence glyphs inheriting accent.
-
-@item tessera-gnus-summary-thread-tree-face
-Thread branches inheriting @code{shadow}.
+Spam and expirable article text inheriting
+@code{tessera-glyph-negative-face} and
+@code{tessera-glyph-warning-face}, respectively.
 
 @item tessera-gnus-summary-thread-count-face
 Counts inheriting @code{gnus-summary-normal-read} and @code{shadow}.
@@ -725,7 +850,8 @@ navigation continue to belong to mu4e.
 * mu4e Mode::           Enabling the mu4e adapter.
 * mu4e Row Contents::   Message fields, targets, and labels.
 * State Precedence: mu4e State Precedence.  Choosing among competing message states.
-* mu4e Faces::          Text styling and glyph faces.
+* mu4e Glyph Options::  Configuring state and operation indicators.
+* mu4e Faces::          Styling message text.
 @end menu
 
 @node mu4e Mode
@@ -807,6 +933,59 @@ counts can enlarge the shared leading area.  Attachment, signature,
 encryption, and calendar indicators use independent optional content
 slots.
 
+@node mu4e Glyph Options
+@section mu4e Glyph Options
+@cindex glyph customization, mu4e
+
+  Each glyph name identifies a message state, pending operation, or
+content attribute.  The selection rules in @ref{mu4e State Precedence}
+continue to apply after customization.
+
+@defopt tessera-mu4e-headers-glyphs
+Global mu4e glyph overrides, initially @code{nil}.  Use the property
+list format described in @ref{Customizing Glyphs}.
+@end defopt
+
+@table @code
+@item status-
+Append @code{trashed}, @code{draft}, @code{new}, @code{unread}, or
+@code{seen}; for example, @code{status-unread}.
+
+@item priority-
+Append @code{high}, @code{flagged}, or @code{low}.
+
+@item operation-
+Append @code{move}, @code{refile}, @code{trash}, @code{untrash},
+@code{delete}, @code{flag}, @code{unflag}, @code{read},
+@code{mark-unread}, @code{label}, @code{unlabel}, @code{action}, or
+@code{something}.  The last name represents a deferred operation.
+
+@item secondary-
+Append @code{replied}, @code{passed}, @code{personal}, or @code{list}.
+The @code{passed} flag indicates forwarding.
+
+@item attachment
+@itemx signature
+@itemx encryption
+@itemx calendar
+Independent content indicators.  Their default glyphs are a paperclip,
+signing glyph, lock, and calendar, with ASCII @samp{a}, @samp{S},
+@samp{E}, and @samp{c}.  They use informational, informational, accent,
+and attention faces, respectively.
+
+@item target
+The arrow preceding a pending operation's target, initially Unicode
+@samp{→} or ASCII @samp{>}, using @code{tessera-glyph-attention-face}.
+Hiding it retains the target text.
+@end table
+
+  New, unread, and personal indicators use the accent face; seen and
+low-priority indicators use muted.  Draft, forwarded, and list
+indicators use informational; replied uses positive; flagged uses
+attention; high priority uses warning.  Pending operations use attention
+except trash and delete, which use negative.  An existing trashed state
+also uses negative, independently of pending operations.
+
 @node mu4e Faces
 @section mu4e Faces
 @cindex faces, mu4e
@@ -847,9 +1026,6 @@ Bold, upright headings based on @code{mu4e-header-face} or
 Italic adjustments over each message's native state.  The unread variant
 adds bold weight.
 
-@item tessera-mu4e-headers-thread-tree-face
-Thread branches inheriting @code{mu4e-header-face}.
-
 @item tessera-mu4e-headers-thread-count-face
 @itemx tessera-mu4e-headers-thread-unread-count-face
 Counts based on @code{mu4e-header-face} or @code{mu4e-unread-face}, with
@@ -865,41 +1041,8 @@ Labels inheriting @code{mu4e-header-value-face}, with normal weight and
 slant.
 
 @item tessera-mu4e-headers-operation-face
-Pending operations inheriting the shared attention face.
+Pending operation target text inheriting the shared attention face.
 
-@item tessera-mu4e-headers-destructive-operation-face
-Pending trash or deletion, adding the negative face over operation.
-
-@item tessera-mu4e-headers-new-face
-@itemx tessera-mu4e-headers-unread-face
-@itemx tessera-mu4e-headers-personal-face
-@itemx tessera-mu4e-headers-encryption-face
-New, unread, personal, or encrypted-content glyphs inheriting accent.
-
-@item tessera-mu4e-headers-read-face
-@itemx tessera-mu4e-headers-low-priority-face
-Read and low-priority glyphs inheriting muted.
-
-@item tessera-mu4e-headers-draft-face
-@itemx tessera-mu4e-headers-forwarded-face
-@itemx tessera-mu4e-headers-list-face
-@itemx tessera-mu4e-headers-attachment-face
-@itemx tessera-mu4e-headers-signature-face
-Draft, correspondence, and content-presence glyphs inheriting
-informational.
-
-@item tessera-mu4e-headers-trashed-face
-An existing trashed state, inheriting negative.
-
-@item tessera-mu4e-headers-flagged-face
-@itemx tessera-mu4e-headers-calendar-face
-Flagged messages and calendar content, inheriting attention.
-
-@item tessera-mu4e-headers-replied-face
-Replied messages, inheriting positive.
-
-@item tessera-mu4e-headers-high-priority-face
-High-priority messages, inheriting warning.
 @end vtable
 
 @node Elfeed
@@ -952,40 +1095,29 @@ hover; it does not download enclosures.
 @node Elfeed Glyph Options
 @section Elfeed Glyph Options
 @cindex glyph customization, Elfeed
-  The following values are five-element lists containing ASCII text,
-Unicode text, Nerd Icons function, Nerd Icons name, and semantic role.
-Set them through Customize or @code{setopt} so their custom setter
-re-registers the glyphs and refreshes active Search buffers.
 
-@defopt tessera-elfeed-search-unread-glyph
-The unread glyph.  Initially:
-@lisp
-("*" "●" nerd-icons-mdicon "nf-md-email" accent)
-@end lisp
+  Search status follows the entry's unread tag, and enclosure presence
+follows its stored enclosure metadata.  The option changes their
+appearance without changing those data.
+
+@defopt tessera-elfeed-search-glyphs
+Global Elfeed glyph overrides, initially @code{nil}.  Use the property
+list format described in @ref{Customizing Glyphs}.  The names are
+@code{status-unread}, @code{status-read}, and @code{enclosure}.
 @end defopt
 
-@defopt tessera-elfeed-search-read-glyph
-The read glyph.  Initially:
-@lisp
-("o" "○" nerd-icons-mdicon "nf-md-email_open_outline" muted)
-@end lisp
-@end defopt
-
-@defopt tessera-elfeed-search-enclosure-glyph
-The enclosure glyph.  Initially:
-@lisp
-("@@" "📎" nerd-icons-mdicon "nf-md-paperclip" informational)
-@end lisp
-@end defopt
-
-  The options belong to @code{tessera-elfeed}.  The read and unread
-glyphs must fit the status slot's two-column width.  For example, to
-change the unread Unicode form while retaining its semantic role:
+  The unread glyph defaults to Unicode @samp{●}, ASCII @samp{*}, and
+@code{tessera-glyph-accent-face}; the read glyph uses @samp{○},
+@samp{o}, and @code{tessera-glyph-muted-face}.  The enclosure glyph uses
+a paperclip, ASCII @samp{@@}, and
+@code{tessera-glyph-informational-face}.  Their Nerd Icons names are
+@samp{nf-md-email}, @samp{nf-md-email_open_outline}, and
+@samp{nf-md-paperclip}, all using @code{nerd-icons-mdicon}.
 
 @lisp
-(require 'tessera-elfeed)
-(setopt tessera-elfeed-search-unread-glyph
-        '("*" "•" nerd-icons-mdicon "nf-md-email" accent))
+(require 'tessera-elfeed-search)
+(setopt tessera-elfeed-search-glyphs
+        '((status-unread :unicode "•")))
 @end lisp
 
 @node Elfeed Faces
@@ -1028,8 +1160,8 @@ underline.  The unread variant retains unread emphasis.
 @cindex refreshing
   Gnus and mu4e track native changes, theme changes, and shared
 appearance options during their normal update cycles.  After manually
-changing individual faces, regenerate the affected native view to
-refresh any resolved hover colors as well as text faces.
+changing individual faces, use @code{tessera-refresh-glyphs} to refresh
+resolved hover colors as well as text faces.
 
   In an active Elfeed Search buffer, force a local display update after
 changing a shared layout option:
@@ -1038,10 +1170,19 @@ changing a shared layout option:
 (elfeed-search-update :force)
 @end lisp
 
-  This redraws the search display; it is not a feed download.  Elfeed's
-three glyph options have custom setters that also refresh active
-buffers.  Assigning them with @code{setq} bypasses that setter, so
-prefer Customize or @code{setopt}.
+  This redraws the search display; it is not a feed download.  Glyph
+options, the shared glyph style and color options, and the truncation
+marker redraw active views when changed through Customize or
+@code{setopt}.  Invalid glyph definitions are rejected before the option
+is changed.  Assigning with @code{setq} bypasses the setter.
+
+@deffn Command tessera-refresh-glyphs
+Validate the current glyph settings and redraw active Tessera views. Use
+after @code{setq} or face customization.  Preserve point's message,
+window positions, and native folding and marks.  Disabled adapters stay
+disabled; no mail or feeds are fetched.  Invalid settings signal an
+error.  The command does not save options to the customization file.
+@end deffn
 
 @node Writing an Entry Backend
 @chapter Writing an Entry Backend
@@ -1264,45 +1405,64 @@ registered thread layout take precedence.
 @node Glyph Definitions
 @section Glyph Definitions
 
+  Backend code resolves configured forms into glyph objects before
+registering slots.  A glyph contains presentation data; native state
+selection belongs to its slot's selector.
+
 @deftp {Data Type} tessera-glyph
-Alternative visual forms and a semantic role.  Construct with
+Alternative visual forms, a face, and a visibility flag.  Construct with
 @code{make-tessera-glyph}; fields are @code{ascii}, @code{unicode},
-@code{nerd-icons}, and @code{semantic}.
+@code{nerd-icons}, @code{face}, and @code{hidden}.
 @end deftp
 @findex make-tessera-glyph
 @findex tessera-glyph-p
 @findex tessera-glyph-ascii
 @findex tessera-glyph-unicode
 @findex tessera-glyph-nerd-icons
-@findex tessera-glyph-semantic
-  The ASCII form must be a nonempty ASCII string.  The Unicode form must
-be a nonempty string.  The Nerd Icons descriptor is a plist with
-@code{:function} naming a non-@code{nil} symbol and @code{:name} holding
-a nonempty string.  All three forms are supplied even when a particular
-installation uses only one.  @code{semantic} must be a recognized role.
-
-  For example:
+@findex tessera-glyph-face
+@findex tessera-glyph-hidden
+  The ASCII form is required, even for hidden glyphs.  Unicode and Nerd
+Icons forms are optional.  The fields follow the value contracts in
+@ref{Customizing Glyphs}, except that the object's ASCII field must
+already contain the resolved string.  Face and hidden default to
+@code{nil}.
 
 @lisp
 (make-tessera-glyph
- :ascii "*" :unicode "●"
+ :ascii "*"
+ :unicode "●"
  :nerd-icons '(:function nerd-icons-mdicon :name "nf-md-email")
- :semantic 'accent)
+ :face 'tessera-glyph-accent-face)
 @end lisp
+
+@defun tessera-glyph-resolve id defaults overrides &optional ascii
+Return a new glyph object for symbol @var{id}.  @var{defaults} and
+@var{overrides} are association lists of glyph property lists, with the
+fields described in @ref{Customizing Glyphs}.  Merge the selected
+entry's named fields, including fields within its Nerd Icons descriptor.
+Explicit @code{nil} values override defaults.  Do not modify either
+input table.
+
+When the default and resolved @code{:ascii} fields are both @code{nil},
+use @var{ascii} as the native fallback string.  Signal an error for an
+unknown @var{id} or invalid resolved fields.  This function resolves one
+entry; adapters must separately validate table names, uniqueness, and
+slot-width limits before accepting an entire configuration.  It does not
+activate an adapter or require a live buffer.
+@end defun
 
 @defun tessera-glyph-render glyph context &optional properties
 Return the rendered glyph string for the entry @var{context}, applying
 style fallback, color, hover, and interaction properties.  Validate
 @var{glyph}, @var{context}, and @var{properties}, signalling errors for
-invalid input.
+invalid input.  A hidden glyph returns an empty string.
 @end defun
 
-  @var{properties} supports @code{:face}, @code{:mouse-face},
-@code{:help-echo}, @code{:keymap}, @code{:pointer}, and
-@code{:follow-link}.  @code{:face} must name an existing face and is
-used only in semantic-color mode.  Do not pass @code{:glyph} here: the
-glyph is already the first argument.  Standalone rendering does not
-reserve a slot width.
+  @var{properties} supports @code{:mouse-face}, @code{:help-echo},
+@code{:keymap}, @code{:pointer}, and @code{:follow-link}.  The face is a
+field of the glyph, not an interaction property.  Do not pass
+@code{:glyph} here: the glyph is already the first argument.  Standalone
+rendering does not reserve a slot width.
 
 @node Glyph Slots
 @section Glyph Slots
@@ -1481,8 +1641,10 @@ install a native adapter or modify the built-in backend registrations.
 (defun my-tessera-context (object buffer window)
   "Describe OBJECT in BUFFER and WINDOW."
   (make-tessera-entry-context
-   :backend 'my-list :object object
-   :buffer buffer :window window))
+   :backend 'my-list
+   :object object
+   :buffer buffer
+   :window window))
 
 (defun my-tessera-title (context)
   "Return the title in CONTEXT."
@@ -1500,8 +1662,10 @@ install a native adapter or modify the built-in backend registrations.
  (list (cons 'single-line
              (make-tessera-entry-layout
               :main-left-segments
-              '((title :grow t :min-width 4
-                       :truncate tail :point t))
+              '((title :grow t
+                       :min-width 4
+                       :truncate tail
+                       :point t))
               :main-right-segments '(date)))))
 
 (pop-to-buffer (get-buffer-create "*Tessera Example*"))
@@ -1617,15 +1781,15 @@ thread membership.
 @defun tessera-thread-prefix context
 Return tree connectors for the native member described by entry
 @var{context}, or @code{nil} when there is no branch path.  Respect
-@code{tessera-glyph-style} for connector style and
-@code{tessera-entry-segment-gap} for indentation.
+@code{tessera-thread-glyphs} and the shared glyph style and color
+settings, with @code{tessera-entry-segment-gap} for indentation.
 @end defun
 
   These functions are segment providers.  Register the tree as fixed
 content: shrinking or omitting it would misrepresent parentage.
-Backend-specific providers may compose native faces over the returned
-strings.  The adapter must also update the display when native folding
-changes which messages are visible.
+Backend-specific providers may style counts with native faces.  Keep
+configured connector faces intact.  The adapter must also update the
+display when native folding changes which messages are visible.
 
 @node Native Adapter Interfaces
 @chapter Native Adapter Interfaces

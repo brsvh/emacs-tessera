@@ -91,7 +91,8 @@
                    :object header
                    :thread (make-tessera-thread-context :first nil)
                    :metadata
-                   (list :author "Author" :marks "    "
+                   (list :author "Author"
+                         :marks "    "
                          :native-face 'gnus-summary-low-ticked)))
          (text (tessera-gnus-summary--author context))
          (face (get-text-property 0 'face text)))
@@ -104,9 +105,11 @@
   (let* ((header (make-full-mail-header 1 "Subject" "Author"))
          (node (make-tessera-thread-context :first t :unread 1))
          (context (make-tessera-entry-context
-                   :object header :thread node
+                   :object header
+                   :thread node
                    :metadata
-                   (list :author "Author" :marks "R   "
+                   (list :author "Author"
+                         :marks "R   "
                          :native-face 'gnus-summary-high-read))))
     ;; A read root can represent a thread with unread replies.
     (should (eq (get-text-property
@@ -129,7 +132,8 @@
          (context (make-tessera-entry-context
                    :object header
                    :metadata
-                   (list :author "Author" :marks marks
+                   (list :author "Author"
+                         :marks marks
                          :native-face 'gnus-summary-normal-read))))
     ;; Check every status using the same unread rule as thread counts.
     (dolist (spec (cddr (assq 'status tessera-gnus-summary--states)))
@@ -170,22 +174,30 @@
             (if node (should (memq special face))
               (should-not (memq special face)))
             (should
-             (eq (tessera-gnus-summary--glyph-face
-                  'status (car spec) nil) special))))))))
+             (eq (tessera-glyph-face
+                  (tessera-glyph-resolve
+                   (intern (format "status-%s" (car spec)))
+                   tessera-gnus-summary--glyph-defaults nil "?"))
+                 (if (eq (car spec) 'spam)
+                     'tessera-glyph-negative-face
+                   'tessera-glyph-warning-face)))))))))
 
 (ert-deftest tessera-gnus-faces-dates-follow-article-unread-state ()
   (let* ((header (make-full-mail-header
                   1 "Subject" "Author" "17 Feb 2025 00:00:00 +0000"))
          (marks (string gnus-read-mark ?\s ?\s ?\s))
          (context (make-tessera-entry-context
-                   :object header :metadata (list :marks marks))))
+                   :object header
+                   :metadata (list :marks marks))))
     (dolist (spec (cddr (assq 'status tessera-gnus-summary--states)))
       (aset marks 0 (symbol-value (cadr spec)))
       (dolist (node (list nil
                           (make-tessera-thread-context
-                           :first t :unread 1)
+                           :first t
+                           :unread 1)
                           (make-tessera-thread-context
-                           :first nil :unread 0)))
+                           :first nil
+                           :unread 0)))
         (setf (tessera-entry-context-thread context) node)
         (let* ((read (gnus-read-mark-p (aref marks 0)))
                (face (get-text-property
@@ -201,20 +213,22 @@
 
 (ert-deftest tessera-glyph-role-face-respects-color-preferences ()
   (let ((glyph (make-tessera-glyph
-                :ascii "!" :unicode "!" :semantic 'negative
+                :ascii "!"
+                :unicode "!"
+                :face 'warning
                 :nerd-icons '(:function ignore :name "test")))
         (context (make-tessera-entry-context))
         (tessera-glyph-style 'ascii))
     (dolist (tessera-glyph-color '(t nil "blue"))
       (let* ((text (tessera-glyph-render
-                    glyph context '(:face warning)))
+                    glyph context))
              (face (get-text-property 0 'face text)))
         (pcase tessera-glyph-color
           ('t (should (memq 'warning (ensure-list face))))
           ('nil (should-not face))
           (_ (should (equal face '(:foreground "blue")))))))
-    (should-error
-     (tessera-glyph-render glyph context '(:face missing-face)))))
+    (setf (tessera-glyph-face glyph) 'missing-face)
+    (should-error (tessera-glyph-render glyph context))))
 
 (ert-deftest tessera-gnus-faces-score-changes-refresh-without-marks ()
   (with-temp-buffer

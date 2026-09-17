@@ -65,9 +65,15 @@ Enable the adapter for your application.  For Gnus:
 (tessera-gnus-mode +1)
 #+end_src
 
-Loading the library makes its settings available; enabling the mode updates
+Loading the library makes its mode available; enabling the mode updates
 existing and future matching buffers.  Pass ~-1~ to restore the native display.
 Elfeed and mu4e examples appear below.
+
+Load the feature that owns the settings you want to customize.  The view
+features ~tessera-gnus-summary~, ~tessera-mu4e-headers~, and
+~tessera-elfeed-search~ define their options and faces.  Experimental options
+belong to the corresponding ~tessera-x-*~ feature.  Loading these libraries
+does not enable a Tessera mode.
 
 Use ~M-x customize-group~ with ~tessera~, ~tessera-elfeed~, ~tessera-gnus~, or
 ~tessera-mu4e~.  Installed manuals are available with ~C-h i~, then ~m~ and the manual
@@ -95,7 +101,7 @@ heights.  For example, in your initialization file:
 
 #+begin_src emacs-lisp
 (require 'tessera)
-(setq tessera-entry-left-padding 2
+(setopt tessera-entry-left-padding 2
         tessera-entry-right-padding 2
         tessera-entry-top-padding 0.1
         tessera-entry-bottom-padding 0.1)
@@ -121,7 +127,31 @@ corresponding library and font.  A color string for ~tessera-glyph-color~ gives
 all glyphs that foreground color.
 
 Use ~M-x customize-face~ for ~tessera-entry-current-face~ and
-~tessera-entry-hover-face~, or the backend faces described below.
+~tessera-entry-hover-face~, or shared semantic faces such as
+~tessera-glyph-accent-face~ and ~tessera-glyph-negative-face~.  Individual glyphs use
+~:face~ to select a shared or user-defined face.
+
+Each view has a glyph option: ~tessera-gnus-summary-glyphs~,
+~tessera-mu4e-headers-glyphs~, and ~tessera-elfeed-search-glyphs~.  These are
+alists of named property lists.  Supply only the fields to override; omitted
+fields and glyphs retain their defaults.  For example:
+
+#+begin_src emacs-lisp
+(require 'tessera-mu4e-headers)
+(setopt tessera-mu4e-headers-glyphs
+        '((status-unread :unicode "◉" :face tessera-glyph-accent-face)
+          (attachment :hidden t)))
+#+end_src
+
+The fields are ~:ascii~, ~:unicode~, ~:nerd-icons~, ~:face~, and ~:hidden~.
+Set ~:nerd-icons~ to nil to skip Nerd Icons, or ~:face~ to nil to inherit
+surrounding text.  ~tessera-thread-glyphs~ configures shared connectors;
+~tessera-entry-ellipsis~ configures the truncation marker.  See the manual
+for glyph names, defaults, width limits, and fallback rules.
+
+Customize and ~setopt~ refresh active views.  After ~setq~ or face changes,
+use ~M-x tessera-refresh-glyphs~.  Loading a view feature makes its options
+available; its mode owns runtime hooks and removes them when disabled.
 
 *** Native Threads
 
@@ -149,12 +179,13 @@ Enable the Search adapter:
 #+end_src
 
 Rows show titles, feeds, tags, dates, and read or enclosure indicators.  Use ~M-x
-customize-group~ with ~tessera-elfeed~ for text faces.  For example, change the
-unread Unicode glyph with:
+customize-group~ with ~tessera-elfeed-search~ for text faces.  For example,
+change the unread Unicode glyph with:
 
 #+begin_src emacs-lisp
-(setopt tessera-elfeed-search-unread-glyph
-        '("*" "•" nerd-icons-mdicon "nf-md-email" accent))
+(require 'tessera-elfeed-search)
+(setopt tessera-elfeed-search-glyphs
+        '((status-unread :unicode "•")))
 #+end_src
 
 Use Customize or ~setopt~ for the glyph options so their setters refresh active
@@ -183,7 +214,7 @@ Enable the Headers adapter:
 Rows show subjects, contacts, labels, dates, message flags, and pending
 operations.  Thread folding continues to use mu4e's own controls.
 
-Use ~M-x customize-group~ with ~tessera-mu4e-headers~ for text and glyph faces,
+Use ~M-x customize-group~ with ~tessera-mu4e-headers~ for text faces,
 including ~tessera-mu4e-headers-label-face~.  Native message-state faces remain
 part of the display.
 
@@ -256,7 +287,7 @@ stored feed content on failure.  To fetch only when the stored body is short,
 and limit concurrent requests:
 
 #+begin_src emacs-lisp
-(require 'tessera-elfeed)
+(require 'tessera-x-elfeed)
 (setopt tessera-x-elfeed-fetch-minimum-characters 1000
         tessera-x-elfeed-fetch-timeout 10
         tessera-x-elfeed-fetch-concurrency 2)
@@ -285,7 +316,7 @@ current group's local Agent overview.
 To use that expanded scope by default:
 
 #+begin_src emacs-lisp
-(require 'tessera-gnus)
+(require 'tessera-x-gnus)
 (setopt tessera-x-gnus-subthread-scope 'local-index)
 #+end_src
 
@@ -301,7 +332,7 @@ Selected-article and subthread snapshots download missing bodies into the Agent
 by default.  To use cached bodies only:
 
 #+begin_src emacs-lisp
-(require 'tessera-gnus)
+(require 'tessera-x-gnus)
 (setopt tessera-x-gnus-body-policy 'local-only)
 #+end_src
 
@@ -328,7 +359,7 @@ descendants outside the current results.
 To expand through the index by default:
 
 #+begin_src emacs-lisp
-(require 'tessera-mu4e)
+(require 'tessera-x-mu4e)
 (setopt tessera-x-mu4e-subthread-scope 'local-index)
 #+end_src
 
@@ -342,7 +373,7 @@ ready hook runs on successful completion.
 To supply a fixed maildir scope, replace the path in this example:
 
 #+begin_src emacs-lisp
-(require 'tessera-mu4e)
+(require 'tessera-x-mu4e)
 
 (defun my-tessera-today-query ()
   "Return the mail scope for today's snapshot."

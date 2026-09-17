@@ -105,10 +105,10 @@ own library directory.  Then use:
 (require 'tessera-x-mu4e)
 @end lisp
 
-  Use @kbd{M-x customize-group @key{RET} tessera-mu4e @key{RET}} to
-configure the options documented here.  You can also load
-@code{tessera-mu4e} and set them in your initialization file before
-loading the snapshot commands.
+  Use @kbd{M-x customize-group @key{RET} tessera-x-mu4e @key{RET}}
+to configure this package.  Its options are defined in
+@code{tessera-x-mu4e}; load that library before setting them in your
+initialization file.
 
 @node First Context
 @section Preparing a First Context
@@ -252,14 +252,14 @@ only when today's query should have no additional restriction.
 Replace the maildir with one present in the configured index.
 
 @lisp
-(require 'tessera-mu4e)
+(require 'tessera-x-mu4e)
 
 (defun my-tessera-today-query ()
   "Return the mail scope for today's context."
   "maildir:/personal/Inbox")
 
-(setq tessera-x-mu4e-today-query-function
-      #'my-tessera-today-query)
+(setopt tessera-x-mu4e-today-query-function
+        #'my-tessera-today-query)
 @end lisp
 
   Both backend options can be set globally or given buffer-local values.

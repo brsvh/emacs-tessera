@@ -5,7 +5,8 @@
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1") (tessera "0.1.0") (tessera-x "0.1.0"))
+;; Package-Requires: ((emacs "30.1") (tessera "0.1.0")
+;;                   (tessera-x "0.1.0"))
 ;; Keywords: convenience, mail, news
 ;; URL: https://github.com/brsvh/emacs-tessera
 
@@ -38,6 +39,29 @@
 (require 'gnus-agent)
 (require 'gnus-topic)
 (require 'nnheader)
+
+(defgroup tessera-x-gnus nil
+  "Experimental Tessera features for Gnus."
+  :group 'tessera-x
+  :group 'tessera-gnus
+  :prefix "tessera-x-gnus-")
+
+;;;; Context options
+
+(defcustom tessera-x-gnus-body-policy 'download
+  "How selected and subthread contexts obtain article bodies.
+Download fetches missing bodies into the Agent.  Local-only keeps
+metadata and an explicit note when the Agent has no body.
+Today contexts always use local-only, regardless of this option."
+  :type '(choice (const download) (const local-only))
+  :group 'tessera-x-gnus)
+
+(defcustom tessera-x-gnus-subthread-scope 'results
+  "Default source of context subthread members.
+Results includes folded articles; local-index also consults the
+current group's Agent overview, which can itself be incomplete."
+  :type '(choice (const results) (const local-index))
+  :group 'tessera-x-gnus)
 
 ;;;; Context snapshots
 
@@ -241,7 +265,8 @@ overview.  That local index may omit articles absent from the Agent."
          (id (save-excursion (gnus-summary-article-number)))
          (anchor
           (cl-find (cons gnus-newsgroup-name id) items
-                   :key #'tessera-x-item-id :test #'equal))
+                   :key #'tessera-x-item-id
+                   :test #'equal))
          (expanded (or local-index
                        (eq tessera-x-gnus-subthread-scope
                            'local-index))))

@@ -14,11 +14,32 @@
 (require 'tessera-x-gnus)
 (require 'tessera-gnus-test-support)
 
+(ert-deftest tessera-x-options-belong-to-their-feature ()
+  (dolist (entry '((tessera-x-gnus
+                    body-policy subthread-scope)
+                   (tessera-x-mu4e
+                    subthread-scope today-query-function)
+                   (tessera-x-elfeed
+                    fetch-linked-content fetch-minimum-characters
+                    fetch-timeout fetch-concurrency)))
+    (let ((prefix (symbol-name (car entry))))
+      (dolist (suffix (cdr entry))
+        (let ((option (intern (concat prefix "-"
+                                      (symbol-name suffix)))))
+          (should (get option 'standard-value))
+          (should
+           (equal prefix
+                  (file-name-base (symbol-file option 'defvar))))
+          (should (assq option (get (car entry) 'custom-group))))))))
+
 (defun tessera-x-tests--item (id &optional references)
   "Create a context record with ID and REFERENCES."
   (make-tessera-x-item
-   :id id :message-id id :references references
-   :subject "Full subject" :date '(27000 0)
+   :id id
+   :message-id id
+   :references references
+   :subject "Full subject"
+   :date '(27000 0)
    :metadata '(("From" . "Full Name <full@example.invalid>"))
    :body (make-string 1000 ?x)))
 
@@ -209,12 +230,14 @@
                    (lambda (&rest _) source)))
           (dotimes (index 5)
             (mu4e~headers-insert-header
-             (list :docid (1+ index) :subject "Full subject"
+             (list :docid (1+ index)
+                   :subject "Full subject"
                    :message-id (unless (= index 2)
                                  (format "%d" (1+ index)))
                    :meta (list :level (nth index '(0 1 0 1 2))
                                :root (memq index '(0 2)))
-                   :date '(27000 0) :flags '(unread))
+                   :date '(27000 0)
+                   :flags '(unread))
              (point-max))))
         (goto-char (point-min))
         (let ((overlay (make-overlay (point-min) (point-max))))
@@ -350,7 +373,8 @@
              (request (make-tessera-x-elfeed--request
                        :context context))
              (fetch (make-tessera-x-elfeed--fetch
-                     :request request :item item))
+                     :request request
+                     :item item))
              (calls 0)
              (tessera-x-context-ready-hook
               (list (lambda (_) (cl-incf calls)))))
@@ -375,10 +399,12 @@
                (buffers (cl-loop repeat 3 collect
                                  (generate-new-buffer " *Redirect*")))
                (process (make-pipe-process
-                         :name "tessera-redirect" :noquery t
+                         :name "tessera-redirect"
+                         :noquery t
                          :buffer (car (last buffers))))
                (fetch (make-tessera-x-elfeed--fetch
-                       :request request :item item
+                       :request request
+                       :item item
                        :buffer (car buffers))))
           (unwind-protect
               (progn
@@ -452,7 +478,8 @@
            (mu4e-mu-home
             (expand-file-name "index with space" directory))
            (message-file (expand-file-name "message.eml" directory))
-           (record (list :path message-file :message-id "indexed"
+           (record (list :path message-file
+                         :message-id "indexed"
                          :references '("root")
                          :subject "Local indexed mail"
                          :date '(27000 0)))
@@ -541,7 +568,8 @@
              (request (make-tessera-x-elfeed--request
                        :context context))
              (fetch (make-tessera-x-elfeed--fetch
-                     :request request :item item))
+                     :request request
+                     :item item))
              (response (generate-new-buffer " *HTTP fixture*")))
         (setf (tessera-x-elfeed--request-active request) (list fetch))
         (with-current-buffer response
@@ -579,8 +607,12 @@
                do
                (let* ((id (cons "feed" (number-to-string index)))
                       (entry (elfeed-entry--create
-                              :id id :feed-id "feed" :title "Entry"
-                              :date date :tags tags :content "Body"
+                              :id id
+                              :feed-id "feed"
+                              :title "Entry"
+                              :date date
+                              :tags tags
+                              :content "Body"
                               :link "https://example.invalid/item")))
                  (puthash id entry elfeed-db-entries)
                  (avl-tree-enter elfeed-db-index id)))

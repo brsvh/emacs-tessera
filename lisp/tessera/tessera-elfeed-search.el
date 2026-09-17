@@ -24,13 +24,123 @@
 ;;; Commentary:
 
 ;; This module renders `elfeed-search-mode' entries with Tessera.
-;; `tessera-elfeed' declares public faces and manages activation.
+;; Options and faces live here; `tessera-elfeed' manages activation.
 
 ;;; Code:
 
 (require 'hl-line)
 (require 'subr-x)
 (require 'tessera-elfeed)
+
+(defgroup tessera-elfeed-search nil
+  "Tessera entries in Elfeed search buffers."
+  :group 'tessera-elfeed
+  :prefix "tessera-elfeed-search-")
+
+;;;; Glyph options
+
+(defvar tessera-elfeed-search--glyph-defaults
+  '((status-unread
+     :ascii "*"
+     :unicode "●"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email")
+     :face tessera-glyph-accent-face)
+    (status-read
+     :ascii "o"
+     :unicode "○"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email_open_outline")
+     :face tessera-glyph-muted-face)
+    (enclosure
+     :ascii "@"
+     :unicode "📎"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-paperclip")
+     :face tessera-glyph-informational-face))
+  "Default glyph representations and shared semantic faces.")
+
+(defun tessera-elfeed-search--set-glyphs
+    (symbol value)
+  "Set glyph option SYMBOL to validated VALUE and refresh views."
+  (tessera--set-glyphs
+   symbol value tessera-elfeed-search--glyph-defaults))
+
+(defcustom tessera-elfeed-search-glyphs nil
+  "Overrides for the named fields of this view's glyphs.
+Each alist entry maps a glyph ID to a property list.  Missing fields
+keep their defaults.  Use :ascii, :unicode, :nerd-icons, :face, and
+:hidden; see `tessera-glyph-resolve'.  Customize and `setopt' redraw
+active views.  After `setq', call `tessera-refresh-glyphs'."
+  :type (tessera--glyph-custom-type
+         tessera-elfeed-search--glyph-defaults)
+  :initialize #'custom-initialize-default
+  :set #'tessera-elfeed-search--set-glyphs
+  :group 'tessera-elfeed-search)
+
+;;;; Faces
+
+(defface tessera-elfeed-search-title-face
+  '((t :inherit elfeed-search-title-face))
+  "Face used for entry titles in Elfeed search buffers."
+  :group 'tessera-elfeed-search)
+
+(defface tessera-elfeed-search-unread-title-face
+  '((t :inherit elfeed-search-unread-title-face))
+  "Face used for unread entry titles in Elfeed search buffers."
+  :group 'tessera-elfeed-search)
+
+(defface tessera-elfeed-search-feed-face
+  '((t :inherit elfeed-search-feed-face
+       :weight normal
+       :slant italic
+       :extend nil))
+  "Face used for feed titles of read entries."
+  :group 'tessera-elfeed-search)
+
+(defface tessera-elfeed-search-unread-feed-face
+  '((t :inherit (bold tessera-elfeed-search-feed-face)
+       :extend nil))
+  "Face used for feed titles of unread entries."
+  :group 'tessera-elfeed-search)
+
+(defface tessera-elfeed-search-tag-face
+  '((t :inherit elfeed-search-tag-face))
+  "Face used for entry tags in Elfeed search buffers."
+  :group 'tessera-elfeed-search)
+
+(defface tessera-elfeed-search-date-face
+  '((t :inherit (elfeed-search-title-face elfeed-search-date-face)
+       :weight normal
+       :slant normal
+       :extend nil))
+  "Face used for read dates, with the native title color."
+  :group 'tessera-elfeed-search)
+
+(defface tessera-elfeed-search-unread-date-face
+  '((t :inherit (bold elfeed-search-unread-title-face
+                      tessera-elfeed-search-date-face)
+       :slant normal
+       :extend nil))
+  "Face used for unread dates, with the native unread title color."
+  :group 'tessera-elfeed-search)
+
+(defface tessera-elfeed-search-url-face
+  '((t :inherit (tessera-elfeed-search-date-face link)
+       :slant italic
+       :underline nil
+       :extend nil))
+  "Face used for read URLs, with the read date color."
+  :group 'tessera-elfeed-search)
+
+(defface tessera-elfeed-search-unread-url-face
+  '((t :inherit (tessera-elfeed-search-unread-date-face
+                 tessera-elfeed-search-url-face)
+       :slant italic
+       :underline nil
+       :extend nil))
+  "Face used for unread URLs, with unread date color and weight."
+  :group 'tessera-elfeed-search)
 
 (declare-function elfeed-add-properties "elfeed-lib")
 (declare-function elfeed-entry-date "elfeed-db")
@@ -70,16 +180,6 @@
    :buffer buffer
    :window window))
 
-(defun tessera-elfeed-search--make-glyph (definition)
-  "Build a Tessera glyph from Elfeed glyph DEFINITION."
-  (pcase-let ((`(,ascii ,unicode ,function ,name ,semantic)
-               definition))
-    (make-tessera-glyph
-     :ascii ascii
-     :unicode unicode
-     :nerd-icons `(:function ,function :name ,name)
-     :semantic semantic)))
-
 (defun tessera-elfeed-search--select-status (context)
   "Return the status glyph variant for CONTEXT."
   (if (memq 'unread
@@ -98,12 +198,14 @@
    :align 'center
    :glyphs
    `((unread
-      :glyph ,(tessera-elfeed-search--make-glyph
-               tessera-elfeed-search-unread-glyph)
+      :glyph ,(tessera-glyph-resolve
+               'status-unread tessera-elfeed-search--glyph-defaults
+               tessera-elfeed-search-glyphs)
       :help-echo "Unread")
      (read
-      :glyph ,(tessera-elfeed-search--make-glyph
-               tessera-elfeed-search-read-glyph)
+      :glyph ,(tessera-glyph-resolve
+               'status-read tessera-elfeed-search--glyph-defaults
+               tessera-elfeed-search-glyphs)
       :help-echo "Read"))))
 
 (defun tessera-elfeed-search--title-faces (tags)
@@ -174,11 +276,14 @@
   "Return an enclosure indicator for CONTEXT."
   (when-let* ((enclosures
                (elfeed-entry-enclosures
-                (tessera-elfeed-search--entry context))))
+                (tessera-elfeed-search--entry context)))
+              (glyph
+               (tessera-glyph-resolve
+                'enclosure tessera-elfeed-search--glyph-defaults
+                tessera-elfeed-search-glyphs))
+              ((not (tessera-glyph-hidden glyph))))
     (tessera-glyph-render
-     (tessera-elfeed-search--make-glyph
-      tessera-elfeed-search-enclosure-glyph)
-     context
+     glyph context
      (list :help-echo
            (tessera-elfeed-search--enclosure-help enclosures)))))
 
@@ -232,8 +337,11 @@
    :main-left-segments
    '((title :grow t :min-width 4 :truncate tail))
    :main-right-segments
-   '((feed :grow t :min-width 4 :max-width 32
-           :truncate tail :priority -10))
+   '((feed :grow t
+           :min-width 4
+           :max-width 32
+           :truncate tail
+           :priority -10))
    :extra-glyph-slots '((status :reserve t))
    :extra-left-segments
    '((url :grow t :min-width 8 :truncate tail :priority 0)
@@ -244,6 +352,9 @@
 
 (defun tessera-elfeed-search--register ()
   "Register the Elfeed search adapter with Tessera."
+  (tessera--validate-glyph-overrides
+   tessera-elfeed-search--glyph-defaults
+   tessera-elfeed-search-glyphs 2)
   (tessera-entry-register
    'elfeed-search
    :context #'tessera-elfeed-search--context
@@ -360,6 +471,22 @@
     (tessera-elfeed-search--refresh)
     (hl-line-mode (if tessera-elfeed-search--saved-hl-line 1 -1))
     (setq tessera-elfeed-search--saved-hl-line nil)))
+
+(defun tessera-elfeed-search--glyphs-changed (option)
+  "Refresh active elfeed views after glyph OPTION changes.
+Nil means explicitly refresh all glyphs and their hover faces."
+  (when (or (null option)
+            (memq option '(tessera-elfeed-search-glyphs
+                           tessera-thread-glyphs
+                           tessera-entry-ellipsis
+                           tessera-glyph-style tessera-glyph-color)))
+    (when (gethash 'elfeed-search tessera--entry-backends)
+      (tessera-elfeed-search--register))
+    (save-window-excursion
+      (dolist (buffer (buffer-list))
+        (with-current-buffer buffer
+          (when tessera-elfeed-search--active
+            (tessera-elfeed-search--refresh)))))))
 
 (provide 'tessera-elfeed-search)
 ;;; tessera-elfeed-search.el ends here

@@ -15,7 +15,8 @@
          (elfeed-db '(:version 4))
          (elfeed-db-feeds (make-hash-table :test #'equal))
          (entry (elfeed-entry--create
-                 :feed-id "test-feed" :date 0
+                 :feed-id "test-feed"
+                 :date 0
                  :link "https://example.invalid/entry"))
          (context (make-tessera-entry-context :object entry)))
     (puthash "test-feed" feed elfeed-db-feeds)

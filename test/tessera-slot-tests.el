@@ -14,18 +14,21 @@
          (calls 0)
          (context (make-tessera-entry-context))
          (slot (make-tessera-glyph-slot
-                :name 'status :width 2 :align 'center
+                :name 'status
+                :width 2
+                :align 'center
                 :selector (lambda (ctx)
                             (cl-incf calls)
                             (tessera-entry-context-object ctx))
                 :glyphs
                 (list (list 'present :glyph
                             (make-tessera-glyph
-                             :ascii "x" :unicode "x"
+                             :ascii "x"
+                             :unicode "x"
                              :nerd-icons
-                             '(:function nerd-icons-mdicon
-                                         :name "nf-md-paperclip")
-                             :semantic 'neutral)))))
+                             '( :function nerd-icons-mdicon
+                                :name "nf-md-paperclip")
+                             :face 'tessera-glyph-neutral-face)))))
          (definition
           (tessera--make-entry-backend
            :glyph-slots (list slot)
@@ -86,7 +89,9 @@
            (mapcar
             (lambda (name)
               (make-tessera-glyph-slot
-               :name name :width 2 :align 'left
+               :name name
+               :width 2
+               :align 'left
                :selector
                (lambda (ctx)
                  (when (memq name (tessera-entry-context-object ctx))
@@ -97,10 +102,9 @@
                       (make-tessera-glyph
                        :ascii (symbol-name name)
                        :unicode (symbol-name name)
-                       :nerd-icons
-                       '(:function nerd-icons-mdicon
-                                   :name "nf-md-paperclip")
-                       :semantic 'neutral)))))
+                       :nerd-icons '( :function nerd-icons-mdicon
+                                      :name "nf-md-paperclip")
+                       :face 'tessera-glyph-neutral-face)))))
             references))))
     (cl-labels
         ((columns
@@ -160,16 +164,21 @@
            (mapcar
             (lambda (name)
               (make-tessera-glyph-slot
-               :name name :width 2 :align 'center
+               :name name
+               :width 2
+               :align 'center
                :selector
                (lambda (ctx)
                  (when (memq name (tessera-entry-context-object ctx))
                    'present))
                :glyphs
-               (list (list 'present :help-echo "State"
-                           :glyph (make-tessera-glyph
-                                   :ascii glyph-text
-                                   :semantic 'neutral)))))
+               (list
+                (list 'present
+                      :help-echo "State"
+                      :glyph
+                      (make-tessera-glyph
+                       :ascii glyph-text
+                       :face 'tessera-glyph-neutral-face)))))
             names))))
     (should (> (string-pixel-width glyph-text)
                (* 2 (frame-char-width))))

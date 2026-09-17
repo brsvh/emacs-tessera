@@ -17,7 +17,8 @@
          (definition (tessera--make-entry-backend
                       :layouts (list (cons 'two-line plain))
                       :thread-layout (make-tessera-thread-layout
-                                      :head head :child child)))
+                                      :head head
+                                      :child child)))
          (tessera-entry-layout 'two-line)
          (node (make-tessera-thread-context :first t))
          (context (make-tessera-entry-context :thread node)))
@@ -33,7 +34,8 @@
   (should-error
    (tessera--validate-layout
     (make-tessera-entry-layout
-     :main-glyph-slots '(status) :main-leading-segments '(count))
+     :main-glyph-slots '(status)
+     :main-leading-segments '(count))
     '(count) '(status) "Test"))
   (should-error
    (tessera--validate-layout
@@ -41,25 +43,30 @@
 
 (ert-deftest tessera-thread-prefix-preserves-branches-at-full-depth
     ()
-  (let* ((tessera-glyph-style 'unicode)
-         (tessera-entry-segment-gap 1)
-         (node (make-tessera-thread-context :path '(t nil t)))
-         (context (make-tessera-entry-context :thread node))
-         (prefix (tessera-thread-prefix context)))
-    (should (string-prefix-p "│" prefix))
-    (should (string-match-p "├─" prefix))
-    (should (= 8 (string-width prefix)))
-    (setf (tessera-thread-context-path node) '(nil))
-    (should (string-prefix-p "└─" (tessera-thread-prefix context)))
-    (setf (tessera-thread-context-path node)
-          (cons t (make-list 49 nil)))
-    (should (string-prefix-p "│" (tessera-thread-prefix context)))
-    (should (= (string-width (tessera-thread-prefix context)) 149))
-    (let ((tessera-glyph-style 'ascii))
-      (should (string-prefix-p "|" (tessera-thread-prefix context)))
-      (should (= (string-width (tessera-thread-prefix context))
-                 149))))
-  (should-not (tessera-thread-prefix (make-tessera-entry-context))))
+  (cl-letf (((symbol-function 'display-graphic-p)
+             (lambda (&optional _frame) t))
+            ((symbol-function 'char-displayable-p)
+             (lambda (_char) t)))
+    (let* ((tessera-glyph-style 'unicode)
+           (tessera-entry-segment-gap 1)
+           (node (make-tessera-thread-context :path '(t nil t)))
+           (context (make-tessera-entry-context :thread node))
+           (prefix (tessera-thread-prefix context)))
+      (should (string-prefix-p "│" prefix))
+      (should (string-match-p "├─" prefix))
+      (should (= 8 (string-width prefix)))
+      (setf (tessera-thread-context-path node) '(nil))
+      (should (string-prefix-p "└─" (tessera-thread-prefix context)))
+      (setf (tessera-thread-context-path node)
+            (cons t (make-list 49 nil)))
+      (should (string-prefix-p "│" (tessera-thread-prefix context)))
+      (should (= (string-width (tessera-thread-prefix context)) 149))
+      (let ((tessera-glyph-style 'ascii))
+        (should (string-prefix-p "|" (tessera-thread-prefix context)))
+        (should (= (string-width (tessera-thread-prefix context))
+                   149))))
+    (should-not
+     (tessera-thread-prefix (make-tessera-entry-context)))))
 
 (ert-deftest tessera-thread-branches-align-with-parent-text ()
   (dolist (tessera-glyph-style '(ascii unicode nerd-icons))

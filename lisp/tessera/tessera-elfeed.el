@@ -23,7 +23,7 @@
 
 ;;; Commentary:
 
-;; Public options, faces, and `tessera-elfeed-mode' live here.
+;; The Elfeed group and `tessera-elfeed-mode' live here.
 ;; Search rendering follows the upstream `elfeed-search' feature.
 
 ;;; Code:
@@ -35,151 +35,12 @@
   :group 'tessera
   :prefix "tessera-elfeed-")
 
-;;;; Experimental context snapshots
-
-(defcustom tessera-x-elfeed-fetch-linked-content t
-  "Whether selected-entry contexts fetch linked HTTP content.
-Today contexts always use locally stored feed bodies."
-  :type 'boolean
-  :group 'tessera-elfeed)
-
-(defcustom tessera-x-elfeed-fetch-minimum-characters nil
-  "Skip context HTTP retrieval for stored bodies of this size.
-Nil means fetch every selected HTTP link when fetching is enabled."
-  :type '(choice (const nil) natnum)
-  :group 'tessera-elfeed)
-
-(defcustom tessera-x-elfeed-fetch-timeout 15
-  "Seconds to fetch a context body before using stored feed content."
-  :type 'natnum
-  :group 'tessera-elfeed)
-
-(defcustom tessera-x-elfeed-fetch-concurrency 4
-  "Maximum simultaneous linked-page requests for one context."
-  :type 'natnum
-  :group 'tessera-elfeed)
-
 (declare-function tessera-elfeed-search--disable
                   "tessera-elfeed-search")
 (declare-function tessera-elfeed-search--enable
                   "tessera-elfeed-search")
-
 (declare-function tessera-elfeed-search--register
                   "tessera-elfeed-search")
-
-(declare-function tessera-elfeed-search--refresh-active-buffers
-                  "tessera-elfeed-search")
-
-;;;; Public options
-
-(defun tessera-elfeed--set-search-glyph (symbol value)
-  "Set glyph option SYMBOL to VALUE and refresh active buffers."
-  (set-default symbol value)
-  (when (and (gethash 'elfeed-search tessera--entry-backends)
-             (fboundp 'tessera-elfeed-search--register)
-             (fboundp 'tessera-elfeed-search--refresh-active-buffers))
-    (tessera-elfeed-search--register)
-    (tessera-elfeed-search--refresh-active-buffers)))
-
-(defcustom tessera-elfeed-search-unread-glyph
-  '("*" "●" nerd-icons-mdicon "nf-md-email" accent)
-  "Glyph definition used for unread Elfeed entries.
-
-The value contains the ASCII text, Unicode text, Nerd Icons function,
-Nerd Icons name, and semantic role, in that order."
-  :type '(list
-          (string :tag "ASCII")
-          (string :tag "Unicode")
-          (symbol :tag "Nerd Icons function")
-          (string :tag "Nerd Icons name")
-          (symbol :tag "Semantic role"))
-  :set #'tessera-elfeed--set-search-glyph
-  :group 'tessera-elfeed)
-
-(defcustom tessera-elfeed-search-read-glyph
-  '("o" "○" nerd-icons-mdicon "nf-md-email_open_outline" muted)
-  "Glyph definition used for read Elfeed entries.
-
-The value has the same shape as
-`tessera-elfeed-search-unread-glyph'."
-  :type '(list
-          (string :tag "ASCII")
-          (string :tag "Unicode")
-          (symbol :tag "Nerd Icons function")
-          (string :tag "Nerd Icons name")
-          (symbol :tag "Semantic role"))
-  :set #'tessera-elfeed--set-search-glyph
-  :group 'tessera-elfeed)
-
-(defcustom tessera-elfeed-search-enclosure-glyph
-  '("@" "📎" nerd-icons-mdicon "nf-md-paperclip" informational)
-  "Glyph definition used for entries with enclosures.
-
-The value has the same shape as
-`tessera-elfeed-search-unread-glyph'."
-  :type '(list
-          (string :tag "ASCII")
-          (string :tag "Unicode")
-          (symbol :tag "Nerd Icons function")
-          (string :tag "Nerd Icons name")
-          (symbol :tag "Semantic role"))
-  :set #'tessera-elfeed--set-search-glyph
-  :group 'tessera-elfeed)
-
-;;;; Public faces
-
-(defface tessera-elfeed-search-title-face
-  '((t :inherit elfeed-search-title-face))
-  "Face used for entry titles in Elfeed search buffers."
-  :group 'tessera-elfeed)
-
-(defface tessera-elfeed-search-unread-title-face
-  '((t :inherit elfeed-search-unread-title-face))
-  "Face used for unread entry titles in Elfeed search buffers."
-  :group 'tessera-elfeed)
-
-(defface tessera-elfeed-search-feed-face
-  '((t :inherit elfeed-search-feed-face
-       :weight normal :slant italic :extend nil))
-  "Face used for feed titles of read entries."
-  :group 'tessera-elfeed)
-
-(defface tessera-elfeed-search-unread-feed-face
-  '((t :inherit (bold tessera-elfeed-search-feed-face)
-       :extend nil))
-  "Face used for feed titles of unread entries."
-  :group 'tessera-elfeed)
-
-(defface tessera-elfeed-search-tag-face
-  '((t :inherit elfeed-search-tag-face))
-  "Face used for entry tags in Elfeed search buffers."
-  :group 'tessera-elfeed)
-
-(defface tessera-elfeed-search-date-face
-  '((t :inherit (elfeed-search-title-face elfeed-search-date-face)
-       :weight normal :slant normal :extend nil))
-  "Face used for read dates, with the native title color."
-  :group 'tessera-elfeed)
-
-(defface tessera-elfeed-search-unread-date-face
-  '((t :inherit (bold elfeed-search-unread-title-face
-                      tessera-elfeed-search-date-face)
-       :slant normal :extend nil))
-  "Face used for unread dates, with the native unread title color."
-  :group 'tessera-elfeed)
-
-(defface tessera-elfeed-search-url-face
-  '((t :inherit (tessera-elfeed-search-date-face link)
-       :slant italic :underline nil :extend nil))
-  "Face used for read URLs, with the read date color."
-  :group 'tessera-elfeed)
-
-(defface tessera-elfeed-search-unread-url-face
-  '((t :inherit (tessera-elfeed-search-unread-date-face
-                 tessera-elfeed-search-url-face)
-       :slant italic :underline nil :extend nil))
-  "Face used for unread URLs, with unread date color and weight."
-  :group 'tessera-elfeed)
 
 ;;;; Adapter lifecycle
 
@@ -196,6 +57,14 @@ The value has the same shape as
   (tessera-elfeed-search--register)
   (tessera-elfeed-search--enable))
 
+(declare-function tessera-elfeed-search--glyphs-changed
+                  "tessera-elfeed-search")
+
+(defun tessera-elfeed--glyphs-changed (option)
+  "Forward changed glyph OPTION to an already loaded adapter."
+  (when (featurep 'tessera-elfeed-search)
+    (tessera-elfeed-search--glyphs-changed option)))
+
 ;;;###autoload
 (define-minor-mode tessera-elfeed-mode
   "Toggle Tessera UI adapters for Elfeed buffers."
@@ -203,10 +72,14 @@ The value has the same shape as
   :group 'tessera-elfeed
   (if tessera-elfeed-mode
       (progn
+        (add-hook 'tessera--glyph-change-functions
+                  #'tessera-elfeed--glyphs-changed)
         (add-hook 'elfeed-search-mode-hook
                   #'tessera-elfeed--enable-search)
         (tessera-elfeed--map-search-buffers
          #'tessera-elfeed--enable-search))
+    (remove-hook 'tessera--glyph-change-functions
+                 #'tessera-elfeed--glyphs-changed)
     (remove-hook 'elfeed-search-mode-hook
                  #'tessera-elfeed--enable-search)
     (when (featurep 'tessera-elfeed-search)

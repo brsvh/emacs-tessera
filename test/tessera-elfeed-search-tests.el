@@ -186,20 +186,34 @@
                 'read))))
 
 (ert-deftest tessera-elfeed-search-glyphs-are-configurable ()
-  (let ((original tessera-elfeed-search-unread-glyph)
+  (let ((original tessera-elfeed-search-glyphs)
+        (tessera--glyph-change-functions
+         '(tessera-elfeed--glyphs-changed))
         (entry (tessera-elfeed-search-tests--entry '(unread)))
         (tessera-entry-layout 'single-line)
         (tessera-glyph-style 'ascii))
     (unwind-protect
         (progn
-          (tessera-elfeed--set-search-glyph
-           'tessera-elfeed-search-unread-glyph
-           '("U" "◉" nerd-icons-mdicon "nf-md-email" accent))
+          (tessera-elfeed-search--set-glyphs
+           'tessera-elfeed-search-glyphs
+           '((status-unread :ascii "U" :unicode "◉")))
           (should (string-match-p
                    "U"
                    (tessera-entry-render 'elfeed-search entry))))
-      (tessera-elfeed--set-search-glyph
-       'tessera-elfeed-search-unread-glyph original))))
+      (tessera-elfeed-search--set-glyphs
+       'tessera-elfeed-search-glyphs original))))
+
+(ert-deftest tessera-elfeed-search-hidden-enclosure-omits-segment ()
+  (let* ((entry
+          (tessera-elfeed-search-tests--entry
+           nil '(("https://example.invalid/a" "text/plain" 10))))
+         (context (tessera-elfeed-search--context entry nil nil))
+         (tessera-elfeed-search-glyphs '((enclosure :hidden t))))
+    (should-not (tessera-elfeed-search--enclosure context))
+    (should-not
+     (tessera--render-segment
+      '(enclosure :optional t)
+      (gethash 'elfeed-search tessera--entry-backends) context))))
 
 (ert-deftest tessera-elfeed-search-omits-missing-enclosure ()
   (let* ((entry (tessera-elfeed-search-tests--entry))

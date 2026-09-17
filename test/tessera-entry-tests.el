@@ -75,9 +75,9 @@
   (make-tessera-glyph
    :ascii "*"
    :unicode "●"
-   :nerd-icons '(:function nerd-icons-mdicon
-                           :name "nf-md-circle")
-   :semantic 'accent))
+   :nerd-icons '( :function nerd-icons-mdicon
+                  :name "nf-md-circle")
+   :face 'tessera-glyph-accent-face))
 
 (defun tessera-entry-tests--nerd-icon (_name)
   "Return a stand-in Nerd Icons glyph."
@@ -221,7 +221,7 @@
          (glyph (plist-get
                  (cdr (car (tessera-glyph-slot-glyphs slot)))
                  :glyph)))
-    (setf (tessera-glyph-semantic glyph) 'unknown)
+    (setf (tessera-glyph-face glyph) 'unknown)
     (should-error
      (tessera-entry-register
       backend
@@ -300,9 +300,9 @@
             (let ((display
                    (tessera-entry-render
                     backend
-                    '(:title "A very long subject"
-                             :date "2026"
-                             :status unread)
+                    '( :title "A very long subject"
+                       :date "2026"
+                       :status unread)
                     (selected-window))))
               (should (string-match-p "A very …" display))
               (should-not (string-match-p "long subject" display))
@@ -394,9 +394,9 @@
               "●"
               (tessera-entry-render
                backend
-               '(:title "Subject"
-                        :date "2026"
-                        :status unread))))))
+               '( :title "Subject"
+                  :date "2026"
+                  :status unread))))))
       (remhash backend tessera--entry-backends))))
 
 (ert-deftest tessera-entry-render-falls-back-to-ascii ()
@@ -414,9 +414,9 @@
               (regexp-quote "*")
               (tessera-entry-render
                backend
-               '(:title "Subject"
-                        :date "2026"
-                        :status unread))))))
+               '( :title "Subject"
+                  :date "2026"
+                  :status unread))))))
       (remhash backend tessera--entry-backends))))
 
 (ert-deftest tessera-entry-render-uses-nerd-icons ()
@@ -439,9 +439,9 @@
               "N"
               (tessera-entry-render
                backend
-               '(:title "Subject"
-                        :date "2026"
-                        :status unread))))))
+               '( :title "Subject"
+                  :date "2026"
+                  :status unread))))))
       (remhash backend tessera--entry-backends))))
 
 (ert-deftest tessera-glyph-render-supports-segment-glyphs ()
@@ -457,8 +457,8 @@
     (should (equal (get-text-property 0 'help-echo text)
                    "Indicator"))
     (should (eq (get-text-property
-                 0 'tessera-glyph-semantic text)
-                'accent))))
+                 0 'tessera-glyph text)
+                t))))
 
 (ert-deftest tessera-entry-render-falls-back-from-nerd-icons ()
   (let ((backend 'tessera-entry-tests)
@@ -481,9 +481,9 @@
               "●"
               (tessera-entry-render
                backend
-               '(:title "Subject"
-                        :date "2026"
-                        :status unread))))))
+               '( :title "Subject"
+                  :date "2026"
+                  :status unread))))))
       (remhash backend tessera--entry-backends))))
 
 (ert-deftest tessera-entry-render-applies-semantic-color ()
@@ -496,15 +496,15 @@
           (let* ((display
                   (tessera-entry-render
                    backend
-                   '(:title "Subject"
-                            :date "2026"
-                            :status unread)))
+                   '( :title "Subject"
+                      :date "2026"
+                      :status unread)))
                  (position (string-match (regexp-quote "*") display)))
             (should (eq (get-text-property position 'face display)
                         'tessera-glyph-accent-face))
             (should (eq (get-text-property
-                         position 'tessera-glyph-semantic display)
-                        'accent))
+                         position 'tessera-glyph display)
+                        t))
             (let ((hover (get-text-property
                           position 'mouse-face display)))
               (should (equal (cadr hover)
@@ -525,14 +525,14 @@
           (let* ((display
                   (tessera-entry-render
                    backend
-                   '(:title "Subject"
-                            :date "2026"
-                            :status unread)))
+                   '( :title "Subject"
+                      :date "2026"
+                      :status unread)))
                  (position (string-match (regexp-quote "*") display)))
             (should-not (get-text-property position 'face display))
             (should (eq (get-text-property
-                         position 'tessera-glyph-semantic display)
-                        'accent))))
+                         position 'tessera-glyph display)
+                        t))))
       (remhash backend tessera--entry-backends))))
 
 (ert-deftest tessera-entry-render-supports-uniform-glyph-color ()
@@ -545,9 +545,9 @@
           (let* ((display
                   (tessera-entry-render
                    backend
-                   '(:title "Subject"
-                            :date "2026"
-                            :status unread)))
+                   '( :title "Subject"
+                      :date "2026"
+                      :status unread)))
                  (position (string-match (regexp-quote "*") display)))
             (should (equal (get-text-property position 'face display)
                            '(:foreground "red")))))
@@ -560,9 +560,9 @@
          (variant (car (tessera-glyph-slot-glyphs slot))))
     (setcdr variant
             (append (cdr variant)
-                    '(:mouse-face mode-line-highlight
-                                  :pointer hand
-                                  :follow-link t)))
+                    '( :mouse-face mode-line-highlight
+                       :pointer hand
+                       :follow-link t)))
     (unwind-protect
         (progn
           (tessera-entry-register
@@ -577,9 +577,9 @@
           (let* ((display
                   (tessera-entry-render
                    backend
-                   '(:title "Subject"
-                            :date "2026"
-                            :status unread)))
+                   '( :title "Subject"
+                      :date "2026"
+                      :status unread)))
                  (position (string-match (regexp-quote "*") display)))
             (should (equal (get-text-property
                             position 'mouse-face display)
@@ -603,10 +603,10 @@
           (let* ((display
                   (tessera-entry-render
                    backend
-                   '(:title "Subject"
-                            :date "2026"
-                            :status unread
-                            :local-hover t)))
+                   '( :title "Subject"
+                      :date "2026"
+                      :status unread
+                      :local-hover t)))
                  (title-position
                   (string-match "Subject" display)))
             (should (equal (get-text-property title-position
@@ -669,11 +669,11 @@
             (let* ((display
                     (tessera-entry-render
                      backend
-                     '(:title "A very long subject"
-                              :date "2026"
-                              :author "Alexandria Example"
-                              :count "12"
-                              :status unread)
+                     '( :title "A very long subject"
+                        :date "2026"
+                        :author "Alexandria Example"
+                        :count "12"
+                        :status unread)
                      (selected-window)))
                    (break
                     (tessera-tests--property-position
@@ -723,8 +723,10 @@
         (let ((rendered
                (tessera-entry-render
                 'tessera-entry-tests
-                '(:title "Subject" :date "日本語,café"
-                         :author "Author" :count "12")
+                '( :title "Subject"
+                   :date "日本語,café"
+                   :author "Author"
+                   :count "12")
                 (selected-window))))
           (should (tessera-entry-tests--overlay-property-p
                    'display '(space :align-to (- right (93)))
@@ -755,11 +757,11 @@
             (let ((display
                    (tessera-entry-render
                     backend
-                    '(:title "Subject"
-                             :date "2026"
-                             :author "Author"
-                             :count "12"
-                             :status unread))))
+                    '( :title "Subject"
+                       :date "2026"
+                       :author "Author"
+                       :count "12"
+                       :status unread))))
               (should (seq-some
                        (lambda (text) (string-match-p "\\*" text))
                        measured))
@@ -829,8 +831,9 @@
       (let ((rendered
              (tessera-entry-render
               'tessera-entry-tests
-              '(:title "A very long subject" :date "2026"
-                       :status unread)
+              '( :title "A very long subject"
+                 :date "2026"
+                 :status unread)
               (selected-window))))
         (should (equal (substring-no-properties rendered)
                        " *A very lo…2026"))))))
@@ -873,8 +876,11 @@
     (let ((start (point)))
       (insert (tessera-entry-render
                'tessera-entry-tests
-               (list :title title :author "Author" :date "2026"
-                     :count "12" :status 'unread)))
+               (list :title title
+                     :author "Author"
+                     :date "2026"
+                     :count "12"
+                     :status 'unread)))
       (let ((end (point)))
         (insert "\n")
         (tessera-entry-apply-layout start end)))))
@@ -1025,8 +1031,10 @@
       (let ((start (point)))
         (insert (tessera-entry-render
                  'tessera-entry-tests
-                 '(:title "Spaced title" :author "Plain author"
-                          :date "2026" :count "12")))
+                 '( :title "Spaced title"
+                    :author "Plain author"
+                    :date "2026"
+                    :count "12")))
         (let ((end (point)))
           (insert "\n")
           (tessera-entry-apply-layout start end)))
@@ -1090,8 +1098,11 @@
       (tessera-entry-clear-layout (point) (1+ (point)))
       (insert (tessera-entry-render
                'tessera-entry-tests
-               '(:title "Updated" :author "Author" :date "2026"
-                        :count "12" :status unread)))
+               '( :title "Updated"
+                  :author "Author"
+                  :date "2026"
+                  :count "12"
+                  :status unread)))
       (tessera-entry-apply-layout (point-min) (point))
       (goto-char (point-min))
       (tessera-entry-highlight-current)
@@ -1126,8 +1137,8 @@
                        (ert-fail "Glyph was revalidated"))))
             (should (string-match-p
                      "Title" (tessera-entry-render
-                              backend '(:title "Title"
-                                               :status unread)))))
+                              backend '( :title "Title"
+                                         :status unread)))))
           (should-error
            (tessera-glyph-render nil (make-tessera-entry-context)))
           (should-error

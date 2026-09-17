@@ -36,10 +36,12 @@
                           (:level 1 :last-child t)
                           (:level 0 :root t))
             do (mu4e~headers-insert-header
-                (list :docid id :subject (format "Subject %d" id)
+                (list :docid id
+                      :subject (format "Subject %d" id)
                       :from (list (list :name (format "Author %d" id)
                                         :email "a@example.test"))
-                      :date '(27000 0) :priority 'high
+                      :date '(27000 0)
+                      :priority 'high
                       :flags (if (= id 3) '(unread draft attach)
                                '(seen flagged))
                       :meta meta)
@@ -78,10 +80,12 @@
        for level in (append (number-sequence 1 27) '(27 26))
        do
        (mu4e~headers-insert-header
-        (list :docid id :subject (format "Subject %d" id)
+        (list :docid id
+              :subject (format "Subject %d" id)
               :from (list (list :name (format "Author %d" id)
                                 :email "a@example.test"))
-              :date '(27000 0) :flags '(seen)
+              :date '(27000 0)
+              :flags '(seen)
               :meta (list :level level
                           :first-child (not (memq id '(33 34)))
                           :last-child (not (memq id '(31 32)))
@@ -149,7 +153,7 @@
     (should (string-match-p "Hm" (buffer-substring-no-properties
                                   (line-beginning-position)
                                   (line-end-position))))
-    (should (string-match-p "→ /archive" (buffer-string)))
+    (should (string-match-p "> /archive" (buffer-string)))
     (mu4e-mark-at-point 'unmark nil)
     (setq mu4e-search-threads nil)
     (tessera-mu4e-headers--refresh)
@@ -192,7 +196,7 @@
                         'tessera-mu4e-state))
         (should-not (memq 'unread (plist-get (car snapshot) :flags)))
         (should (equal (cdr (cadr snapshot)) "/after"))
-        (should (string-match-p "→ /after" (buffer-string)))
+        (should (string-match-p "> /after" (buffer-string)))
         (should (= 0 (tessera-thread-context-unread
                       (gethash 1 tessera-mu4e-headers--threads))))))))
 
