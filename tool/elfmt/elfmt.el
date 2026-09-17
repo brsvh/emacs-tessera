@@ -88,7 +88,8 @@
   "Apply EditorConfig properties to the current buffer."
   (when buffer-file-name
     (let ((properties
-           (editorconfig-call-get-properties-function buffer-file-name)))
+           (editorconfig-call-get-properties-function
+            buffer-file-name)))
       (condition-case err
           (run-hook-with-args 'editorconfig-hack-properties-functions
                               properties)

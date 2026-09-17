@@ -946,7 +946,8 @@
     (should (equal "Ordinary entry"
                    (tessera--clip-thread-content
                     "Ordinary entry" 4))))
-  (let* ((text (concat (propertize "界" 'tessera--overflow-help "Full")
+  (let* ((text (concat (propertize "界" 'tessera--overflow-help
+                                   "Full")
                        (propertize "名字" 'tessera-entry-point t)))
          (clipped (tessera--clip-thread-content text 2)))
     (should (= 2 (string-width clipped)))

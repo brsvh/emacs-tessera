@@ -66,10 +66,12 @@
               (should (= (mark) 8))
               (should mark-active)
               (with-current-buffer other
-                (setq last (tessera-x-context-start 'test "other" nil))
+                (setq last (tessera-x-context-start
+                            'test "other" nil))
                 (tessera-x-context-finish last))
               (should (eq tessera-x-current-context first))
-              (should (buffer-live-p (tessera-x-context-buffer first)))
+              (should (buffer-live-p
+                       (tessera-x-context-buffer first)))
               (should-not (eq (tessera-x-context-buffer first)
                               (tessera-x-context-buffer last)))
               (let ((next (tessera-x-context-start 'test "new" nil)))
@@ -390,13 +392,14 @@
              (context (tessera-x-context-start
                        'elfeed "failure" items))
              (request (make-tessera-elfeed-x--request
-                       :context context :queue (copy-sequence items))))
+                       :context context
+                       :queue (copy-sequence items))))
         (cl-letf (((symbol-function 'url-retrieve)
                    (lambda (&rest _) (error "Offline"))))
           (tessera-elfeed-x--dispatch request))
         (should (eq (tessera-x-context-state context) 'ready))
-        (should (string-match-p "Offline"
-                                (tessera-x-item-note (car items))))))))
+        (should (string-match-p
+                 "Offline" (tessera-x-item-note (car items))))))))
 
 (ert-deftest tessera-x-mu-today-query-belongs-to-current-headers ()
   (let ((mu4e-headers-mode-hook nil)
@@ -499,7 +502,8 @@
               (should (string-match-p "--include-related"
                                       (buffer-string)))
               (should (string-match-p
-                       (regexp-quote (concat "--muhome=" mu4e-mu-home))
+                       (regexp-quote
+                        (concat "--muhome=" mu4e-mu-home))
                        (buffer-string)))))
         (delete-directory directory t)))))
 
@@ -527,7 +531,8 @@
           (tessera-elfeed-x--response nil fetch))
         (should (eq (tessera-x-context-state context) 'ready))
         (should-not (buffer-live-p response))
-        (should (equal (tessera-x-item-body item) "café fetched body"))
+        (should (equal (tessera-x-item-body item)
+                       "café fetched body"))
         (should (equal (tessera-x-item-note item)
                        "Fetched linked page"))))))
 

@@ -15,7 +15,8 @@
                  (lisp-path
                   (expand-file-name "lisp/" project-directory)))
             (setq-local load-path e-load-path
-                        elisp-flymake-byte-compile-load-path c-load-path)
+                        elisp-flymake-byte-compile-load-path
+                        c-load-path)
             (add-to-list 'elisp-flymake-byte-compile-load-path
                          lisp-path)
             (add-to-list 'load-path lisp-path))))))
