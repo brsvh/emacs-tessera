@@ -48,7 +48,7 @@ in
     in
     {
       apps = {
-        emacs = mkEmacsApp pkgs.emacs "Launch Emacs 30";
+        emacs = mkEmacsApp pkgs.emacs31 "Launch Emacs 31";
         emacs31 = mkEmacsApp pkgs.emacs31 "Launch Emacs 31";
       };
 
