@@ -28,6 +28,7 @@
 
 ;;; Code:
 
+(require 'hl-line)
 (require 'subr-x)
 (require 'tessera-elfeed)
 
@@ -53,6 +54,9 @@
 
 (defvar-local tessera-elfeed-search--saved-settings nil
   "Original values and locality of settings replaced by Tessera.")
+
+(defvar-local tessera-elfeed-search--saved-hl-line nil
+  "Whether native line highlighting was enabled before Tessera.")
 
 (defun tessera-elfeed-search--entry (context)
   "Return the Elfeed entry stored in CONTEXT."
@@ -321,11 +325,13 @@
 (defun tessera-elfeed-search--enable ()
   "Enable Tessera rendering in the current Elfeed search buffer."
   (unless tessera-elfeed-search--active
-    (setq tessera-elfeed-search--saved-settings
+    (setq tessera-elfeed-search--saved-hl-line hl-line-mode
+          tessera-elfeed-search--saved-settings
           (tessera--save-settings
            '(elfeed-search-print-entry-function
              tessera-entry-layout
              elfeed-search-separator-date-format)))
+    (when hl-line-mode (hl-line-mode -1))
     (setq-local elfeed-search-print-entry-function
                 #'tessera-elfeed-search-print-entry)
     (setq-local tessera-entry-layout 'two-line)
@@ -351,7 +357,9 @@
     (tessera-elfeed-search--restore-separators)
     (setq tessera-elfeed-search--active nil
           tessera-elfeed-search--saved-settings nil)
-    (tessera-elfeed-search--refresh)))
+    (tessera-elfeed-search--refresh)
+    (hl-line-mode (if tessera-elfeed-search--saved-hl-line 1 -1))
+    (setq tessera-elfeed-search--saved-hl-line nil)))
 
 (provide 'tessera-elfeed-search)
 ;;; tessera-elfeed-search.el ends here
