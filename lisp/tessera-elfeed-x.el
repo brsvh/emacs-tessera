@@ -87,14 +87,18 @@
                (nreverse order))))
 
 (defun tessera-elfeed-x--stop-fetch (fetch)
-  "Release FETCH's timer and response buffer."
+  "Release FETCH's timer, response buffers and redirected transfers."
   (when (timerp (tessera-elfeed-x--fetch-timer fetch))
     (cancel-timer (tessera-elfeed-x--fetch-timer fetch)))
-  (when (buffer-live-p (tessera-elfeed-x--fetch-buffer fetch))
-    (when-let* ((process (get-buffer-process
-                          (tessera-elfeed-x--fetch-buffer fetch))))
-      (delete-process process))
-    (kill-buffer (tessera-elfeed-x--fetch-buffer fetch))))
+  (let ((buffer (tessera-elfeed-x--fetch-buffer fetch)))
+    (while (buffer-live-p buffer)
+      (let ((next (buffer-local-value 'url-redirect-buffer buffer)))
+        (when-let* ((process (get-buffer-process buffer)))
+          (delete-process process))
+        (kill-buffer buffer)
+        (setq buffer next))))
+  (setf (tessera-elfeed-x--fetch-timer fetch) nil
+        (tessera-elfeed-x--fetch-buffer fetch) nil))
 
 (defun tessera-elfeed-x--cancel (request)
   "Cancel every pending transfer in REQUEST."

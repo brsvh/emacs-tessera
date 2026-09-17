@@ -340,6 +340,48 @@
         (should (= calls 1))
         (should (= (length (tessera-x-item-body item)) 1000))))))
 
+(ert-deftest tessera-x-elfeed-redirects-release-all-transfers ()
+  (dolist (cancel '(nil t))
+    (tessera-x-tests--with-snapshots
+      (with-temp-buffer
+        (let* ((item (tessera-x-tests--item "redirect"))
+               (context (tessera-x-context-start
+                         'elfeed "redirect" (list item)))
+               (request (make-tessera-elfeed-x--request
+                         :context context))
+               (buffers (cl-loop repeat 3 collect
+                                 (generate-new-buffer " *Redirect*")))
+               (process (make-pipe-process
+                         :name "tessera-redirect" :noquery t
+                         :buffer (car (last buffers))))
+               (fetch (make-tessera-elfeed-x--fetch
+                       :request request :item item
+                       :buffer (car buffers))))
+          (unwind-protect
+              (progn
+                (cl-loop for (buffer next) on buffers
+                         do (with-current-buffer buffer
+                              (setq-local url-redirect-buffer next)))
+                (setf (tessera-elfeed-x--request-active request)
+                      (list fetch))
+                (push (apply-partially
+                       #'tessera-elfeed-x--cancel request)
+                      (tessera-x-context-cleanup context))
+                (if cancel
+                    (tessera-x-cancel-context)
+                  (tessera-elfeed-x--timeout fetch))
+                (should (eq (tessera-x-context-state context)
+                            (if cancel 'cancelled 'ready)))
+                (should-not (tessera-elfeed-x--request-active
+                             request))
+                (should-not (cl-some #'buffer-live-p buffers))
+                (should-not (process-live-p process))
+                (tessera-elfeed-x--stop-fetch fetch))
+            (when (process-live-p process) (delete-process process))
+            (dolist (buffer buffers)
+              (when (buffer-live-p buffer)
+                (kill-buffer buffer)))))))))
+
 (ert-deftest tessera-x-elfeed-startup-failures-dont-recurse ()
   (tessera-x-tests--with-snapshots
     (with-temp-buffer
