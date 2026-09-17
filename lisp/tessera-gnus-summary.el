@@ -345,23 +345,47 @@ parents and adopted roots.  Threading follows `gnus-show-threads'."
        (warning . tessera-gnus-summary-warning-face)
        (negative . tessera-gnus-summary-error-face))))))
 
-(defun tessera-gnus-summary--native-face (header marks)
+(defun tessera-gnus-summary--face-index ()
+  "Index native scores and uncached articles for one batch update.
+Keep the first score for each article, as `assq' would."
+  (let ((scores (make-hash-table :test #'eq))
+        (uncached (make-hash-table :test #'eq)))
+    (dolist (entry gnus-newsgroup-scored)
+      (unless (gethash (car entry) scores)
+        (puthash (car entry) entry scores)))
+    (when gnus-summary-use-undownloaded-faces
+      (dolist (article gnus-newsgroup-undownloaded)
+        (puthash article t uncached))
+      (dolist (article gnus-newsgroup-cached)
+        (remhash article uncached)))
+    (cons scores uncached)))
+
+(defun tessera-gnus-summary--native-face
+    (header marks &optional index)
   "Return Gnus's configured summary face for HEADER and MARKS.
 Use the native rule evaluator with the same scoring and download
-context as `gnus-summary-highlight-line'."
+context as `gnus-summary-highlight-line'.  INDEX, when non-nil,
+supplies scores and uncached articles for the current batch."
   (let* ((article (mail-header-number header))
          (face
           (cl-progv
               '(score default default-high default-low mark uncached)
-              (list (or (cdr (assq article gnus-newsgroup-scored))
+              (list (or (cdr (if index
+                                 (gethash article (car index))
+                               (assq article gnus-newsgroup-scored)))
                         gnus-summary-default-score 0)
                     gnus-summary-default-score
                     gnus-summary-default-high-score
                     gnus-summary-default-low-score
                     (aref marks 0)
                     (and gnus-summary-use-undownloaded-faces
-                         (memq article gnus-newsgroup-undownloaded)
-                         (not (memq article gnus-newsgroup-cached))))
+                         (if index
+                             (gethash article (cdr index))
+                           (and (memq article
+                                      gnus-newsgroup-undownloaded)
+                                (not (memq
+                                      article
+                                      gnus-newsgroup-cached))))))
             (funcall (gnus-summary-highlight-line-0)))))
     (if (and (symbolp face) (boundp face)) (symbol-value face) face)))
 
@@ -849,13 +873,14 @@ FORCE also redraws entries with unchanged marks."
     (when (/= width tessera-gnus-summary--thread-width)
       (setq force t)))
   (let ((saved-point (tessera-entry-save-point))
+        (face-index (tessera-gnus-summary--face-index))
         (tessera-gnus-summary--batching t)
         (tessera-gnus-summary--updating t))
     (unwind-protect
         (progn
           (goto-char (point-min))
           (while (< (point) (point-max))
-            (tessera-gnus-summary--sync-line force)
+            (tessera-gnus-summary--sync-line force face-index)
             (forward-line 1)))
       (tessera-gnus-summary--reindex)
       (tessera-entry-restore-point saved-point))))
@@ -876,9 +901,10 @@ FORCE also redraws entries with unchanged marks."
           (forward-line 1))))
     (setq gnus-newsgroup-data-reverse nil)))
 
-(defun tessera-gnus-summary--sync-line (&optional force)
+(defun tessera-gnus-summary--sync-line (&optional force face-index)
   "Synchronize the current logical article line.
-FORCE also redraws entries whose native marks have not changed."
+FORCE also redraws entries whose native marks have not changed.
+FACE-INDEX supplies native face data during a batch update."
   (let* ((start (line-beginning-position))
          (end (line-end-position))
          (entry (get-text-property
@@ -888,7 +914,7 @@ FORCE also redraws entries whose native marks have not changed."
                      start (+ start 4)))
              (metadata (cdr entry))
              (native-face (tessera-gnus-summary--native-face
-                           (car entry) marks))
+                           (car entry) marks face-index))
              (inhibit-read-only t)
              (inhibit-modification-hooks t))
         (when (or force

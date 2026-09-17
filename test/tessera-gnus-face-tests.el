@@ -35,6 +35,55 @@
       (should (eq (tessera-gnus-summary--native-face header marks)
                   'warning)))))
 
+(ert-deftest tessera-gnus-face-index-preserves-native-rules ()
+  (let ((gnus-summary-default-score 0)
+        (gnus-summary-default-high-score 10)
+        (gnus-summary-default-low-score -10)
+        (gnus-newsgroup-scored '((1 . 20) (1 . -20) (2 . -20)
+                                 (3) (3 . 20) (4 . 0)))
+        (gnus-newsgroup-undownloaded '(1 2 3 2 4))
+        (gnus-newsgroup-cached '(2 5)))
+    (dolist (enabled '(nil t))
+      (let* ((gnus-summary-use-undownloaded-faces enabled)
+             (index (tessera-gnus-summary--face-index)))
+        (dotimes (number 6)
+          (dolist (mark (list gnus-unread-mark gnus-read-mark
+                              gnus-ticked-mark))
+            (let ((header (make-full-mail-header number))
+                  (marks (string mark ?\s ?\s ?\s)))
+              (should (equal
+                       (tessera-gnus-summary--native-face
+                        header marks)
+                       (tessera-gnus-summary--native-face
+                        header marks index))))))))))
+
+(ert-deftest tessera-gnus-batch-faces-follow-native-list-changes ()
+  (tessera-gnus-summary--register)
+  (let ((gnus-show-threads nil)
+        (gnus-summary-default-score 0)
+        (gnus-summary-default-high-score 10)
+        (gnus-summary-default-low-score -10)
+        (gnus-summary-use-undownloaded-faces t)
+        (gnus-newsgroup-scored (list (cons 1 20)))
+        (gnus-newsgroup-undownloaded '(1))
+        (gnus-newsgroup-cached nil))
+    (with-temp-buffer
+      (tessera-tests--gnus-rows '(0 0))
+      (tessera-gnus-summary--sync-buffer t)
+      (should (eq (plist-get
+                   (cdr (get-text-property
+                         (point-min) 'tessera-gnus-summary-entry))
+                   :native-face)
+                  'gnus-summary-high-undownloaded))
+      (setcdr (car gnus-newsgroup-scored) -20)
+      (setq gnus-newsgroup-cached '(1))
+      (tessera-gnus-summary--sync-buffer)
+      (should (eq (plist-get
+                   (cdr (get-text-property
+                         (point-min) 'tessera-gnus-summary-entry))
+                   :native-face)
+                  'gnus-summary-low-unread)))))
+
 (ert-deftest tessera-gnus-faces-keep-state-on-thread-children ()
   (let* ((header (make-full-mail-header
                   1 "Subject" "Author" "Date" "<id@test>"))
@@ -181,13 +230,18 @@
       (setq gnus-newsgroup-scored '((1 . 20)))
       (let ((native-face (symbol-function
                           'tessera-gnus-summary--native-face))
-            (calls (make-hash-table)))
+            (calls (make-hash-table))
+            index-seen)
         (cl-letf (((symbol-function
                     'tessera-gnus-summary--native-face)
-                   (lambda (header marks)
+                   (lambda (header marks &optional index)
+                     (should index)
+                     (if index-seen
+                         (should (eq index index-seen))
+                       (setq index-seen index))
                      (cl-incf (gethash (mail-header-number header)
                                        calls 0))
-                     (funcall native-face header marks))))
+                     (funcall native-face header marks index))))
           (tessera-gnus-summary--sync-buffer))
         ;; User highlight rules run once even when a row is redrawn.
         (dotimes (index 5)
