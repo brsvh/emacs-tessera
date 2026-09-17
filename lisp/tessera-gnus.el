@@ -118,37 +118,37 @@ current group's Agent overview, which can itself be incomplete."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-status-face
-  '((t :inherit (gnus-summary-normal-unread default) :extend nil))
+  '((t :inherit tessera-glyph-accent-face :extend nil))
   "Article status icons."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-muted-face
-  '((t :inherit (gnus-summary-normal-read shadow) :extend nil))
+  '((t :inherit tessera-glyph-muted-face :extend nil))
   "Read and inactive article status icons."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-important-face
-  '((t :inherit (gnus-summary-normal-ticked bold) :extend nil))
+  '((t :inherit tessera-glyph-attention-face :extend nil))
   "Ticked and processing status icons."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-positive-face
-  '((t :inherit success :extend nil))
+  '((t :inherit tessera-glyph-positive-face :extend nil))
   "Completed action and availability icons."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-informational-face
-  '((t :inherit gnus-header-content :extend nil))
+  '((t :inherit tessera-glyph-informational-face :extend nil))
   "Informational article status icons."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-warning-face
-  '((t :inherit warning :extend nil))
+  '((t :inherit tessera-glyph-warning-face :extend nil))
   "Article states requiring attention."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-error-face
-  '((t :inherit error :extend nil))
+  '((t :inherit tessera-glyph-negative-face :extend nil))
   "Failed actions and content processing errors."
   :group 'tessera-gnus-summary)
 
@@ -163,27 +163,27 @@ current group's Agent overview, which can itself be incomplete."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-high-score-face
-  '((t :inherit (gnus-summary-high-unread bold) :extend nil))
+  '((t :inherit tessera-glyph-attention-face :extend nil))
   "Scores above the native threshold."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-low-score-face
-  '((t :inherit (gnus-summary-low-read shadow) :extend nil))
+  '((t :inherit tessera-glyph-muted-face :extend nil))
   "Scores below the native threshold."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-attachment-face
-  '((t :inherit shadow :extend nil))
+  '((t :inherit tessera-glyph-informational-face :extend nil))
   "Attachment presence, without implying trust."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-signature-face
-  '((t :inherit gnus-header-content :extend nil))
+  '((t :inherit tessera-glyph-informational-face :extend nil))
   "Signature presence, without implying verification."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-encryption-face
-  '((t :inherit gnus-header-content :extend nil))
+  '((t :inherit tessera-glyph-accent-face :extend nil))
   "Encrypted content, without implying decryption."
   :group 'tessera-gnus-summary)
 

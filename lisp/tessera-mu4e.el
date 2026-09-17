@@ -140,89 +140,94 @@ A custom function may supply an account-specific query."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-operation-face
-  '((t :inherit mu4e-header-marks-face :extend nil))
+  '((t :inherit tessera-glyph-attention-face :extend nil))
   "Pending actions, separate from current message state."
   :group 'tessera-mu4e-headers)
 
+(defface tessera-mu4e-headers-destructive-operation-face
+  '((t :inherit (tessera-glyph-negative-face
+                 tessera-mu4e-headers-operation-face)
+       :extend nil))
+  "Pending trash and deletion actions."
+  :group 'tessera-mu4e-headers)
+
 (defface tessera-mu4e-headers-new-face
-  '((t :inherit (mu4e-unread-face default)
-       :weight bold :extend nil))
+  '((t :inherit tessera-glyph-accent-face :extend nil))
   "New message status icons."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-unread-face
-  '((t :inherit (mu4e-unread-face default)
-       :weight bold :extend nil))
+  '((t :inherit tessera-glyph-accent-face :extend nil))
   "Unread message status icons."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-read-face
-  '((t :inherit (mu4e-header-face default) :extend nil))
+  '((t :inherit tessera-glyph-muted-face :extend nil))
   "Read message status icons."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-draft-face
-  '((t :inherit mu4e-draft-face :extend nil))
+  '((t :inherit tessera-glyph-informational-face :extend nil))
   "Draft status icons."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-trashed-face
-  '((t :inherit mu4e-trashed-face :extend nil))
+  '((t :inherit tessera-glyph-negative-face :extend nil))
   "Existing trashed flags, separate from pending deletion."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-flagged-face
-  '((t :inherit mu4e-flagged-face :extend nil))
+  '((t :inherit tessera-glyph-attention-face :extend nil))
   "User-flagged message icons."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-replied-face
-  '((t :inherit mu4e-replied-face :extend nil))
+  '((t :inherit tessera-glyph-positive-face :extend nil))
   "Replied message icons."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-forwarded-face
-  '((t :inherit mu4e-forwarded-face :extend nil))
+  '((t :inherit tessera-glyph-informational-face :extend nil))
   "Forwarded message icons."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-high-priority-face
-  '((t :inherit mu4e-warning-face :extend nil))
+  '((t :inherit tessera-glyph-warning-face :extend nil))
   "High message priority, independent of user flagging."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-low-priority-face
-  '((t :inherit shadow :extend nil))
+  '((t :inherit tessera-glyph-muted-face :extend nil))
   "Low message priority."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-list-face
-  '((t :inherit mu4e-special-header-value-face :extend nil))
+  '((t :inherit tessera-glyph-informational-face :extend nil))
   "Mailing list attribute icons."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-personal-face
-  '((t :inherit mu4e-special-header-value-face :extend nil))
+  '((t :inherit tessera-glyph-accent-face :extend nil))
   "Personal message attribute icons."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-attachment-face
-  '((t :inherit shadow :extend nil))
+  '((t :inherit tessera-glyph-informational-face :extend nil))
   "Attachment presence, without implying a known count."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-signature-face
-  '((t :inherit mu4e-special-header-value-face :extend nil))
+  '((t :inherit tessera-glyph-informational-face :extend nil))
   "Signature presence, without implying verification."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-encryption-face
-  '((t :inherit mu4e-special-header-value-face :extend nil))
+  '((t :inherit tessera-glyph-accent-face :extend nil))
   "Encrypted content, without implying decryption."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-calendar-face
-  '((t :inherit mu4e-special-header-value-face :extend nil))
+  '((t :inherit tessera-glyph-attention-face :extend nil))
   "Calendar invitation icons."
   :group 'tessera-mu4e-headers)
 

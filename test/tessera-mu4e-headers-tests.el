@@ -30,14 +30,14 @@
       (insert (propertize "Message" 'msg message))
       (dolist (spec
                '((status ?T tessera-mu4e-headers-trashed-face
-                         ("Trashed" "Draft" "New" "Unread"))
+                         ("Trashed" "Draft" "New" "Unread") negative)
                  (priority ?H tessera-mu4e-headers-high-priority-face
-                           ("High priority" "Flagged"))
+                           ("High priority" "Flagged") warning)
                  (secondary ?R tessera-mu4e-headers-replied-face
                             ("Replied" "Forwarded" "Personal"
-                             "Mailing list"))
+                             "Mailing list") positive)
                  (operation ?m tessera-mu4e-headers-operation-face
-                            ("Move: /archive"))))
+                            ("Move: /archive") attention)))
         (let* ((slot (tessera-mu4e-headers--slot (car spec)))
                (text (tessera--render-glyph-slot slot context t))
                (position (text-property-not-all
@@ -47,6 +47,9 @@
           (should (= (aref text position) (nth 1 spec)))
           (should (equal (get-text-property position 'face text)
                          (nth 2 spec)))
+          (should (eq (get-text-property
+                       position 'tessera-glyph-semantic text)
+                      (nth 4 spec)))
           (should (equal (funcall help nil (current-buffer) 1)
                          (string-join (nth 3 spec) "; ")))))
       (dolist (slot '(attach signed encrypted calendar))
@@ -61,6 +64,20 @@
         (should (equal (tessera-mu4e-headers--help
                         'status "New" nil (current-buffer) 1)
                        "New; Unread")))
+      ;; Destructive pending marks must stand out from a normal move.
+      (dolist (action '(trash delete))
+        (puthash 42 (list action) mu4e--mark-map)
+        (let* ((slot (tessera-mu4e-headers--slot 'operation))
+               (text (tessera--render-glyph-slot slot context t))
+               (position (text-property-not-all
+                          0 (length text)
+                          'tessera-glyph-semantic nil text)))
+          (should (eq (get-text-property
+                       position 'tessera-glyph-semantic text)
+                      'negative))
+          (should
+           (eq (get-text-property position 'face text)
+               'tessera-mu4e-headers-destructive-operation-face))))
       (puthash 42 '(unread) mu4e--mark-map)
       (should (eq 'mark-unread (tessera-mu4e-headers--state
                                 'operation context)))

@@ -93,9 +93,9 @@
                             attention "Marked for processing")
                (cached gnus-cached-mark "▣" "database"
                        positive "Cached")
-               (replied gnus-replied-mark "↩" "reply"
+               (replied gnus-replied-mark "↶" "reply"
                         positive "Replied")
-               (forwarded gnus-forwarded-mark "↪" "forward"
+               (forwarded gnus-forwarded-mark "↷" "forward"
                           informational "Forwarded")
                (saved gnus-saved-mark "▣" "content-save"
                       positive "Saved")
@@ -331,7 +331,6 @@ parents and adopted roots.  Threading follows `gnus-show-threads'."
    ((eq slot 'score)
     (if (eq variant 'high) 'tessera-gnus-summary-high-score-face
       'tessera-gnus-summary-low-score-face))
-   ((eq variant 'dormant) 'tessera-gnus-summary-important-face)
    ((eq variant 'spam) 'tessera-gnus-summary-spam-face)
    ((eq variant 'expirable) 'tessera-gnus-summary-expirable-face)
    (t
@@ -606,13 +605,15 @@ value.  Signal an error if neither value is an ASCII character."
   "Return independent attachment, signature, and encryption slots."
   (mapcar
    (lambda (spec)
-     (pcase-let* ((`(,name ,key ,ascii ,unicode ,icon ,label) spec)
+     (pcase-let* ((`(,name ,key ,ascii ,unicode ,icon ,label
+                           ,semantic)
+                   spec)
                   (glyph
                    (make-tessera-glyph
                     :ascii ascii :unicode unicode
                     :nerd-icons (list :function 'nerd-icons-mdicon
                                       :name icon)
-                    :semantic 'informational))
+                    :semantic semantic))
                   (face (intern (format "tessera-gnus-summary-%s-face"
                                         name)))
                   (help (apply-partially
@@ -639,10 +640,12 @@ value.  Signal an error if neither value is an ASCII character."
                    :semantic 'negative)
                   :face 'tessera-gnus-summary-error-face
                   :help-echo help)))))))
-   '((attachment :attachment "a" "📎" "nf-md-paperclip" "Attachment")
-     (signature :signature "S" "✍" "nf-md-file_sign" "Signature")
+   '((attachment :attachment "a" "📎" "nf-md-paperclip" "Attachment"
+                 informational)
+     (signature :signature "S" "✍\uFE0E" "nf-md-file_sign" "Signature"
+                informational)
      (encryption :encryption "E" "🔒" "nf-md-lock_outline"
-                 "Encrypted content"))))
+                 "Encrypted content" accent))))
 
 ;;;; Layout registration
 

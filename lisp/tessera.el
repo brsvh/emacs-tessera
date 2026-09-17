@@ -162,18 +162,18 @@ to every glyph."
   :group 'tessera)
 
 (defface tessera-glyph-accent-face
-  '((t :inherit font-lock-keyword-face))
-  "Face used for accent Tessera glyphs."
+  '((t :inherit font-lock-keyword-face :weight bold))
+  "Theme emphasis for new, unread, and distinctive glyphs."
   :group 'tessera)
 
 (defface tessera-glyph-attention-face
-  '((t :inherit font-lock-warning-face))
-  "Face used for attention Tessera glyphs."
+  '((t :inherit warning :weight bold))
+  "Theme warning color for important or pending actions."
   :group 'tessera)
 
 (defface tessera-glyph-informational-face
   '((t :inherit font-lock-type-face))
-  "Face used for informational Tessera glyphs."
+  "Theme information color for attributes and correspondence."
   :group 'tessera)
 
 (defface tessera-glyph-muted-face
@@ -183,7 +183,7 @@ to every glyph."
 
 (defface tessera-glyph-negative-face
   '((t :inherit error))
-  "Face used for negative Tessera glyphs."
+  "Theme error color for failures and destructive actions."
   :group 'tessera)
 
 (defface tessera-glyph-neutral-face
@@ -193,12 +193,12 @@ to every glyph."
 
 (defface tessera-glyph-positive-face
   '((t :inherit success))
-  "Face used for positive Tessera glyphs."
+  "Theme success color for completed actions and availability."
   :group 'tessera)
 
 (defface tessera-glyph-warning-face
   '((t :inherit warning))
-  "Face used for warning Tessera glyphs."
+  "Theme warning color for urgent or uncertain states."
   :group 'tessera)
 
 (defun tessera--save-settings (variables)

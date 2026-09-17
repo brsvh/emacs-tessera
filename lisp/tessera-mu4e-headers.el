@@ -107,7 +107,9 @@ aggregate unread state, while contacts retain native message state."
 Pending operation marks take precedence over matching flag names."
   (let ((role
          (if (eq slot 'operation)
-             'operation
+             (if (memq variant '(trash delete))
+                 'destructive-operation
+               'operation)
            (pcase variant
              ('seen 'read)
              ('passed 'forwarded)
@@ -126,43 +128,48 @@ Pending operation marks take precedence over matching flag names."
 
 (defconst tessera-mu4e-headers--icons
   '((status
-     (trashed "T" "⌫" "trash-can-outline" "Trashed")
-     (draft "D" "✎" "email-edit-outline" "Draft")
-     (new "N" "✦" "new-box" "New")
-     (unread "u" "●" "email" "Unread")
-     (seen "S" "○" "email-open-outline" "Read"))
+     (trashed "T" "⌫" "trash-can-outline" "Trashed" negative)
+     (draft "D" "✎" "email-edit-outline" "Draft" informational)
+     (new "N" "✦" "new-box" "New" accent)
+     (unread "u" "●" "email" "Unread" accent)
+     (seen "S" "○" "email-open-outline" "Read" muted))
     (priority
-     (high "H" "↑" "arrow-up-bold" "High priority")
-     (flagged "F" "★" "star" "Flagged")
-     (low "L" "↓" "arrow-down-bold" "Low priority"))
+     (high "H" "↑" "arrow-up-bold" "High priority" warning)
+     (flagged "F" "★" "star" "Flagged" attention)
+     (low "L" "↓" "arrow-down-bold" "Low priority" muted))
     (operation
-     (move "m" "→" "folder-move-outline" "Move")
-     (refile "r" "↧" "archive-arrow-down-outline" "Refile")
-     (trash "d" "⌫" "trash-can-outline" "Trash action")
-     (untrash "=" "↶" "restore" "Untrash action")
-     (delete "D" "×" "delete-forever-outline" "Delete action")
-     (flag "+" "☆" "star-plus-outline" "Flag action")
-     (unflag "-" "⊖" "star-minus-outline" "Unflag action")
-     (read "!" "○" "email-open-outline" "Read action")
-     (mark-unread "?" "●" "email" "Unread action")
-     (label "l" "+" "tag-plus-outline" "Add/remove labels")
-     (unlabel "L" "−" "tag-remove-outline" "Clear labels")
-     (action "a" "▶" "play-circle-outline" "Custom action")
-     (something "*" "◆" "clipboard-clock-outline" "Deferred"))
+     (move "m" "→" "folder-move-outline" "Move" attention)
+     (refile "r" "↧" "archive-arrow-down-outline" "Refile" attention)
+     (trash "d" "⌫" "trash-can-outline" "Trash action" negative)
+     (untrash "=" "↶" "restore" "Untrash action" attention)
+     (delete "D" "×" "delete-forever-outline" "Delete action"
+             negative)
+     (flag "+" "☆" "star-plus-outline" "Flag action" attention)
+     (unflag "-" "⊖" "star-minus-outline" "Unflag action" attention)
+     (read "!" "○" "email-open-outline" "Read action" attention)
+     (mark-unread "?" "●" "email" "Unread action" attention)
+     (label "l" "+" "tag-plus-outline" "Add/remove labels" attention)
+     (unlabel "L" "−" "tag-remove-outline" "Clear labels" attention)
+     (action "a" "▶" "play-circle-outline" "Custom action" attention)
+     (something "*" "◆" "clipboard-clock-outline" "Deferred"
+                attention))
     (secondary
-     (replied "R" "↩" "reply" "Replied")
-     (passed "P" "↪" "forward" "Forwarded")
-     (personal "p" "♙" "account-outline" "Personal")
-     (list "l" "≡" "format-list-bulleted" "Mailing list"))
+     (replied "R" "↶" "reply" "Replied" positive)
+     (passed "P" "↷" "forward" "Forwarded" informational)
+     (personal "p" "♙" "account-outline" "Personal" accent)
+     (list "l" "≡" "format-list-bulleted" "Mailing list"
+           informational))
     (attach
-     (attach "a" "📎" "paperclip" "Attachment present"))
+     (attach "a" "📎" "paperclip" "Attachment present" informational))
     (signed
-     (signed "S" "✍" "file-sign" "Signed; not verified"))
+     (signed "S" "✍\uFE0E" "file-sign" "Signed; not verified"
+             informational))
     (encrypted
-     (encrypted "E" "🔒" "lock-outline" "Encrypted"))
+     (encrypted "E" "🔒" "lock-outline" "Encrypted" accent))
     (calendar
-     (calendar "c" "▦" "calendar" "Calendar invitation")))
-  "Glyph variants grouped by their native message or action slot.")
+     (calendar "c" "▦" "calendar" "Calendar invitation" attention)))
+  "Glyph variants grouped by their native message or action slot.
+Each variant lists its ID, ASCII, Unicode, icon, help, and semantic.")
 
 (defconst tessera-mu4e-headers--auxiliary
   '((status trashed draft)
@@ -316,7 +323,7 @@ visibility settings.  Pending operations also show their target."
          :name (concat "nf-md-"
                        (replace-regexp-in-string "-" "_"
                                                  (nth 3 spec))))
-   :semantic 'neutral))
+   :semantic (nth 5 spec)))
 
 (defun tessera-mu4e-headers--slot (name)
   "Make semantic or content glyph slot NAME."
