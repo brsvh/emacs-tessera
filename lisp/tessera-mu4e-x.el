@@ -264,7 +264,9 @@ the current search filter.  This does not fetch mail from a server."
   "Read a native Headers query or Main query-item at point."
   (cond
    ((derived-mode-p 'mu4e-headers-mode)
-    (or (plist-get (mu4e-server-last-query) :query) ""))
+    (if (stringp list-buffers-directory)
+        list-buffers-directory
+      (user-error "No query associated with this Headers buffer")))
    ((derived-mode-p 'mu4e-main-mode)
     (let ((position (line-beginning-position))
           (end (line-end-position))

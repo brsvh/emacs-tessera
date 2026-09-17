@@ -398,6 +398,29 @@
         (should (string-match-p "Offline"
                                 (tessera-x-item-note (car items))))))))
 
+(ert-deftest tessera-x-mu-today-query-belongs-to-current-headers ()
+  (let ((mu4e-headers-mode-hook nil)
+        (mu4e-search-hide-enabled nil)
+        (mu4e-search-threads nil))
+    (with-temp-buffer
+      (mu4e-headers-mode)
+      (setq-local list-buffers-directory "maildir:/account-a/Inbox")
+      (cl-letf (((symbol-function 'mu4e-server-last-query)
+                 (lambda () '(:query "maildir:/account-b/Inbox"))))
+        (with-temp-buffer
+          (mu4e-headers-mode)
+          (setq-local list-buffers-directory
+                      "maildir:/account-b/Inbox")
+          (should (equal (tessera-mu4e-x--today-query)
+                         "maildir:/account-b/Inbox")))
+        (should (equal (tessera-mu4e-x--today-query)
+                       "maildir:/account-a/Inbox"))
+        (setq-local list-buffers-directory nil)
+        (should-error (tessera-mu4e-x--today-query)
+                      :type 'user-error)
+        (setq-local list-buffers-directory "")
+        (should (equal (tessera-mu4e-x--today-query) ""))))))
+
 (ert-deftest tessera-x-mu-query-uses-muhome-and-path-identities ()
   (tessera-x-tests--with-snapshots
     (let* ((directory (make-temp-file "tessera-mu-query-" t))
