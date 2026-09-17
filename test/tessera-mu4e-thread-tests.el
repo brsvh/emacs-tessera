@@ -157,6 +157,45 @@
     (should (string-match-p "Subject 2" (buffer-string)))
     (tessera-mu4e-headers--disable)))
 
+(ert-deftest tessera-mu4e-thread-snapshots-share-current-paths ()
+  (tessera-mu4e-tests--with-thread
+    (dotimes (_ 3)
+      (tessera-mu4e-headers--sync nil)
+      (dotimes (index 5)
+        (let ((id (1+ index)))
+          (mu4e~headers-goto-docid id)
+          (let* ((snapshot (get-text-property
+                            (tessera-mu4e-headers--body-start)
+                            'tessera-mu4e-state))
+                 (node (gethash id tessera-mu4e-headers--threads)))
+            (should (eq (nth 4 (nth 2 snapshot))
+                        (tessera-thread-context-reverse-path
+                         node)))))))))
+
+(ert-deftest tessera-mu4e-thread-snapshots-detect-native-mutations ()
+  (tessera-mu4e-tests--with-thread
+    (mu4e~headers-goto-docid 3)
+    (let ((mark (cons 'move "/before")))
+      (puthash 3 mark mu4e--mark-map)
+      (tessera-mu4e-headers--sync nil)
+      (let* ((message (mu4e-message-at-point))
+             (snapshot (get-text-property
+                        (tessera-mu4e-headers--body-start)
+                        'tessera-mu4e-state)))
+        (plist-put message :flags '(seen draft attach))
+        (setcdr mark "/after")
+        (should (memq 'unread (plist-get (car snapshot) :flags)))
+        (should (equal (cdr (cadr snapshot)) "/before"))
+        (tessera-mu4e-headers--sync nil)
+        (setq snapshot (get-text-property
+                        (tessera-mu4e-headers--body-start)
+                        'tessera-mu4e-state))
+        (should-not (memq 'unread (plist-get (car snapshot) :flags)))
+        (should (equal (cdr (cadr snapshot)) "/after"))
+        (should (string-match-p "→ /after" (buffer-string)))
+        (should (= 0 (tessera-thread-context-unread
+                      (gethash 1 tessera-mu4e-headers--threads))))))))
+
 (ert-deftest tessera-mu4e-thread-current-excludes-virtual-subject ()
   (tessera-mu4e-tests--with-thread
     (mu4e~headers-goto-docid 1)

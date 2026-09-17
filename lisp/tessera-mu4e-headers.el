@@ -605,7 +605,10 @@ FORCE also redraws rows whose message and thread state are unchanged."
             (put-text-property 0 (length text)
                                'tessera-mu4e-native original text)
             (put-text-property 0 (length text) 'tessera-mu4e-state
-                               (copy-tree state) text)
+                               (list (copy-tree (car state))
+                                     (copy-tree (cadr state))
+                                     (caddr state))
+                               text)
             (insert text)
             (put-text-property
              start body 'tessera--entry-layout
@@ -619,6 +622,11 @@ FORCE also redraws rows whose message and thread state are unchanged."
             (goto-char start)
             (mu4e-mark-at-point (car mark) (cdr mark)))))
       (unless native
+        ;; Even unchanged rows must share this generation's paths.
+        ;; Only native messages and marks need mutable-data copies.
+        (when-let* ((snapshot (get-text-property
+                               body 'tessera-mu4e-state)))
+          (setf (nth 2 snapshot) (nth 2 state)))
         (if (and mu4e-search-threads
                  (tessera-mu4e-thread-fold-at start))
             (when (tessera-entry-layout-applied-p body)
