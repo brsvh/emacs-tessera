@@ -295,7 +295,8 @@
         (progn
           (tessera-entry-tests--register backend)
           (cl-letf (((symbol-function 'window-body-width)
-                     (lambda (&rest _arguments) 21)))
+                     (lambda (&rest _arguments) 21))
+                    ((symbol-function 'display-graphic-p) #'ignore))
             (let ((display
                    (tessera-entry-render
                     backend
@@ -663,7 +664,8 @@
         (progn
           (tessera-entry-tests--register-two-line backend)
           (cl-letf (((symbol-function 'window-body-width)
-                     (lambda (&rest _arguments) 21)))
+                     (lambda (&rest _arguments) 21))
+                    ((symbol-function 'display-graphic-p) #'ignore))
             (let* ((display
                     (tessera-entry-render
                      backend
