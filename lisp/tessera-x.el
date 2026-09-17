@@ -122,6 +122,8 @@ successful snapshot.  Return the new `tessera-x-context'."
          :max-characters tessera-x-context-max-characters
          :body-max-characters tessera-x-context-body-max-characters))
   (add-hook 'kill-buffer-hook #'tessera-x-cancel-context nil t)
+  (add-hook 'change-major-mode-hook
+            #'tessera-x-cancel-context nil t)
   tessera-x--pending-context)
 
 (defun tessera-x-context-fail (context error-data)

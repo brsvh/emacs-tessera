@@ -91,6 +91,28 @@
     (should (eq (tessera-x-context-state context) 'cancelled))
     (should-not (tessera-x-context-buffer context))))
 
+(ert-deftest tessera-x-mode-change-cancels-pending-work ()
+  (tessera-x-tests--with-snapshots
+    (with-temp-buffer
+      (let* ((ready (tessera-x-context-start 'test "ready" nil))
+             (cleanup-count 0)
+             pending)
+        (tessera-x-context-finish ready)
+        (setq pending (tessera-x-context-start 'test "pending" nil))
+        (push (lambda () (cl-incf cleanup-count))
+              (tessera-x-context-cleanup pending))
+        (special-mode)
+        (tessera-x-context-finish pending)
+        (tessera-x-context-fail pending "Late failure")
+        (tessera-x-cancel-context)
+        (should (= cleanup-count 1))
+        (should (eq (tessera-x-context-state pending) 'cancelled))
+        (should-not (tessera-x-context-cleanup pending))
+        (should-not (tessera-x-context-buffer pending))
+        (should-not tessera-x--pending-context)
+        (should (buffer-live-p (tessera-x-context-buffer ready)))
+        (should (eq (tessera-x-context-state ready) 'ready))))))
+
 (ert-deftest tessera-x-budget-keeps-metadata-and-is-snapshotted ()
   (tessera-x-tests--with-snapshots
     (with-temp-buffer
