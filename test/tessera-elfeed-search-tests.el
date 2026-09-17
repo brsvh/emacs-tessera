@@ -101,6 +101,39 @@
       (should (eq (get-text-property (point-min) 'elfeed-entry)
                   entry)))))
 
+(ert-deftest tessera-elfeed-search-fits-long-feed-names ()
+  (let* ((entry (tessera-elfeed-search-tests--entry))
+         (elfeed-db '(:version 4))
+         (elfeed-db-feeds (make-hash-table :test #'equal))
+         (feed (elfeed-feed--create
+                :id (elfeed-entry-feed-id entry)))
+         (tessera-entry-layout 'two-line)
+         (tessera-glyph-style 'ascii)
+         (allocator
+          (symbol-function 'tessera--allocate-segment-widths)))
+    (puthash (elfeed-entry-feed-id entry) feed elfeed-db-feeds)
+    (dolist (title (list "Short Feed" (make-string 120 ?F)
+                         (make-string 60 ?界)))
+      (setf (elfeed-feed-title feed) title)
+      (dolist (width '(30 60 80))
+        (let ((lines 0))
+          (cl-letf
+              (((symbol-function 'window-body-width)
+                (lambda (&rest _) width))
+               ((symbol-function 'tessera--allocate-segment-widths)
+                (lambda (left right slots available)
+                  (funcall allocator left right slots available)
+                  (cl-incf lines)
+                  (should (<= (tessera--single-line-width
+                               left right slots)
+                              available)))))
+            (let ((text (tessera-entry-render
+                         'elfeed-search entry (selected-window))))
+              (should (= lines 2))
+              (when (= width 80)
+                (should (string-match-p
+                         (elfeed-entry-title entry) text))))))))))
+
 (ert-deftest tessera-elfeed-search-shrinks-second-line-in-order ()
   (let* ((entry
           (tessera-elfeed-search-tests--entry

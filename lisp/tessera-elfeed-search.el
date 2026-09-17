@@ -227,7 +227,9 @@
    :main-glyph-slots '(status)
    :main-left-segments
    '((title :grow t :min-width 4 :truncate tail))
-   :main-right-segments '(feed)
+   :main-right-segments
+   '((feed :grow t :min-width 4 :max-width 32
+           :truncate tail :priority -10))
    :extra-glyph-slots '((status :reserve t))
    :extra-left-segments
    '((url :grow t :min-width 8 :truncate tail :priority 0)
