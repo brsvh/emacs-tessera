@@ -92,6 +92,8 @@ current group's Agent overview, which can itself be incomplete."
   (unless (derived-mode-p 'gnus-summary-mode)
     (user-error "Run this command in Gnus Summary"))
   (let* ((gnus-summary-buffer (current-buffer))
+         ;; Reading a selection must not push process-mark history.
+         (gnus-newsgroup-process-stack nil)
          (numbers (and selected
                        (save-excursion
                          (gnus-summary-work-articles nil))))
