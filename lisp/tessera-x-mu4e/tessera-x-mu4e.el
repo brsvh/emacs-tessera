@@ -5,8 +5,7 @@
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1") (tessera "0.1.0")
-;;                   (tessera-x "0.1.0") (mu4e "1.14.3"))
+;; Package-Requires: ((emacs "30.1") (tessera "0.1.0") (tessera-x "0.1.0") (mu4e "1.14.3"))
 ;; Keywords: convenience, mail, news
 ;; URL: https://github.com/brsvh/emacs-tessera
 
