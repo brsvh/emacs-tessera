@@ -970,6 +970,43 @@
                       (mapcar (lambda (id) (cons "feed" id))
                               (cdr case)))))))))))
 
+(ert-deftest tessera-x-elfeed-today-obeys-both-age-bounds ()
+  (tessera-x-tests--with-snapshots
+    (let* ((elfeed-db '(:version 4))
+           (elfeed-db-feeds (make-hash-table :test #'equal))
+           (elfeed-db-entries (make-hash-table :test #'equal))
+           (elfeed-db-index (avl-tree-create #'elfeed-db-compare))
+           (start (car (tessera-x-today-bounds)))
+           (now (+ (float-time start) 43200))
+           (float-time-function (symbol-function 'float-time))
+           (feed (elfeed-feed--create :id "feed" :title "Feed")))
+      (puthash "feed" feed elfeed-db-feeds)
+      (dolist (age '(1800 3600 7200 10800 14400))
+        (let* ((id (cons "feed" (number-to-string age)))
+               (entry (elfeed-entry--create
+                       :id id
+                       :feed-id "feed"
+                       :title "Entry"
+                       :date (- now age)
+                       :content "Body")))
+          (puthash id entry elfeed-db-entries)
+          (avl-tree-enter elfeed-db-index id)))
+      (dolist (case '(("@3-hours-ago--1-hour-ago" . ("10800" "7200"))
+                      ("@3-hours-ago--1-hour-ago #1" . ("7200"))))
+        (with-temp-buffer
+          (setq-local major-mode 'elfeed-search-mode)
+          (setq-local elfeed-search-filter (car case))
+          (cl-letf (((symbol-function 'float-time)
+                     (lambda (&optional time)
+                       (if time (funcall float-time-function time)
+                         now))))
+            (let ((context (tessera-x-elfeed-prepare-today-context)))
+              (should
+               (equal (mapcar (lambda (item)
+                                (cdr (tessera-x-item-id item)))
+                              (tessera-x-context-items context))
+                      (cdr case))))))))))
+
 (ert-deftest tessera-x-gnus-overview-filters-dates-and-keeps-headers
     ()
   (let* ((file (make-temp-file "tessera-overview-"))

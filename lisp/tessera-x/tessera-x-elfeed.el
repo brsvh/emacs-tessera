@@ -32,6 +32,7 @@
 
 (require 'tessera-x)
 (require 'avl-tree)
+(require 'bytecomp)
 (require 'mail-parse)
 (require 'mail-utils)
 (require 'url-http)
@@ -55,8 +56,8 @@
 (declare-function elfeed-feed-url "elfeed-db" (feed))
 (declare-function elfeed-meta
                   "elfeed-db" (thing key &optional default))
-(declare-function elfeed-search-filter "elfeed-search"
-                  (filter entry feed &optional count now))
+(declare-function elfeed-search-compile-filter
+                  "elfeed-search" (filter))
 (declare-function elfeed-search-parse-filter "elfeed-search" (filter))
 (declare-function elfeed-search-selected
                   "elfeed-search" (&optional ignore-region))
@@ -342,7 +343,9 @@ Never fetch linked pages.  In Tree, use the native filter at point."
                          (line-beginning-position) 'elfeed-filter)
                         (user-error "No Elfeed filter at point"))))
            (t (user-error "Run in Elfeed Search or Tree"))))
-         (filter (elfeed-search-parse-filter scope))
+         (filter (byte-compile
+                  (elfeed-search-compile-filter
+                   (elfeed-search-parse-filter scope))))
          (bounds (tessera-x-today-bounds))
          (start (float-time (car bounds)))
          (end (float-time (cdr bounds)))
@@ -359,7 +362,7 @@ Never fetch linked pages.  In Tree, use the native filter at point."
            (when (< date start)
              (throw 'elfeed-db-done nil))
            (when (and (< date end)
-                      (elfeed-search-filter
+                      (funcall
                        filter entry (elfeed-entry-feed entry)
                        count now))
              (cl-incf count)
