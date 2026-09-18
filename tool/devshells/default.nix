@@ -8,6 +8,7 @@ let
   inherit (lib)
     concatStringsSep
     getExe
+    makeBinPath
     ;
 
   inherit (lib.generators)
@@ -159,8 +160,19 @@ in
                 exit 0
               fi
 
+              repoRoot="$(${getExe git} rev-parse --show-toplevel)" || exit 1
+              export PATH=${
+                makeBinPath (
+                  formatters
+                  ++ [
+                    git
+                    pkgs.treefmt
+                  ]
+                )
+              }:"$PATH"
+
               gitDir="$(
-                ${getExe git} -C "$PRJ_ROOT" \
+                ${getExe git} -C "$repoRoot" \
                   rev-parse --absolute-git-dir \
                   2>/dev/null || true
               )"
@@ -173,7 +185,7 @@ in
                 fi
 
                 ref="$(
-                  ${getExe git} -C "$PRJ_ROOT" \
+                  ${getExe git} -C "$repoRoot" \
                     symbolic-ref --quiet --short HEAD \
                     2>/dev/null || true
                 )"
@@ -183,7 +195,7 @@ in
                 fi
               fi
 
-              exec ${getExe prek} -C "$PRJ_ROOT" run --stage "${stage}" "$@"
+              exec ${getExe prek} -C "$repoRoot" run --stage "${stage}" "$@"
             '';
         in
         concatStringsSep "\n" (map mkInstall data.default_install_hook_types);
