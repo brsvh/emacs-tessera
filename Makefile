@@ -135,7 +135,7 @@ $(ELC_FILES) &: $(COMPILE_DEPS) $(BUILD_FILE)
 
 $(INFO): doc/$(PACKAGE).texi doc/fdl.texi doc/Makefile
 	+$(MAKE) -C doc PACKAGE="$(PACKAGE)" \
-		OUTPUT_DIR="$(abspath $(DIST_DIR)/manuals)" info
+		OUTPUT_DIR="$(if $(filter /%,$(DIST_DIR)),,../)$(DIST_DIR)/manuals" info
 
 $(ARCHIVE_STAMP): $(LISP_FILES) $(PKG) $(INFO) COPYING $(BUILD_FILE)
 	@set -eu
