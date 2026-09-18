@@ -116,6 +116,7 @@ in
                 id = "treefmt";
                 language = "system";
                 name = "treefmt";
+                require_serial = true;
 
                 stages = [
                   "pre-commit"
