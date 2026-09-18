@@ -931,11 +931,11 @@ Values contain a path limit and its immutable forward prefix.")
 (defun tessera--thread-prefix-path (tail limit)
   "Return at most LIMIT root-to-child branches from reverse TAIL.
 Reuse cached ancestor prefixes without retaining dead contexts."
-  (let ((cursor tail) cached pending)
+  (let ((cache tessera--thread-prefix-paths)
+        (cursor tail)
+        cached pending)
     (while (and cursor
-                (not (and (setq cached
-                                (gethash
-                                 cursor tessera--thread-prefix-paths))
+                (not (and (setq cached (gethash cursor cache))
                           (= limit (car cached)))))
       (push cursor pending)
       (setq cursor (cdr cursor)))
@@ -943,7 +943,7 @@ Reuse cached ancestor prefixes without retaining dead contexts."
       (dolist (node pending)
         (when (< (length path) limit)
           (setq path (append path (list (car node)))))
-        (puthash node (cons limit path) tessera--thread-prefix-paths))
+        (puthash node (cons limit path) cache))
       path)))
 
 (defun tessera-thread-prefix (context &optional width)

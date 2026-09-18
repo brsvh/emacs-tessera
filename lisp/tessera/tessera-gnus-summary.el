@@ -646,25 +646,25 @@ Use the native rule evaluator with the same scoring and download
 context as `gnus-summary-highlight-line'.  INDEX, when non-nil,
 supplies scores and uncached articles for the current batch."
   (let* ((article (mail-header-number header))
+         (score-entry (if index
+                          (gethash article (car index))
+                        (assq article gnus-newsgroup-scored)))
+         (uncached-article
+          (and gnus-summary-use-undownloaded-faces
+               (if index
+                   (gethash article (cdr index))
+                 (and (memq article gnus-newsgroup-undownloaded)
+                      (not (memq article gnus-newsgroup-cached))))))
          (face
           (cl-progv
               '(score default default-high default-low mark uncached)
-              (list (or (cdr (if index
-                                 (gethash article (car index))
-                               (assq article gnus-newsgroup-scored)))
+              (list (or (cdr score-entry)
                         gnus-summary-default-score 0)
                     gnus-summary-default-score
                     gnus-summary-default-high-score
                     gnus-summary-default-low-score
                     (aref marks 0)
-                    (and gnus-summary-use-undownloaded-faces
-                         (if index
-                             (gethash article (cdr index))
-                           (and (memq article
-                                      gnus-newsgroup-undownloaded)
-                                (not (memq
-                                      article
-                                      gnus-newsgroup-cached))))))
+                    uncached-article)
             (funcall (gnus-summary-highlight-line-0)))))
     (if (and (symbolp face) (boundp face)) (symbol-value face) face)))
 
@@ -682,14 +682,12 @@ Spam and expirable faces take precedence over native attributes."
 
 (defun tessera-gnus-summary--thread-tree (context)
   "Return CONTEXT's configured thread branches."
-  (when-let* ((text (tessera-thread-prefix
-                     context
-                     (when-let* ((window
-                                  (tessera-entry-context-window
-                                   context)))
-                       (window-body-width window)))))
-    (propertize text 'tessera--overflow-help
-                #'tessera-gnus-summary--overflow-help)))
+  (let* ((window (tessera-entry-context-window context))
+         (width (and window (window-body-width window)))
+         (text (tessera-thread-prefix context width)))
+    (when text
+      (propertize text 'tessera--overflow-help
+                  #'tessera-gnus-summary--overflow-help))))
 
 (defun tessera-gnus-summary--overflow-help (window object position)
   "Describe the clipped article at POSITION in OBJECT or WINDOW."

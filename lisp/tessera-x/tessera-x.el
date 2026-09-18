@@ -317,16 +317,15 @@ Consumers retaining that snapshot will lose access to its contents."
   "Call MIME dissection FUNCTION with ARGUMENTS, retaining metadata.
 Native multipart handles discard their container headers.  Capture
 attachment declarations before dissection removes those headers."
-  (let* ((attachment
-          (save-excursion
-            (save-restriction
-              (mail-narrow-to-head)
-              (let ((type (mail-fetch-field "Content-Type"))
-                    (disposition
-                     (mail-fetch-field "Content-Disposition")))
-                (when (and type
-                           (string-prefix-p "multipart/"
-                                            (downcase type)))
+  (let (attachment)
+    (save-excursion
+      (save-restriction
+        (mail-narrow-to-head)
+        (let ((type (mail-fetch-field "Content-Type"))
+              (disposition (mail-fetch-field "Content-Disposition")))
+          (when (and type
+                     (string-prefix-p "multipart/" (downcase type)))
+            (setq attachment
                   (tessera-x--mime-attachment
                    (mm-make-handle
                     nil (mail-header-parse-content-type type)
@@ -334,12 +333,12 @@ attachment declarations before dissection removes those headers."
                     (and disposition
                          (mail-header-parse-content-disposition
                           disposition)))))))))
-         (handle (apply function arguments)))
-    (when (and attachment (stringp (car handle)))
-      (put-text-property 0 (length (car handle))
-                         'tessera-x--attachment attachment
-                         (car handle)))
-    handle))
+    (let ((handle (apply function arguments)))
+      (when (and attachment (stringp (car handle)))
+        (put-text-property 0 (length (car handle))
+                           'tessera-x--attachment attachment
+                           (car handle)))
+      handle)))
 
 (defun tessera-x--mime-part (handle)
   "Extract (BODY . ATTACHMENTS) from MIME HANDLE without actions."

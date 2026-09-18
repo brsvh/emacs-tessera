@@ -666,15 +666,12 @@ Use recipients for personal outgoing mail, as native mu4e does."
          (thread (tessera-entry-context-thread context)))
     (pcase role
       ('thread-tree
-       (when-let* ((text (tessera-thread-prefix
-                          context
-                          (when-let* ((window
-                                       (tessera-entry-context-window
-                                        context)))
-                            (window-body-width window)))))
-         (propertize text
-                     'tessera--overflow-help
-                     #'tessera-mu4e-headers--overflow-help)))
+       (let* ((window (tessera-entry-context-window context))
+              (width (and window (window-body-width window)))
+              (text (tessera-thread-prefix context width)))
+         (when text
+           (propertize text 'tessera--overflow-help
+                       #'tessera-mu4e-headers--overflow-help))))
       ('thread-count
        (when-let* ((text (tessera-thread-count context)))
          (propertize
