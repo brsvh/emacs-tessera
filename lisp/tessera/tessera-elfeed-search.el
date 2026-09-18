@@ -224,7 +224,7 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
   "Return the interactive title segment for CONTEXT."
   (let* ((entry (tessera-elfeed-search--entry context))
          (title (elfeed-meta--title entry)))
-    (elfeed-add-properties
+    (propertize
      (or (and title (not (string-empty-p title)) title)
          (elfeed-entry-link entry))
      'face (tessera-elfeed-search--title-faces

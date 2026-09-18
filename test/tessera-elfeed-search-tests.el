@@ -95,6 +95,30 @@
       (should (eq (get-text-property (point-min) 'elfeed-entry)
                   entry)))))
 
+(ert-deftest tessera-elfeed-search-preserves-title-properties ()
+  (dolist (source '(title custom-title link))
+    (let* ((text (propertize "Entry title" 'language 'en))
+           (original (copy-sequence text))
+           (entry (tessera-elfeed-search-tests--entry '(unread)))
+           (context (tessera-elfeed-search--context entry nil nil)))
+      (pcase source
+        ('title (setf (elfeed-entry-title entry) text))
+        ('custom-title (setf (elfeed-meta entry :title) text))
+        ('link
+         (setf (elfeed-entry-title entry) ""
+               (elfeed-entry-link entry) text)))
+      (let ((rendered (tessera-elfeed-search--title context)))
+        (should (equal-including-properties text original))
+        (should (equal rendered text))
+        (should (eq (get-text-property 0 'language rendered) 'en))
+        (should (equal (get-text-property 0 'face rendered)
+                       '(tessera-elfeed-search-unread-title-face
+                         tessera-elfeed-search-title-face)))
+        (should (eq (get-text-property 0 'mouse-face rendered)
+                    'highlight))
+        (should (equal (get-text-property 0 'follow-link rendered)
+                       [elfeed-entry]))))))
+
 (ert-deftest tessera-elfeed-search-fits-long-feed-names ()
   (let* ((entry (tessera-elfeed-search-tests--entry))
          (elfeed-db '(:version 4))
