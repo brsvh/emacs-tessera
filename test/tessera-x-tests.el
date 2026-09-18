@@ -1078,6 +1078,11 @@
          (bounds (tessera-x-today-bounds))
          (start (car bounds))
          (end (cdr bounds))
+         (read-labels
+          (symbol-function 'tessera-gnus-summary-label-data))
+         (parse-date (symbol-function 'date-to-time))
+         (label-count 0)
+         (date-count 0)
          (gnus-agent t))
     (unwind-protect
         (progn
@@ -1093,15 +1098,26 @@
                (format "<%d@test.invalid>" number)
                "<root@test.invalid>" 100 5 nil
                '((Keywords . "design,review"))))))
-          (cl-letf (((symbol-function 'tessera-x-gnus--agent-file)
-                     (lambda (&rest _) file))
-                    ((symbol-function 'gnus-find-method-for-group)
-                     (lambda (_) '(nnmaildir "fixture")))
-                    ((symbol-function 'gnus-agent-method-p)
-                     (lambda (_) t)))
+          (cl-letf
+              (((symbol-function 'tessera-x-gnus--agent-file)
+                (lambda (&rest _) file))
+               ((symbol-function 'gnus-find-method-for-group)
+                (lambda (_) '(nnmaildir "fixture")))
+               ((symbol-function 'gnus-agent-method-p)
+                (lambda (_) t))
+               ((symbol-function 'tessera-gnus-summary-label-data)
+                (lambda (header)
+                  (cl-incf label-count)
+                  (funcall read-labels header)))
+               ((symbol-function 'date-to-time)
+                (lambda (date)
+                  (cl-incf date-count)
+                  (funcall parse-date date))))
             (let ((items
                    (tessera-x-gnus--overview '("group") bounds)))
               (should (= (length items) 1))
+              (should (= label-count 1))
+              (should (= date-count 3))
               (should (equal (tessera-x-item-id (car items))
                              '("group" . 2)))
               (should (equal (tessera-x-item-subject (car items))
@@ -1110,7 +1126,12 @@
                        (cdr
                         (assoc "Labels"
                                (tessera-x-item-metadata (car items))))
-                       "design,review")))))
+                       "design,review")))
+            (setq label-count 0 date-count 0)
+            (should (= (length (tessera-x-gnus--overview '("group")))
+                       3))
+            (should (= label-count 3))
+            (should (= date-count 3))))
       (delete-file file))))
 
 (provide 'tessera-x-tests)

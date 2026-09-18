@@ -100,15 +100,19 @@ current group's Agent overview, which can itself be incomplete."
 
 ;;;; Context snapshots
 
-(defun tessera-x-gnus--item (header group)
-  "Snapshot HEADER from GROUP, with complete names and labels."
+(cl-defun tessera-x-gnus--item
+    (header group &optional
+            (date (ignore-errors
+                    (date-to-time (mail-header-date header)))))
+  "Snapshot HEADER from GROUP, with complete names and labels.
+Reuse an already parsed DATE when supplied, including nil."
   (make-tessera-x-item
    :id (cons group (mail-header-number header))
    :message-id (car (tessera-x-message-ids
                      (mail-header-message-id header)))
    :references (tessera-x-message-ids (mail-header-references header))
    :subject (mail-header-subject header)
-   :date (ignore-errors (date-to-time (mail-header-date header)))
+   :date date
    :metadata
    (append
     (list (cons "From" (mail-header-from header))
@@ -269,8 +273,9 @@ BOUNDS is a pair of Emacs times.  No articles or headers are fetched."
               (while (not (eobp))
                 (let* ((header (save-excursion
                                  (nnheader-parse-nov)))
-                       (item (tessera-x-gnus--item header group))
-                       (date (tessera-x-item-date item)))
+                       (date (ignore-errors
+                               (date-to-time
+                                (mail-header-date header)))))
                   (when (and (> (mail-header-number header) 0)
                              (or (not bounds)
                                  (and date
@@ -278,7 +283,8 @@ BOUNDS is a pair of Emacs times.  No articles or headers are fetched."
                                             date (car bounds)))
                                       (time-less-p
                                        date (cdr bounds)))))
-                    (push item items)))
+                    (push (tessera-x-gnus--item header group date)
+                          items)))
                 (forward-line 1)))))))
     (sort items
           (lambda (left right)
