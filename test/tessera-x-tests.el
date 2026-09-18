@@ -1352,7 +1352,7 @@
 
 (ert-deftest tessera-x-elfeed-http-detects-document-charset ()
   (pcase-dolist
-      (`(,type ,declaration ,coding ,body)
+      (`(,type ,declaration ,coding ,body . ,fragment)
        `(("text/html" "<meta charset=\"gb18030\">"
           chinese-gbk "中文正文")
          ("text/html" "<meta charset='iso-8859-1'>"
@@ -1361,6 +1361,31 @@
           ,(concat "<meta http-equiv='Content-Type' "
                    "content='text/html; charset=iso-8859-1'>")
           iso-latin-1 "café")
+         ("text/html"
+          ,(concat "<meta content='text/html; charset=iso-8859-1' "
+                   "http-equiv='Content-Type'>")
+          iso-latin-1 "café")
+         ("text/html" "<!doctype html><meta charset = 'iso-8859-1'>"
+          iso-latin-1 "café" t)
+         ("text/html" "<meta charset=iso-8859-1>"
+          iso-latin-1 "café" t)
+         ("text/html" "<META CHARSET\n=\t\"ISO-8859-1\">"
+          iso-latin-1 "café" t)
+         ("text/html"
+          ,(concat "<meta content = 'text/html; charset = iso-8859-1'"
+                   " http-equiv = 'CONTENT-TYPE'>")
+          iso-latin-1 "café" t)
+         ("text/html"
+          ,(concat "<!-- <meta charset=utf-8> -->"
+                   "<script>var x = '<meta charset=utf-8>';</script>"
+                   "<meta data-note='<meta charset=utf-8>' "
+                   "charset=iso-8859-1>")
+          iso-latin-1 "café" t)
+         ("text/html"
+          ,(concat "<meta content='text/html; charset=utf-8'>"
+                   "<meta charset=unknown-encoding>"
+                   "<meta charset=iso-8859-1>")
+          iso-latin-1 "café" t)
          ("application/xhtml+xml"
           "<?xml version=\"1.0\" encoding=\"iso-8859-1\"?>"
           iso-latin-1 "café")
@@ -1382,11 +1407,14 @@
                          :item item))
                  (response (generate-new-buffer " *HTTP fixture*"))
                  (html
-                  (if (string-prefix-p "<?xml" declaration)
-                      (concat declaration "<html><body>"
-                              body "</body></html>")
-                    (concat "<html><head>" declaration
-                            "</head><body>" body "</body></html>"))))
+                  (cond
+                   (fragment (concat declaration "<p>" body "</p>"))
+                   ((string-prefix-p "<?xml" declaration)
+                    (concat declaration "<html><body>"
+                            body "</body></html>"))
+                   (t (concat "<html><head>" declaration
+                              "</head><body>" body
+                              "</body></html>")))))
             (setf (tessera-x-elfeed--request-active request)
                   (list fetch))
             (with-current-buffer response

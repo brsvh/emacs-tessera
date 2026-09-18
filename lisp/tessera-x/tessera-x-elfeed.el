@@ -33,8 +33,10 @@
 (require 'tessera-x)
 (require 'avl-tree)
 (require 'bytecomp)
+(require 'dom)
 (require 'mail-parse)
 (require 'mail-utils)
+(require 'seq)
 (require 'url-http)
 
 (defvar elfeed-db-index)
@@ -203,6 +205,21 @@ Nil means fetch every selected HTTP link when fetching is enabled."
   "Complete timed out FETCH using its stored feed content."
   (tessera-x-elfeed--complete fetch nil "HTTP timeout"))
 
+(defun tessera-x-elfeed--meta-charset (meta)
+  "Return the coding system declared by the HTML META element."
+  (let* ((pragma (dom-attr meta 'http-equiv))
+         (content (dom-attr meta 'content))
+         (charset
+          (or (dom-attr meta 'charset)
+              (and pragma content
+                   (equal (downcase pragma) "content-type")
+                   (mail-content-type-get
+                    (mail-header-parse-content-type content)
+                    'charset)))))
+    (when charset
+      (mm-charset-to-coding-system
+       (intern (downcase (string-trim charset)))))))
+
 (defun tessera-x-elfeed--document-charset (type)
   "Return the coding system declared in the HTTP body of TYPE."
   (when (member type '("text/html" "application/xhtml+xml"))
@@ -214,7 +231,18 @@ Nil means fetch every selected HTTP link when fetching is enabled."
           (or (and (equal type "application/xhtml+xml")
                    (save-excursion
                      (sgml-xml-auto-coding-function size)))
-              (sgml-html-meta-auto-coding-function size)))))))
+              (let* ((bytes
+                      (buffer-substring-no-properties
+                       (point-min) (point-max)))
+                     ;; Preserve ASCII before decoding the body.
+                     (document
+                      (with-temp-buffer
+                        (insert (decode-coding-string
+                                 bytes 'iso-latin-1))
+                        (libxml-parse-html-region
+                         (point-min) (point-max)))))
+                (seq-some #'tessera-x-elfeed--meta-charset
+                          (dom-by-tag document 'meta)))))))))
 
 (defun tessera-x-elfeed--response (status fetch)
   "Handle URL STATUS for FETCH without selecting its source."
