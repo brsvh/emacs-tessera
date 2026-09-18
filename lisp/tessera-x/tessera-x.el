@@ -361,6 +361,27 @@ attachment declarations before dissection removes those headers."
                            (car handle)))
       handle)))
 
+(defun tessera-x--mime-alternative (parts)
+  "Extract one readable body and attachment metadata from PARTS.
+Try plain text, HTML, then other alternatives in their original
+order.  Retain attachment metadata from the parts tried."
+  (let (plain html other body attachments)
+    (dolist (part parts)
+      (pcase (mm-handle-media-type part)
+        ("text/plain" (push part plain))
+        ("text/html" (push part html))
+        (_ (push part other))))
+    (let ((candidates
+           (nconc (nreverse plain) (nreverse html) (nreverse other))))
+      (while (and candidates (not body))
+        (pcase-let ((`(,text . ,metadata)
+                     (tessera-x--mime-part (pop candidates))))
+          (dolist (attachment metadata)
+            (push attachment attachments))
+          (unless (string-blank-p (or text ""))
+            (setq body text)))))
+    (cons body (nreverse attachments))))
+
 (defun tessera-x--mime-part (handle)
   "Extract (BODY . ATTACHMENTS) from MIME HANDLE without actions."
   (let ((type (mm-handle-media-type handle))
@@ -373,20 +394,11 @@ attachment declarations before dissection removes those headers."
      ((equal type "multipart/encrypted")
       (cons "[Encrypted content; not decrypted.]" nil))
      ((stringp (car handle))
-      (let* ((parts (cdr handle))
-             (chosen
-              (if (equal type "multipart/alternative")
-                  (list (or (cl-find "text/plain" parts
-                                     :key #'mm-handle-media-type
-                                     :test #'equal)
-                            (cl-find "text/html" parts
-                                     :key #'mm-handle-media-type
-                                     :test #'equal)
-                            (car parts)))
-                parts))
-             (results (mapcar #'tessera-x--mime-part chosen)))
-        (cons (string-join (delq nil (mapcar #'car results)) "\n\n")
-              (cl-mapcan #'cdr results))))
+      (if (equal type "multipart/alternative")
+          (tessera-x--mime-alternative (cdr handle))
+        (let ((results (mapcar #'tessera-x--mime-part (cdr handle))))
+          (cons (string-join (delq nil (mapcar #'car results)) "\n\n")
+                (cl-mapcan #'cdr results)))))
      ((member type '("text/plain" "text/html"))
       (let* ((charset (mail-content-type-get
                        (mm-handle-type handle) 'charset))

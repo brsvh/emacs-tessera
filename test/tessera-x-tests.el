@@ -337,6 +337,81 @@
       (should (string-match-p "review.pdf" attachments))
       (should (string-match-p "review.ics" attachments)))))
 
+(ert-deftest tessera-x-mime-alternatives-fall-back-to-readable-text ()
+  (dolist (plain '("" " \t\n" "Readable plain text"))
+    (let ((item (make-tessera-x-item :id "alternative"))
+          (html-renderer (symbol-function 'tessera-x-html-text))
+          (html-calls 0))
+      (cl-letf (((symbol-function 'tessera-x-html-text)
+                 (lambda (html)
+                   (cl-incf html-calls)
+                   (funcall html-renderer html))))
+        (tessera-x-read-message
+         item
+         (lambda ()
+           (insert
+            "Content-Type: multipart/alternative; boundary=alt\n\n"
+            "--alt\nContent-Type: text/html\n\n"
+            "<p>Readable HTML text</p>\n"
+            "--alt\nContent-Type: text/plain\n\n\n"
+            "--alt\nContent-Type: text/plain\n\n"
+            plain "\n--alt--\n"))))
+      (if (string-blank-p plain)
+          (progn
+            (should (equal (tessera-x-item-body item)
+                           "Readable HTML text"))
+            (should (= html-calls 1)))
+        (should (equal (tessera-x-item-body item) plain))
+        (should (= html-calls 0)))
+      (should-not (tessera-x-item-note item)))))
+
+(ert-deftest tessera-x-mime-alternatives-try-nested-bodies ()
+  (let ((item (make-tessera-x-item :id "nested")))
+    (tessera-x-read-message
+     item
+     (lambda ()
+       (insert
+        "Content-Type: multipart/alternative; boundary=alt\n\n"
+        "--alt\nContent-Type: multipart/mixed; boundary=empty\n\n"
+        "--empty\nContent-Type: text/plain\n\n \n"
+        "--empty\nContent-Type: text/plain\n\n \n--empty--\n"
+        "--alt\nContent-Type: application/rtf\n\nRTF payload\n"
+        "--alt\nContent-Type: multipart/related; boundary=rel\n\n"
+        "--rel\nContent-Type: text/html\n\n"
+        "<p>Nested HTML text</p>\n"
+        "--rel\nContent-Type: image/png\n\nImage payload\n"
+        "--rel--\n--alt--\n")))
+    (should (equal (tessera-x-item-body item) "Nested HTML text"))
+    (should-not (tessera-x-item-note item))
+    (should (string-match-p
+             "image/png"
+             (cdr (assoc "Attachments / MIME parts"
+                         (tessera-x-item-metadata item)))))))
+
+(ert-deftest tessera-x-mime-alternatives-retain-attachment-metadata ()
+  (dolist (html '("<p>Readable body</p>" "<p> </p>"))
+    (let ((item (make-tessera-x-item :id "attachment")))
+      (tessera-x-read-message
+       item
+       (lambda ()
+         (insert
+          "Content-Type: multipart/alternative; boundary=alt\n\n"
+          "--alt\nContent-Type: text/plain\n"
+          "Content-Disposition: attachment; filename=notes.txt\n\n"
+          "Attachment text\n--alt\nContent-Type: text/html\n\n"
+          html "\n--alt--\n")))
+      (should (equal (cdr (assoc "Attachments / MIME parts"
+                                 (tessera-x-item-metadata item)))
+                     "notes.txt (text/plain)"))
+      (if (string-match-p "Readable" html)
+          (progn
+            (should (equal (tessera-x-item-body item)
+                           "Readable body"))
+            (should-not (tessera-x-item-note item)))
+        (should (string-empty-p (or (tessera-x-item-body item) "")))
+        (should (equal (tessera-x-item-note item)
+                       "No extractable text body"))))))
+
 (ert-deftest tessera-x-mime-normalizes-wire-line-endings ()
   (dolist (multipart '(nil t))
     (dolist (ending '("\n" "\r\n"))
