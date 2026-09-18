@@ -128,13 +128,25 @@ Nil means fetch every selected HTTP link when fetching is enabled."
   "Release FETCH's timer, response buffers and redirected transfers."
   (when (timerp (tessera-x-elfeed--fetch-timer fetch))
     (cancel-timer (tessera-x-elfeed--fetch-timer fetch)))
-  (let ((buffer (tessera-x-elfeed--fetch-buffer fetch)))
-    (while (buffer-live-p buffer)
-      (let ((next (buffer-local-value 'url-redirect-buffer buffer)))
-        (when-let* ((process (get-buffer-process buffer)))
-          (delete-process process))
-        (kill-buffer buffer)
-        (setq buffer next))))
+  ;; URL may collect earlier redirect buffers before the response.
+  ;; Callback arguments retain ownership even when that chain breaks.
+  (let ((buffers (list (tessera-x-elfeed--fetch-buffer fetch))))
+    (dolist (buffer (buffer-list))
+      (when (and (local-variable-p 'url-callback-arguments buffer)
+                 (eq (buffer-local-value
+                      'url-callback-function buffer)
+                     #'tessera-x-elfeed--response)
+                 (eq (cadr (buffer-local-value
+                            'url-callback-arguments buffer))
+                     fetch))
+        (push buffer buffers)))
+    (dolist (buffer buffers)
+      (while (buffer-live-p buffer)
+        (let ((next (buffer-local-value 'url-redirect-buffer buffer)))
+          (when-let* ((process (get-buffer-process buffer)))
+            (delete-process process))
+          (kill-buffer buffer)
+          (setq buffer next)))))
   (setf (tessera-x-elfeed--fetch-timer fetch) nil
         (tessera-x-elfeed--fetch-buffer fetch) nil))
 

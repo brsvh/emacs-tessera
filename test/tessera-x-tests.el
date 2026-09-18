@@ -388,7 +388,8 @@
         (should (= (length (tessera-x-item-body item)) 1000))))))
 
 (ert-deftest tessera-x-elfeed-redirects-release-all-transfers ()
-  (dolist (cancel '(nil t))
+  (pcase-dolist (`(,cancel ,reclaim)
+                 '((nil nil) (t nil) (nil t) (t t)))
     (tessera-x-tests--with-snapshots
       (with-temp-buffer
         (let* ((item (tessera-x-tests--item "redirect"))
@@ -396,6 +397,7 @@
                          'elfeed "redirect" (list item)))
                (request (make-tessera-x-elfeed--request
                          :context context))
+               (url-dead-buffer-list nil)
                (buffers (cl-loop repeat 3 collect
                                  (generate-new-buffer " *Redirect*")))
                (process (make-pipe-process
@@ -410,7 +412,16 @@
               (progn
                 (cl-loop for (buffer next) on buffers
                          do (with-current-buffer buffer
-                              (setq-local url-redirect-buffer next)))
+                              (setq-local
+                               url-redirect-buffer next
+                               url-callback-function
+                               #'tessera-x-elfeed--response
+                               url-callback-arguments
+                               (list nil fetch))))
+                (when reclaim
+                  (url-mark-buffer-as-dead (car buffers))
+                  (url-gc-dead-buffers)
+                  (should-not (buffer-live-p (car buffers))))
                 (setf (tessera-x-elfeed--request-active request)
                       (list fetch))
                 (push (apply-partially
@@ -430,6 +441,16 @@
             (dolist (buffer buffers)
               (when (buffer-live-p buffer)
                 (kill-buffer buffer)))))))))
+
+(ert-deftest tessera-x-elfeed-stop-keeps-unrelated-transfers ()
+  (with-temp-buffer
+    (let* ((other (make-tessera-x-elfeed--fetch))
+           (fetch (make-tessera-x-elfeed--fetch))
+           (buffer (current-buffer)))
+      (setq-local url-callback-function #'tessera-x-elfeed--response
+                  url-callback-arguments (list nil other))
+      (tessera-x-elfeed--stop-fetch fetch)
+      (should (buffer-live-p buffer)))))
 
 (ert-deftest tessera-x-elfeed-startup-failures-dont-recurse ()
   (tessera-x-tests--with-snapshots
