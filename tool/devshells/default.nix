@@ -142,13 +142,13 @@ in
             ;
 
           mkInstall = stage: ''
-            if gitDir="$(
+            if hooksDir="$(
               ${getExe git} -C "$PRJ_ROOT" \
-                rev-parse --absolute-git-dir \
+                rev-parse --path-format=absolute --git-path hooks \
                 2>/dev/null
             )"; then
-              mkdir -p "$gitDir/hooks"
-              ln -sf "${mkScript stage}" "$gitDir/hooks/${stage}"
+              mkdir -p "$hooksDir"
+              ln -sf "${mkScript stage}" "$hooksDir/${stage}"
             fi
           '';
 
