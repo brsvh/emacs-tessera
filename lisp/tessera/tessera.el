@@ -594,7 +594,8 @@ Validate before changing the option or notifying active adapters."
 (defun tessera--set-thread-glyphs (symbol value)
   "Set thread glyph option SYMBOL to validated VALUE."
   (tessera--validate-thread-glyphs value)
-  (tessera--set-glyphs symbol value tessera--thread-glyph-defaults))
+  (set-default symbol value)
+  (run-hook-with-args 'tessera--glyph-change-functions symbol))
 
 (defcustom tessera-thread-glyphs nil
   "Overrides for thread connectors, as an alist of glyph plists.
