@@ -338,9 +338,8 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
    :main-right-segments
    '((feed :grow t
            :min-width 4
-           :max-width 32
            :truncate tail
-           :priority -10))
+           :priority 10))
    :extra-glyph-slots '((status :reserve t))
    :extra-left-segments
    '((url :grow t :min-width 8 :truncate tail :priority 0)

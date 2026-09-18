@@ -105,11 +105,12 @@
          (allocator
           (symbol-function 'tessera--allocate-segment-widths)))
     (puthash (elfeed-entry-feed-id entry) feed elfeed-db-feeds)
-    (dolist (title (list "Short Feed" (make-string 120 ?F)
+    (dolist (title (list "Short Feed" (make-string 60 ?F)
+                         (make-string 120 ?F)
                          (make-string 60 ?界)))
       (setf (elfeed-feed-title feed) title)
-      (dolist (width '(30 60 80))
-        (let ((lines 0))
+      (dolist (width '(30 60 80 160))
+        (let ((lines 0) title-width feed-width)
           (cl-letf
               (((symbol-function 'window-body-width)
                 (lambda (&rest _) width))
@@ -119,13 +120,27 @@
                   (cl-incf lines)
                   (should (<= (tessera--single-line-width
                                left right slots)
-                              available)))))
+                              available))
+                  (when (= lines 1)
+                    (setq title-width
+                          (tessera--rendered-segment-target-width
+                           (car left))
+                          feed-width
+                          (tessera--rendered-segment-target-width
+                           (car right)))))))
             (let ((text (tessera-entry-render
                          'elfeed-search entry (selected-window))))
               (should (= lines 2))
-              (when (= width 80)
+              (when (< feed-width (string-width title))
+                (should (= title-width 4)))
+              (when (= width 160)
                 (should (string-match-p
-                         (elfeed-entry-title entry) text))))))))))
+                         (elfeed-entry-title entry) text))
+                (should (string-match-p title text)))
+              (when (and (= width 80) (= (string-width title) 60))
+                (should (string-match-p title text))
+                (should-not (string-match-p
+                             (elfeed-entry-title entry) text))))))))))
 
 (ert-deftest tessera-elfeed-search-shrinks-second-line-in-order ()
   (let* ((entry

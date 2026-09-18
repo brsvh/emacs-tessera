@@ -1085,6 +1085,11 @@ on the right.  The second line contains the entry URL, an optional
 enclosure indicator, tags, and date.  Reserved status space aligns the
 second line's content.
 
+  On the first line, the title shortens before the feed name.  The feed
+name remains complete when space permits, without a fixed width cap.
+In narrower windows, the feed name can also shorten after the title
+reaches its minimum width.
+
   The native title override is respected, with the entry URL as a
 fallback when the title is empty.  The @code{unread} tag controls read
 state and is omitted from the textual tag list.  Other native tag faces
