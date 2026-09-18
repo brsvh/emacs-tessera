@@ -420,7 +420,9 @@ On failure retain metadata and record an explicit content note."
             (when-let* ((value (mail-fetch-field field)))
               (setf (alist-get field (tessera-x-item-metadata item)
                                nil nil #'equal)
-                    (mail-decode-encoded-word-string value)))))
+                    ;; RFC 6532 permits UTF-8 outside encoded words.
+                    (let ((mail-parse-charset 'utf-8))
+                      (mail-decode-encoded-word-string value))))))
         (let* ((mm-verify-option 'never)
                (mm-decrypt-option 'never)
                (mm-archive-decoders nil)

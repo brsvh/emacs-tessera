@@ -374,6 +374,38 @@
                          (and multipart
                               "review.pdf (application/pdf)"))))))))
 
+(ert-deftest tessera-x-mime-decodes-utf8-and-encoded-headers ()
+  (dolist (case
+           '(("Sender" "Sender")
+             ("作者" "作者")
+             ("=?utf-8?B?5L2c6ICF?=" "作者")
+             ("=?iso-8859-1?Q?Andr=E9?=" "André")
+             ("作者 =?iso-8859-1?Q?Andr=E9?= 中文"
+              "作者 André 中文")))
+    (let* ((mail-parse-charset nil)
+           (fields '("From" "To" "Cc" "Keywords" "X-GM-LABELS"))
+           (metadata (mapcar (lambda (field)
+                               (cons field (cadr case)))
+                             fields))
+           (item (make-tessera-x-item
+                  :id "header-encoding"
+                  :metadata (copy-tree metadata)))
+           (headers (mapconcat (lambda (field)
+                                 (concat field ": " (car case)))
+                               fields "\n"))
+           (wire (concat
+                  (encode-coding-string
+                   (concat headers "\nMIME-Version: 1.0\n"
+                           "Content-Type: text/plain; "
+                           "charset=iso-8859-1\n"
+                           "Content-Transfer-Encoding: 8bit\n\n")
+                   'utf-8)
+                  (encode-coding-string "café\n" 'iso-8859-1))))
+      (tessera-x-read-message item (lambda () (insert wire)))
+      (should (equal (tessera-x-item-metadata item) metadata))
+      (should (equal (tessera-x-item-body item) "café"))
+      (should-not (tessera-x-item-note item)))))
+
 (ert-deftest tessera-x-mime-failures-release-partial-buffers ()
   (dolist (condition '(nil error quit))
     (let ((item (make-tessera-x-item :id "interrupted"))
