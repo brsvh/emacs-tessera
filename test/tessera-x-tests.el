@@ -737,6 +737,70 @@
       (tessera-x-elfeed--stop-fetch fetch)
       (should (buffer-live-p buffer)))))
 
+(ert-deftest tessera-x-elfeed-startup-quit-cancels-transfers ()
+  (tessera-x-tests--with-snapshots
+    (with-temp-buffer
+      (let* ((previous (tessera-x-context-start 'elfeed "Old" nil))
+             (items (cl-loop repeat 3 collect
+                             (tessera-x-tests--item "feed")))
+             (calls 0)
+             buffers fetches timer)
+        (tessera-x-context-finish previous)
+        (let* ((context
+                (tessera-x-context-start 'elfeed "New" items))
+               (request (make-tessera-x-elfeed--request
+                         :context context
+                         :queue (copy-sequence items)
+                         :timeout 60)))
+          (push (apply-partially #'tessera-x-elfeed--cancel request)
+                (tessera-x-context-cleanup context))
+          (unwind-protect
+              (progn
+                (cl-letf (((symbol-function 'url-retrieve)
+                           (lambda (_url callback arguments &rest _)
+                             (cl-incf calls)
+                             (push (car arguments) fetches)
+                             (push (generate-new-buffer " *HTTP*")
+                                   buffers)
+                             (with-current-buffer (car buffers)
+                               (setq-local
+                                url-callback-function callback
+                                url-callback-arguments
+                                (cons nil arguments)))
+                             (when (= calls 2)
+                               (setq timer
+                                     (tessera-x-elfeed--fetch-timer
+                                      (cadr fetches)))
+                               (signal 'quit nil))
+                             (car buffers))))
+                  (should
+                   (eq (condition-case err
+                           (tessera-x-elfeed--dispatch request)
+                         (quit (car err)))
+                       'quit)))
+                (should (= calls 2))
+                (should (eq (tessera-x-context-state context)
+                            'cancelled))
+                (should-not tessera-x--pending-context)
+                (should-not (tessera-x-context-cleanup context))
+                (should-not
+                 (tessera-x-elfeed--request-active request))
+                (should-not (tessera-x-elfeed--request-queue request))
+                (should-not (tessera-x-elfeed--request-dispatching
+                             request))
+                (should (cl-every #'tessera-x-elfeed--fetch-done
+                                  fetches))
+                (should-not (cl-some #'buffer-live-p buffers))
+                (should (timerp timer))
+                (should-not (memq timer timer-list))
+                (should (eq tessera-x-current-context previous))
+                (should (buffer-live-p
+                         (tessera-x-context-buffer previous))))
+            (tessera-x-cancel-context)
+            (dolist (buffer buffers)
+              (when (buffer-live-p buffer)
+                (kill-buffer buffer)))))))))
+
 (ert-deftest tessera-x-elfeed-startup-failures-dont-recurse ()
   (tessera-x-tests--with-snapshots
     (with-temp-buffer

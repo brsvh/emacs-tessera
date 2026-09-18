@@ -265,6 +265,12 @@ Nil means fetch every selected HTTP link when fetching is enabled."
                   (run-at-time
                    (tessera-x-elfeed--request-timeout request)
                    nil #'tessera-x-elfeed--timeout fetch))))
+      (quit
+       (let ((context (tessera-x-elfeed--request-context request)))
+         (when (tessera-x-context-pending-p context)
+           (with-current-buffer (tessera-x-context-source context)
+             (tessera-x-cancel-context))))
+       (signal (car err) (cdr err)))
       (error (tessera-x-elfeed--complete
               fetch nil (error-message-string err))))))
 
