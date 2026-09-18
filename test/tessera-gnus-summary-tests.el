@@ -587,7 +587,7 @@
                (lambda (_id _key) '(Work Later))))
       (should
        (equal
-        (tessera-gnus-summary--label-data
+        (tessera-gnus-summary-label-data
          (tessera-gnus-tests--metadata-header
           '((X-GM-LABELS . "(\"Work\" \"Two words\")")
             (Keywords . "Work, release,\n multi line"))))

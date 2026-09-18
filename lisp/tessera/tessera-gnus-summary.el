@@ -443,8 +443,10 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (defvar-local tessera-gnus-summary--content-cache nil
   "Snapshots of observed MIME properties, keyed by article identity.")
 
-(defun tessera-gnus-summary--header-field (name header)
-  "Return extra field NAME from native HEADER, ignoring case."
+(defun tessera-gnus-summary-header-field (name header)
+  "Return extra field NAME from native HEADER, ignoring case.
+NAME is a string.  Return nil if absent, without changing HEADER.
+No Tessera mode needs to be enabled."
   (cdr (seq-find
         (lambda (pair)
           (string-equal-ignore-case (format "%s" (car pair)) name))
@@ -469,19 +471,22 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
                           value))
     value))
 
-(defun tessera-gnus-summary--label-data (header)
+(defun tessera-gnus-summary-label-data (header)
   "Return labels from HEADER and the enabled registry.
-Each item is (TEXT . SOURCES); equal names share one display label."
+Each item is (TEXT . SOURCES); equal names share one label.  TEXT is
+single-line text; SOURCES lists Registry, Gmail, or Keywords strings.
+Preserve first occurrence order, omitting empty names.  Do not change
+HEADER or registry data.  No Tessera mode needs to be enabled."
   (let* ((id (mail-header-message-id header))
          (registry
           (when (and id (bound-and-true-p gnus-registry-db)
                      (fboundp 'gnus-registry-get-id-key))
             (gnus-registry-get-id-key id 'mark)))
          (gmail (tessera-gnus-summary--gmail-labels
-                 (tessera-gnus-summary--header-field "X-GM-LABELS"
-                                                     header)))
+                 (tessera-gnus-summary-header-field
+                  "X-GM-LABELS" header)))
          (keywords
-          (tessera-gnus-summary--header-field "Keywords" header))
+          (tessera-gnus-summary-header-field "Keywords" header))
          labels)
     (when (stringp keywords)
       (setq keywords (split-string keywords "," t "[[:space:]]+")))
@@ -507,7 +512,7 @@ Each item is (TEXT . SOURCES); equal names share one display label."
            (gethash (tessera-gnus-summary--content-key header)
                     tessera-gnus-summary--content-cache))
       (let* ((result (tessera-gnus-article--unknown-content))
-             (value (tessera-gnus-summary--header-field
+             (value (tessera-gnus-summary-header-field
                      "Content-Type" header))
              (type (and (stringp value)
                         (car (mail-header-parse-content-type
@@ -808,7 +813,7 @@ value.  Signal an error if neither value is an ASCII character."
               'tessera-gnus-summary-read-author-face))))
    'help-echo
    (let* ((header (tessera-entry-context-object context))
-          (to (tessera-gnus-summary--header-field "To" header)))
+          (to (tessera-gnus-summary-header-field "To" header)))
      (concat "From: " (mail-header-from header)
              (when to (concat "\nTo: " to))))))
 
@@ -826,7 +831,7 @@ value.  Signal an error if neither value is an ASCII character."
 
 (defun tessera-gnus-summary--labels (context)
   "Return the labels in CONTEXT as one optional text segment."
-  (when-let* ((labels (tessera-gnus-summary--label-data
+  (when-let* ((labels (tessera-gnus-summary-label-data
                        (tessera-entry-context-object context))))
     (let ((all (mapconcat #'car labels ", ")))
       (mapconcat

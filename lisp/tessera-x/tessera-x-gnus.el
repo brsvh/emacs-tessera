@@ -56,7 +56,6 @@
 (declare-function gnus-data-level "gnus-sum" (data))
 (declare-function gnus-find-method-for-group
                   "gnus" (group &optional info))
-(declare-function gnus-registry-get-id-key "gnus-registry" (id key))
 (declare-function gnus-sorted-ndifference "gnus-range" (list1 list2))
 (declare-function gnus-summary-article-number "gnus-sum" ())
 (declare-function gnus-summary-goto-subject
@@ -65,13 +64,17 @@
                   "gnus-sum" (article))
 (declare-function gnus-summary-work-articles "gnus-sum" (n))
 (declare-function mail-header-date "nnheader" (header))
-(declare-function mail-header-extra "nnheader" (header))
 (declare-function mail-header-from "nnheader" (header))
 (declare-function mail-header-message-id "nnheader" (header))
 (declare-function mail-header-number "nnheader" (header))
 (declare-function mail-header-references "nnheader" (header))
 (declare-function mail-header-subject "nnheader" (header))
 (declare-function nnheader-parse-nov "nnheader" (&optional number))
+
+(declare-function tessera-gnus-summary-header-field
+                  "tessera-gnus-summary" (name header))
+(declare-function tessera-gnus-summary-label-data
+                  "tessera-gnus-summary" (header))
 
 (defgroup tessera-x-gnus nil
   "Experimental Tessera features for Gnus."
@@ -97,44 +100,6 @@ current group's Agent overview, which can itself be incomplete."
 
 ;;;; Context snapshots
 
-(defun tessera-x-gnus--header-field (name header)
-  "Return extra field NAME from native HEADER, ignoring case."
-  (cdr (seq-find
-        (lambda (pair)
-          (string-equal-ignore-case (format "%s" (car pair)) name))
-        (mail-header-extra header))))
-
-(defun tessera-x-gnus--labels (header)
-  "Return unique label names from HEADER and the enabled registry."
-  (let* ((id (mail-header-message-id header))
-         (registry
-          (when (and id (bound-and-true-p gnus-registry-db)
-                     (fboundp 'gnus-registry-get-id-key))
-            (gnus-registry-get-id-key id 'mark)))
-         (gmail (tessera-x-gnus--header-field "X-GM-LABELS" header))
-         (keywords (tessera-x-gnus--header-field "Keywords" header))
-         labels)
-    (when (stringp gmail)
-      (setq gmail
-            (condition-case nil
-                (let ((read-circle nil))
-                  (car (read-from-string gmail)))
-              (error nil))))
-    (unless (and (proper-list-p gmail)
-                 (seq-every-p (lambda (item)
-                                (or (stringp item) (symbolp item)))
-                              gmail))
-      (setq gmail nil))
-    (when (stringp keywords)
-      (setq keywords (split-string keywords "," t "[[:space:]]+")))
-    (dolist (value (append registry gmail keywords))
-      (let ((text (string-trim
-                   (replace-regexp-in-string
-                    "[[:cntrl:]]+" " " (format "%s" value)))))
-        (unless (or (string-empty-p text) (member text labels))
-          (push text labels))))
-    (nreverse labels)))
-
 (defun tessera-x-gnus--item (header group)
   "Snapshot HEADER from GROUP, with complete names and labels."
   (make-tessera-x-item
@@ -149,10 +114,11 @@ current group's Agent overview, which can itself be incomplete."
     (list (cons "From" (mail-header-from header))
           (cons "Newsgroup" group)
           (cons "Labels"
-                (string-join (tessera-x-gnus--labels header) ",")))
+                (mapconcat
+                 #'car (tessera-gnus-summary-label-data header) ",")))
     (mapcar (lambda (field)
               (cons field
-                    (tessera-x-gnus--header-field field header)))
+                    (tessera-gnus-summary-header-field field header)))
             '("To" "Cc")))))
 
 (defun tessera-x-gnus--items (&optional selected)
@@ -321,6 +287,7 @@ When neither is present, use the article at point.  The body policy
 controls downloading to the Agent; no article is marked read."
   (interactive)
   (require 'gnus-agent)
+  (require 'tessera-gnus-summary)
   (let ((items (tessera-x-gnus--items t)))
     (unless items (user-error "No Gnus articles selected"))
     (tessera-x-gnus--build-context
@@ -334,6 +301,7 @@ With prefix LOCAL-INDEX, supplement replies from this group's Agent
 overview.  That local index may omit articles absent from the Agent."
   (interactive "P")
   (require 'gnus-agent)
+  (require 'tessera-gnus-summary)
   (let* ((items (tessera-x-gnus--items))
          (id (save-excursion (gnus-summary-article-number)))
          (anchor
@@ -383,6 +351,7 @@ Use the Summary group, or the Group buffer's group or topic at point.
 Never download bodies or overview data in this command."
   (interactive)
   (require 'gnus-agent)
+  (require 'tessera-gnus-summary)
   (require 'gnus-topic)
   (let* ((position (line-beginning-position))
          (groups

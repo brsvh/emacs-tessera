@@ -86,8 +86,9 @@
          (cons #'tessera-tests--check-library-source
                after-load-functions)))
     (dolist (library tessera-tests--libraries)
-      (require (intern library)
-               (cdr (assoc library tessera-tests--expected-libraries))))
+      (require
+       (intern library)
+       (cdr (assoc library tessera-tests--expected-libraries))))
     (message "Testing Tessera %s from %s"
              (if package-path "bytecode" "source")
              (string-join library-directories ", "))

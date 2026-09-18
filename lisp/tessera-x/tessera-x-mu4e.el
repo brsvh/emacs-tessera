@@ -47,6 +47,9 @@
 (declare-function mu4e~headers-thread-root-p
                   "mu4e-headers" (&optional msg))
 
+(declare-function tessera-mu4e-headers-labels
+                  "tessera-mu4e-headers" (message))
+
 (defgroup tessera-x-mu4e nil
   "Experimental Tessera features for mu4e."
   :group 'tessera-x
@@ -102,9 +105,7 @@ A custom function may supply an account-specific query."
     (list (cons "Maildir" (plist-get message :maildir))
           (cons "Labels"
                 (string-join
-                 (delete-dups
-                  (append (plist-get message :labels)
-                          (plist-get message :tags) nil)) ","))
+                 (tessera-mu4e-headers-labels message) ","))
           (cons "Flags" (plist-get message :flags))))))
 
 (defun tessera-x-mu4e--items (&optional selected)
@@ -265,6 +266,7 @@ With ANCHOR, include related messages and keep descendants."
 Use local mail files and preserve native marks and read state."
   (interactive)
   (require 'mu4e-headers)
+  (require 'tessera-mu4e-headers)
   (let ((items (tessera-x-mu4e--items t)))
     (unless items (user-error "No mu4e messages selected"))
     (let ((context (tessera-x-context-start
@@ -280,6 +282,7 @@ With prefix LOCAL-INDEX, supplement from the local mu index, ignoring
 the current search filter.  This does not fetch mail from a server."
   (interactive "P")
   (require 'mu4e-headers)
+  (require 'tessera-mu4e-headers)
   (let* ((items (tessera-x-mu4e--items))
          (id (plist-get (mu4e-message-at-point) :docid))
          (anchor (cl-find id items :key #'tessera-x-item-id))
@@ -338,6 +341,7 @@ In Headers use its current query; in Main use the query item at point.
 `mu4e-mu-home' selects the index.  No mailbox synchronization occurs."
   (interactive)
   (require 'mu4e-message)
+  (require 'tessera-mu4e-headers)
   (require 'mu4e-server)
   (require 'mu4e-query-items)
   (let* ((base (funcall tessera-x-mu4e-today-query-function))

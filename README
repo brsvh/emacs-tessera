@@ -18,8 +18,8 @@ Documentation License".
 Tessera provides layouts for Elfeed Search, Gnus Summary, and mu4e Headers.  You
 keep using their native commands to read, search, mark, and navigate entries.
 
-The ~tessera~ package contains all display adapters.  The independent ~tessera-x~
-package provides experimental features; ~x~ means experimental.
+The ~tessera~ package contains all display adapters.  The ~tessera-x~ package
+extends it with experimental features; ~x~ means experimental.
 
 ** Getting Started
 
@@ -27,7 +27,8 @@ package provides experimental features; ~x~ means experimental.
 
 Use Emacs 30.1 or later and set up the mail or feed application you use.
 Install ~tessera~ for display features; it requires Alert.  Install ~tessera-x~
-for experiments, independently of ~tessera~ and Alert.  Its backend commands
+for experiments; it depends on ~tessera~ and inherits its Alert dependency.
+Experimental commands do not require enabling display modes.  They
 require Gnus, mu4e 1.14.3 or later, or Elfeed 4.0.1 or later at runtime.
 
 For a source checkout, add the core directory to ~load-path~:
@@ -36,8 +37,8 @@ For a source checkout, add the core directory to ~load-path~:
 (add-to-list 'load-path "/path/to/emacs-tessera/lisp/tessera/")
 #+end_src
 
-For experimental features, add ~lisp/tessera-x/~ instead, or add both
-directories to use both packages.  The ~tessera-x-gnus~, ~tessera-x-mu4e~, and
+For experimental features, also add ~lisp/tessera-x/~ to ~load-path~.
+The ~tessera-x-gnus~, ~tessera-x-mu4e~, and
 ~tessera-x-elfeed~ features are included in ~tessera-x~.  Loading their libraries
 exposes options without loading the native applications.
 
@@ -46,8 +47,8 @@ When upgrading from separate experimental packages, replace them with
 command, and option names remain available.
 
 Alternatively, create archives as described under [[*Build][Build]], then use ~M-x
-package-install-file~ on the desired archives in ~dist/~.  The two packages can
-be installed independently.  Their archives include their Info manuals.
+package-install-file~ on the desired archives in ~dist/~.  Install ~tessera~
+before ~tessera-x~.  Their archives include their Info manuals.
 
 For Nix, add this repository as a flake input named ~tessera~ and include
 ~inputs.tessera.overlays.default~ in your nixpkgs overlays.  Select the packages

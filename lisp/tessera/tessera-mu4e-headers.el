@@ -514,6 +514,13 @@ for padding purposes.  Threading follows `mu4e-search-threads'."
 
 ;;;; Header elements
 
+(defun tessera-mu4e-headers-labels (message)
+  "Return unique label and tag names from native MESSAGE.
+Preserve first occurrence order, with labels before tags.  Return a
+fresh list without changing MESSAGE.  No Tessera mode is needed."
+  (delete-dups (append (plist-get message :labels)
+                       (plist-get message :tags) nil)))
+
 (defun tessera-mu4e-headers--context (object buffer window)
   "Build a context for native OBJECT in BUFFER and WINDOW."
   (make-tessera-entry-context
@@ -688,8 +695,7 @@ visibility settings.  Pending operations also show their target."
                      (when (member label (plist-get message :tags))
                        '("tag"))) ", "))
            'mouse-face 'tessera-entry-hover-face))
-        (delete-dups (append (plist-get message :labels)
-                             (plist-get message :tags) nil))
+        (tessera-mu4e-headers-labels message)
         (propertize "," 'face 'default 'mouse-face 'default)))
       ('target
        (let ((mark (tessera-mu4e-headers--mark message)))

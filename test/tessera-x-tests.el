@@ -20,14 +20,17 @@
 
 (defvar gnus-registry-db)
 
-(ert-deftest tessera-x-compiles-and-loads-independently ()
+(ert-deftest tessera-x-compiles-and-loads-without-native-clients ()
   (with-temp-buffer
     (let ((status
            (call-process
             (expand-file-name invocation-name invocation-directory)
             nil (current-buffer) nil "-Q" "--batch"
             "-l" (locate-library "run-x-tests")
-            (file-name-directory (locate-library "tessera-x")))))
+            (file-name-directory
+             (symbol-file 'tessera-x-context-start 'defun))
+            (file-name-directory
+             (symbol-file 'tessera-entry-render 'defun)))))
       (ert-info ((buffer-string))
         (should (equal status 0))))))
 
@@ -40,14 +43,30 @@
         (gnus-registry-db t))
     (cl-letf (((symbol-function 'gnus-registry-get-id-key)
                (lambda (_id _key) '(shared " Registry\nlabel "))))
-      (should (equal (tessera-x-gnus--labels header)
-                     '("shared" "Registry label" "Gmail" "News")))
-      (should (equal (tessera-x-gnus--header-field "To" header)
-                     "Recipient <to@example.invalid>"))
+      (let ((metadata (tessera-x-item-metadata
+                       (tessera-x-gnus--item header "group"))))
+        (should (equal (cdr (assoc "Labels" metadata))
+                       "shared,Registry label,Gmail,News"))
+        (should (equal (cdr (assoc "To" metadata))
+                       "Recipient <to@example.invalid>")))
       (dolist (value '("#1=(x . #1#)" "(x . y)" "((nested))"))
         (setcdr (assq 'x-gm-labels (mail-header-extra header)) value)
-        (should (equal (tessera-x-gnus--labels header)
-                       '("shared" "Registry label" "News")))))))
+        (let ((metadata (tessera-x-item-metadata
+                         (tessera-x-gnus--item header "group"))))
+          (should (equal (cdr (assoc "Labels" metadata))
+                         "shared,Registry label,News")))))))
+
+(ert-deftest tessera-x-mu4e-labels-share-native-normalization ()
+  (let* ((message (list :labels (list "Work" "Later" "Work")
+                        :tags (list "Later" "News")))
+         (saved (copy-tree message))
+         (labels (tessera-mu4e-headers-labels message))
+         (metadata (tessera-x-item-metadata
+                    (tessera-x-mu4e--item message))))
+    (should (equal labels '("Work" "Later" "News")))
+    (should (equal (cdr (assoc "Labels" metadata)) "Work,Later,News"))
+    (setcar labels "Changed")
+    (should (equal message saved))))
 
 (ert-deftest tessera-x-options-belong-to-their-feature ()
   (dolist (entry '((tessera-x-gnus

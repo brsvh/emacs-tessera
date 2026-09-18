@@ -5,7 +5,7 @@
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1"))
+;; Package-Requires: ((emacs "30.1") (tessera "0.1.0"))
 ;; Keywords: convenience, mail, news
 ;; URL: https://github.com/brsvh/emacs-tessera
 
@@ -38,10 +38,11 @@
 (require 'subr-x)
 (require 'mm-decode)
 (require 'shr)
+(require 'tessera)
 
 (defgroup tessera-x nil
   "Experimental Tessera features."
-  :group 'applications
+  :group 'tessera
   :prefix "tessera-x-")
 
 ;;;; Context snapshots
@@ -251,7 +252,8 @@ Return CONTEXT.  No window, point or region is changed."
              (when (tessera-x-context-pending-p context)
                (with-current-buffer (tessera-x-context-source context)
                  (tessera-x-cancel-context)))
-           (tessera-x-context-fail context (error-message-string err)))
+           (tessera-x-context-fail
+            context (error-message-string err)))
          (signal (car err) (cdr err))))
       (setf (tessera-x-context-buffer context) buffer
             (tessera-x-context-state context) 'ready)

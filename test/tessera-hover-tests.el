@@ -77,7 +77,7 @@
          (tessera-glyph-color nil)
          (tessera-entry-segment-gap 0))
     (tessera-gnus-summary--register)
-    (cl-letf (((symbol-function 'tessera-gnus-summary--label-data)
+    (cl-letf (((symbol-function 'tessera-gnus-summary-label-data)
                (lambda (_) '(("foo" "test") ("bar" "test"))))
               ((symbol-function 'tessera-gnus-summary--content-data)
                (lambda (_) '( :attachment present

@@ -116,6 +116,11 @@
                       ;
 
                     description = "Experimental features for Emacs communication tools";
+
+                    packageRequires = with finalAttrs; [
+                      tessera
+                    ];
+
                     pname = "tessera-x";
                   };
                 };

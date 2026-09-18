@@ -78,8 +78,8 @@ applications, and a first preparation command.
 @cindex experimental features
 @cindex context snapshots
   Tessera X provides experimental features for Gnus, mu4e, and Elfeed.
-The @samp{x} means @dfn{experimental}; the feature implemented in this
-version is content aggregation through context snapshots.
+The @samp{x} means experimental.  This version provides context
+snapshots for collecting content from those applications.
 
   A @dfn{context snapshot} collects selected records, their metadata,
 and available body text in a separate, read-only buffer.  You can
@@ -102,9 +102,13 @@ see @ref{Programming Contexts}.
 @node Requirements
 @section Requirements
 @cindex installation
-  Tessera X requires Emacs 30.1 or later.  It is independent of the
-Tessera display package and Alert.  Install and configure the
-application whose content you want to collect:
+  Tessera X requires Emacs 30.1 or later and Tessera 0.1.0 or later.
+Install Tessera's dependencies as well, including Alert 1.2 or later.
+You can prepare snapshots without enabling a Tessera display mode.
+@xref{Requirements,,, tessera, Tessera}.
+
+  Install and configure the application whose content you want to
+collect:
 
 @table @asis
 @item Gnus
@@ -114,9 +118,9 @@ see @ref{Gnus Download Policy} for body retrieval and @ref{Gnus
 Unplugged,,, gnus, The Gnus Manual} for Agent setup.
 
 @item mu4e
-Use mu4e 1.14.3 or later, with its mail paths, mu executable, and local
-index configured.  Make its libraries available to Emacs.  Snapshots
-read local mail; see @ref{mu4e Local Retrieval}.
+Use mu4e 1.14.3 or later, with its mail paths, @command{mu} executable,
+and local index configured.  Make its libraries available to Emacs.
+Snapshots read local mail; see @ref{mu4e Local Retrieval}.
 
 @item Elfeed
 Use Elfeed 4.0.1 or later, with its libraries and feed database
@@ -126,15 +130,18 @@ that interface.  See @ref{Today Scopes}.
 @end table
 
   The libraries @code{tessera-x-gnus}, @code{tessera-x-mu4e}, and
-@code{tessera-x-elfeed} are all included in Tessera X.  Loading one
+@code{tessera-x-elfeed} are all included in Tessera X@.  Loading one
 exposes its options without loading the native application; commands
-load their required application libraries when invoked.  No Tessera X
-minor mode or default key bindings are installed.
+load their required application libraries when invoked.  Use @kbd{M-x}
+to run the commands; Tessera X supplies no minor mode or default key
+bindings.
 
-  For a source checkout, add @file{lisp/tessera-x/} to @code{load-path}.
-For example, replace the checkout path before evaluating:
+  For a source checkout, make Tessera's dependencies available and add
+both package directories to @code{load-path}.  For example, replace the
+checkout path before evaluating:
 
 @lisp
+(add-to-list 'load-path "/path/to/emacs-tessera/lisp/tessera/")
 (add-to-list 'load-path "/path/to/emacs-tessera/lisp/tessera-x/")
 (require 'tessera-x-gnus)
 @end lisp
@@ -149,20 +156,8 @@ owning library before setting its options in an initialization file.
 @node First Snapshot
 @section Preparing a First Snapshot
 @cindex snapshot, preparing
-  In a supported source buffer, move point to a message or entry and run
-the corresponding command.  With no active region or native selection
-marks, it prepares that record:
-
-@table @asis
-@item Gnus Summary
-@kbd{M-x tessera-x-gnus-prepare-context}.
-
-@item mu4e Headers
-@kbd{M-x tessera-x-mu4e-prepare-context}.
-
-@item Elfeed Search
-@kbd{M-x tessera-x-elfeed-prepare-context}.
-@end table
+  A first snapshot can contain just the message or entry at point.
+Preparation reads its metadata and obtains the available body text.
 
   By default, Gnus may download a missing body into its Agent, and
 Elfeed may fetch a linked page.  mu4e reads local message files.  To
@@ -181,6 +176,21 @@ before running the command:
 These settings control retrieval; they cannot supply content that is
 absent locally.  See @ref{Retrieving Content} for the policies and their
 scope.
+
+  In a supported source buffer, move point to a message or entry and run
+the corresponding command.  With no active region or native selection
+marks, it prepares that record:
+
+@table @asis
+@item Gnus Summary
+@kbd{M-x tessera-x-gnus-prepare-context}.
+
+@item mu4e Headers
+@kbd{M-x tessera-x-mu4e-prepare-context}.
+
+@item Elfeed Search
+@kbd{M-x tessera-x-elfeed-prepare-context}.
+@end table
 
   Once preparation has completed, run @kbd{M-x tessera-x-show-context}
 in the source buffer to view the result.  Preparation itself does not
@@ -360,9 +370,9 @@ error.  This selects from the index, independently of the number of
 currently displayed rows.
 
   A nonempty base produces @samp{(@var{base}) AND (date:today..now)};
-an empty base uses @samp{date:today..now} alone.  mu interprets the date
-range as today through now.  Tessera does not substitute a fixed
-24-hour interval.
+an empty base uses @samp{date:today..now} alone.  The @command{mu}
+program interprets the date range as today through now.  Tessera does
+not substitute a fixed 24-hour interval.
 
 @defopt tessera-x-mu4e-today-query-function
 A no-argument function returning the base mu query string.  The default
@@ -387,9 +397,8 @@ the maildir below with one present in the configured index:
         #'my-tessera-today-query)
 @end lisp
 
-@noindent
-This option can have a global or buffer-local value.  Changing it does
-not alter a query already in progress.
+  The query option can have a global or buffer-local value.  Changing
+it does not alter a query already in progress.
 
 @deffn Command tessera-x-elfeed-prepare-today-context
 Prepare today's local entries and return a context request.  In Search,
@@ -436,11 +445,20 @@ group.  Downloading a missing body additionally requires an agentized
 method.  Loading Tessera X does not configure those facilities.
 
 @defopt tessera-x-gnus-body-policy
-How selected-article and subthread requests obtain bodies.  The initial
-value @code{download} uses native synchronous Agent fetching for absent
-or empty bodies.  The value @code{local-only} reads existing Agent
-bodies.  Today requests always use local-only retrieval, regardless of
-this option.
+This option controls how selected-article and subthread requests obtain
+bodies.  Its default value is @code{download}.
+
+@table @code
+@item download
+Read existing Agent bodies and use native synchronous Agent fetching
+for bodies that are absent or empty.
+
+@item local-only
+Read existing Agent bodies without downloading missing content.
+@end table
+
+Today requests always use local-only retrieval, regardless of this
+option.
 @end defopt
 
   Downloads are grouped by newsgroup.  When they make bodies available
@@ -472,9 +490,9 @@ a file that has moved or disappeared.
 
   Expanded subthreads and today scopes also query the local mu index.
 Queries use @code{mu4e-mu-binary}.  A non-@code{nil} @code{mu4e-mu-home}
-is expanded and passed as @samp{--muhome}; otherwise the executable uses
-its default.  Query results are sorted by date with duplicates removed;
-subthread expansion includes related messages.
+is expanded and passed as @option{--muhome}; otherwise the executable
+uses its default.  Query results are sorted by date with duplicates
+removed; subthread expansion includes related messages.
 
   Index and body access can fail independently.  A query with no matches
 produces an empty snapshot.  A failed query or unreadable query output
@@ -491,34 +509,35 @@ text in the snapshot.  This does not modify Elfeed's stored entry.
 Today requests always use stored bodies and never fetch linked pages.
 
 @defopt tessera-x-elfeed-fetch-linked-content
-Whether selected-entry requests fetch linked pages, initially @code{t}.
-A @code{nil} value uses stored feed content only.
+If this option is non-@code{nil}, selected-entry requests fetch eligible
+linked pages.  Its default value is @code{t}.  A value of @code{nil}
+uses stored feed content only.
 @end defopt
 
 @defopt tessera-x-elfeed-fetch-minimum-characters
-A stored-body length at or above which retrieval is skipped, or
-@code{nil} to fetch every eligible selected link.  Initially @code{nil}.
-A nonnegative integer counts characters after any HTML feed content has
-been rendered to text.
+This option specifies the stored-body length at or above which retrieval
+is skipped.  The default value, @code{nil}, fetches every eligible
+selected link.  A nonnegative integer counts characters after any HTML
+feed content has been rendered to text.  With a numeric threshold, a
+shorter body is eligible and equality skips fetching.  A value of zero
+skips all linked-page retrieval.
 @end defopt
 
   Only links beginning with @samp{http://} or @samp{https://} enter the
-queue.  With a numeric threshold, a shorter body is eligible and
-equality skips fetching.  Zero skips all linked-page retrieval.  Entries
-without an eligible link retain their stored content.
+queue.  Entries without an eligible link retain their stored content.
 
 @cindex content types
   Successful responses must have a status in the 200--299 range and a
 supported media type: @samp{text/html}, @samp{application/xhtml+xml}, or
-@samp{text/plain}.  An absent Content-Type is treated as HTML.  The
-declared charset is used when available, with UTF-8 as the fallback for
-undecoded response bytes.
+@samp{text/plain}.  An absent @samp{Content-Type} is treated as HTML@.
+The declared charset is used when available, with UTF-8 as the fallback
+for undecoded response bytes.
 
-  HTML is rendered with SHR; plain text is trimmed at its boundaries.
-A nonempty result replaces the item's body and receives the note
-@samp{Fetched linked page}.  Metadata and provenance remain.  This is
-not a specialized article extractor, so page navigation can remain in
-the text.  See @ref{Text Extraction}.
+  HTML is converted to plain text; plain text is trimmed at its
+boundaries.  A nonempty result replaces the item's body and receives
+the note @samp{Fetched linked page}.  Metadata and provenance remain.
+This is not a specialized article extractor, so page navigation can
+remain in the text.  See @ref{Text Extraction}.
 
 @cindex HTTP fallback
   A startup error, unsupported media type, HTTP failure, empty result,
@@ -572,11 +591,12 @@ body text retains its line breaks.
 
 @table @asis
 @item Mail and news
-Items include Message-ID, References, any native inferred parent, full
-addresses, and available labels.  Gnus retains newsgroup provenance and
-combines registry marks, Gmail labels, and Keywords.  mu4e retains the
-maildir and flags, and combines labels and tags without duplicates.
-Reading raw mail can refine address and label header metadata.
+Items include @samp{Message-ID}, @samp{References}, any native inferred
+parent, full addresses, and available labels.  Gnus retains newsgroup
+provenance and combines registry marks, Gmail labels, and
+@samp{Keywords}.  mu4e retains the maildir and flags, and combines
+labels and tags without duplicates.  Reading raw mail can refine
+address and label header metadata.
 
 @item Feeds
 Items include entry and feed URLs, authors, tags, and enclosure URLs
@@ -615,7 +635,7 @@ attachment descriptions separately from body text.
 direct @samp{text/plain} alternative, then @samp{text/html}, then the
 first available part.  Other multipart messages are traversed in MIME
 order.  Plain text is decoded using its declared charset when possible;
-HTML is rendered with SHR.
+HTML is rendered with Emacs's Simple HTML Renderer (SHR)@.
 
   Attachments contribute names and media types to metadata; their file
 contents are not inserted as body text.  Other non-text parts are listed
@@ -708,7 +728,7 @@ command returns after publication or failure.
 @item mu4e
 Selected messages and subthreads limited to current results read their
 files synchronously.  Index expansion and today scopes can remain
-pending while a separate mu process runs.
+pending while a separate @command{mu} process runs.
 
 @item Elfeed
 Preparation with stored content only is synchronous.  Selected-entry
@@ -734,6 +754,10 @@ The source buffer remembers its latest result; each snapshot buffer
 retains its own context.  Killing the source leaves completed snapshots
 alive.
 
+  Use @kbd{M-x tessera-x-show-context} to view a snapshot and
+@kbd{M-x tessera-x-discard-context} when you no longer need it.  Run
+these commands in the source buffer or in the snapshot's own buffer.
+
 @deffn Command tessera-x-show-context
 Display the latest successful snapshot associated with the current
 buffer.  From a source buffer, select its latest snapshot; from a
@@ -743,9 +767,11 @@ snapshot buffer is associated with the current buffer.
 
 @deffn Command tessera-x-discard-context
 Kill the snapshot associated with the current source or snapshot buffer.
-If it is the source's latest snapshot, clear the source's reference.
-Signal a user error when there is no associated context.  Programs using
-the snapshot buffer lose access to its contents.
+If that buffer is killed or is already dead, clear the source's
+reference when it refers to this snapshot.  If buffer deletion is
+refused, retain the snapshot and its source reference.  Signal a user
+error when there is no associated context.  Consumers can no longer read
+the buffer's contents after it is killed.
 @end deffn
 
   Discard an older snapshot from its own buffer without affecting the
@@ -767,11 +793,11 @@ retrieval.  Retain successful snapshots.  Do nothing when that source
 has no request in progress.
 @end deffn
 
-  Run this command in the source buffer.  It can stop an asynchronous
-mu index query or linked-page download.  It cannot undo a completed Gnus
-download or interrupt a synchronous operation currently occupying Emacs.
-For automatic cancellation on a new request or source-buffer changes,
-see @ref{Request States}.
+  Run @kbd{M-x tessera-x-cancel-context} in the source buffer.  It can
+stop an asynchronous mu index query or linked-page download.  It cannot
+undo a completed Gnus download or interrupt a synchronous operation
+currently occupying Emacs.  For automatic cancellation on a new request
+or source-buffer changes, see @ref{Request States}.
 
 @node Troubleshooting
 @section Troubleshooting
@@ -885,7 +911,7 @@ functions should handle their own expected failures.
 
   The following example saves a reference for a consumer in each source
 buffer.  It does not send or display the text.  The @samp{my-} symbols
-belong to user configuration, not to the Tessera API.
+belong to user configuration, not to the Tessera API@.
 
 @lisp
 (require 'tessera-x)
@@ -924,6 +950,11 @@ before handling a callback.
   Snapshot request objects are distinct from the entry contexts used to
 render display rows.  @xref{Entry Contexts,,, tessera, Tessera}.
 
+  Gnus and mu4e producers reuse Tessera's native metadata readers to
+collect message fields and labels.  These readers do not require a
+display mode; load their owning library before calling them.
+@xref{Native Metadata,,, tessera, Tessera}.
+
 @menu
 * Records: Source Items.  Source items and context objects.
 * Request Lifecycle::   Starting, finishing, and cleaning up work.
@@ -941,7 +972,7 @@ request is pending; consumers read them after successful publication.
 @deftp {Data Type} tessera-x-item
 A record supplied by a backend.  Construct one with
 @code{make-tessera-x-item}, using keyword arguments for its fields.
-Read fields with accessors named @samp{tessera-x-item-@var{field}}.  Use
+Read fields with accessors named @code{tessera-x-item-@var{field}}.  Use
 @code{setf} to fill content while the request is pending.
 @end deftp
 @findex make-tessera-x-item
@@ -962,13 +993,14 @@ Read fields with accessors named @samp{tessera-x-item-@var{field}}.  Use
 A backend-local identity.  Use a stable value suitable for @code{equal}.
 
 @item message-id
-A normalized mail or news Message-ID, or @code{nil}.
+A normalized mail or news @samp{Message-ID}, or @code{nil}.
 
 @item references
 A list of normalized reference identities in the source's order.
 
 @item parent
-An optional inferred native parent, kept separately from References.
+An optional inferred native parent, kept separately from
+@samp{References}.
 
 @item subject
 The full subject or title.
@@ -983,7 +1015,7 @@ An alist of printable field labels and values.
 A provenance or group label for rendering.
 
 @item data
-Opaque backend retrieval data, such as a message path or entry URL.
+Opaque backend retrieval data, such as a message path or entry URL@.
 
 @item body
 Extracted text, or @code{nil} for no body.
@@ -1014,7 +1046,7 @@ not install a live request in a source buffer.
 @findex tessera-x-context-error
 @findex tessera-x-context-max-characters
 @findex tessera-x-context-body-max-characters
-  Accessors have the form @samp{tessera-x-context-@var{field}}.  The
+  Accessors have the form @code{tessera-x-context-@var{field}}.  The
 fields @code{backend}, @code{source}, @code{scope}, @code{items}, and
 @code{created} record the backend symbol, source buffer, scope label,
 records, and start time.  @code{state} records the lifecycle state.
@@ -1037,7 +1069,8 @@ during preparation so every completion path can release it.
 @defun tessera-x-context-start backend scope items
 Start a request in the current buffer and return its context object.
 @var{backend} is a symbol, @var{scope} describes the selection, and
-@var{items} is a list of snapshotted @code{tessera-x-item} records.
+@var{items} is a list of @code{tessera-x-item} records prepared for this
+request.
 Cancel this source's previous pending request, retain its latest ready
 snapshot, capture the budgets and time, and arrange cancellation when
 the source is killed or changes major mode.
@@ -1061,10 +1094,12 @@ reference, and invoke the ready hook.  A stale or finished context is
 returned without being published again.
 @end defun
 
-  Rendering errors kill the incomplete result buffer, fail the request,
-and are signalled to the caller.  A producer should handle errors from
-its own retrieval and completion path.  Completion itself does not
-select a window or move the source's point or region.
+  An error during rendering kills the incomplete result buffer and
+fails the request.  Quitting during rendering kills that buffer and
+cancels the request instead.  Both conditions are signalled to the
+caller.  A producer should handle errors from its own retrieval and
+completion path.  Completion itself does not select a window or move
+the source's point or region.
 
 @cindex resource cleanup
 @defun tessera-x-context-fail context error-data
@@ -1127,14 +1162,15 @@ supplied text and records rather than display rows.
 @subsection Reading and Converting Content
 
   These helpers extract headers and body text from supplied messages or
-HTML.  Retrieval remains the producer's responsibility.
+HTML@.  Retrieval remains the producer's responsibility.
 
 @defun tessera-x-read-message item reader
 Call the no-argument function @var{reader} in a temporary unibyte
 buffer.  It must insert a complete raw message, including headers.
-Decode available From, To, Cc, Keywords, and X-GM-LABELS fields into
-@var{item}'s metadata and extract its MIME body and attachment
-information.  Record failures as content notes and return @var{item}.
+Decode available @samp{From}, @samp{To}, @samp{Cc}, @samp{Keywords}, and
+@samp{X-GM-LABELS} fields into @var{item}'s metadata and extract its
+MIME body and attachment information.  Record failures as content notes
+and return @var{item}.
 @end defun
 
 @defun tessera-x-html-text html
@@ -1162,23 +1198,24 @@ This is normalization, not a complete message-header parser.
 
 @defun tessera-x-native-parent-stack identity level stack
 Return an updated native ancestry stack for @var{identity} at
-@var{level}.  @var{stack} contains @code{(LEVEL . IDENTITY)} pairs,
-deepest first.  Remove preceding entries at the same or deeper level and
-push the new pair; the second pair then identifies its parent.
+@var{level}.  The argument @var{stack} contains pairs of the form
+@code{(@var{level} . @var{identity})}, deepest first.  Remove preceding
+entries at the same or deeper level and push the new pair; the second
+pair then identifies its parent.
 @end defun
 
   Visit every native record, including folded and unselected records,
 when using the stack.  Selection must not accidentally reparent a
 record.  Retain native inferred ancestry in @code{parent} without
-rewriting the original References list.
+rewriting the original @samp{References} list.
 
 @defun tessera-x-subthread items anchor
 Return @var{anchor} and its descendants among @var{items}, in their
 input order.  The anchor should be an item in that list.  Follow
-References and native parents using Message-ID, falling back to the
-backend identity when it is absent.  Missing intermediate parents do not
-prevent a reference to an earlier ancestor from connecting a record.
-Cycles do not cause an endless traversal.
+@samp{References} and native parents using @samp{Message-ID}, falling
+back to the backend identity when it is absent.  Missing intermediate
+parents do not prevent a reference to an earlier ancestor from
+connecting a record.  Cycles do not cause an endless traversal.
 @end defun
 
   This function does not retrieve additional records or infer ancestry
@@ -1186,10 +1223,10 @@ from equal subjects.  The backend determines whether @var{items} comes
 from loaded results or a wider local index.
 
 @defun tessera-x-group-threads items
-Return @var{items} grouped by connected References and native parent
-identities.  Preserve first-group and within-group order.  Update each
-item's @code{group} field to the first member's subject.  Do not merge
-records solely because their subjects match.
+Return @var{items} grouped by connected @samp{References} and native
+parent identities.  Preserve first-group and within-group order.
+Update each item's @code{group} field to the first member's subject.
+Do not merge records solely because their subjects match.
 @end defun
 
   This operation mutates item group fields and belongs before
