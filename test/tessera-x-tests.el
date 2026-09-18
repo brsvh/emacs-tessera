@@ -132,6 +132,35 @@
                          (tessera-x-context-buffer first))))))
         (kill-buffer other)))))
 
+(ert-deftest tessera-x-interrupted-rendering-releases-resources ()
+  (tessera-x-tests--with-snapshots
+    (with-temp-buffer
+      (let ((ready (tessera-x-context-start 'test "ready" nil))
+            (cleanup-count 0)
+            rendered)
+        (tessera-x-context-finish ready)
+        (dolist (condition '(quit error))
+          (let ((pending (tessera-x-context-start 'test "next" nil)))
+            (push (lambda () (cl-incf cleanup-count))
+                  (tessera-x-context-cleanup pending))
+            (cl-letf (((symbol-function 'tessera-x--context-render)
+                       (lambda (_context)
+                         (setq rendered (current-buffer))
+                         (signal condition nil))))
+              (should
+               (eq (condition-case err
+                       (tessera-x-context-finish pending)
+                     ((error quit) (car err)))
+                   condition)))
+            (should-not (buffer-live-p rendered))
+            (should-not tessera-x--pending-context)
+            (should-not (tessera-x-context-buffer pending))
+            (should (eq (tessera-x-context-state pending)
+                        (if (eq condition 'quit) 'cancelled 'failed)))
+            (tessera-x-context-finish pending)
+            (should (eq tessera-x-current-context ready))))
+        (should (= cleanup-count 2))))))
+
 (ert-deftest tessera-x-closed-source-cancels-and-never-publishes ()
   (let ((source (generate-new-buffer " *Doomed source*"))
         context cancelled)

@@ -245,9 +245,13 @@ Return CONTEXT.  No window, point or region is changed."
             (special-mode)
             (setq-local tessera-x-current-context context)
             (set-buffer-modified-p nil))
-        (error
+        ((error quit)
          (kill-buffer buffer)
-         (tessera-x-context-fail context (error-message-string err))
+         (if (eq (car err) 'quit)
+             (when (tessera-x-context-pending-p context)
+               (with-current-buffer (tessera-x-context-source context)
+                 (tessera-x-cancel-context)))
+           (tessera-x-context-fail context (error-message-string err)))
          (signal (car err) (cdr err))))
       (setf (tessera-x-context-buffer context) buffer
             (tessera-x-context-state context) 'ready)
