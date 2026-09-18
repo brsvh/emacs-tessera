@@ -230,7 +230,8 @@ Nil means fetch every selected HTTP link when fetching is enabled."
        (intern (downcase (string-trim charset)))))))
 
 (defun tessera-x-elfeed--document-charset (type)
-  "Return the coding system declared in the HTTP body of TYPE."
+  "Return the coding system declared in the HTTP body of TYPE.
+Inspect HTML metadata only within the first 1024 body bytes."
   (when (member type '("text/html" "application/xhtml+xml"))
     (save-excursion
       (save-restriction
@@ -242,7 +243,8 @@ Nil means fetch every selected HTTP link when fetching is enabled."
                      (sgml-xml-auto-coding-function size)))
               (let* ((bytes
                       (buffer-substring-no-properties
-                       (point-min) (point-max)))
+                       (point-min)
+                       (min (+ (point-min) 1024) (point-max))))
                      ;; Preserve ASCII before decoding the body.
                      (document
                       (with-temp-buffer

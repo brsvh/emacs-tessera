@@ -1460,6 +1460,16 @@
                    "<meta charset=unknown-encoding>"
                    "<meta charset=iso-8859-1>")
           iso-latin-1 "café" t)
+         ("text/html"
+          ,(format "%1024s" "<meta charset=iso-8859-1>")
+          iso-latin-1 "café" t)
+         ("text/html"
+          ,(format "%1025s" "<meta charset=iso-8859-15>")
+          utf-8 "café" t)
+         ("text/html"
+          ,(concat (make-string 1024 ?\s)
+                   "<meta charset=iso-8859-1>")
+          utf-8 "café" t)
          ("application/xhtml+xml"
           "<?xml version=\"1.0\" encoding=\"iso-8859-1\"?>"
           iso-latin-1 "café")
@@ -1519,6 +1529,26 @@
                            (if (equal type "text/plain") html body)))
             (should (equal (tessera-x-item-note item)
                            "Fetched linked page"))))))))
+
+(ert-deftest tessera-x-elfeed-charset-scan-is-bounded ()
+  (let ((parse (symbol-function 'libxml-parse-html-region)) sizes)
+    (cl-letf (((symbol-function 'libxml-parse-html-region)
+               (lambda (start end &rest args)
+                 (push (- end start) sizes)
+                 (apply parse start end args))))
+      (dolist (size '(2048 2097152))
+        (with-temp-buffer
+          (set-buffer-multibyte nil)
+          (insert "HTTP/1.1 200 OK\r\n\r\n")
+          (setq-local url-http-end-of-headers (point-marker))
+          (insert "<meta charset=iso-8859-1><p>"
+                  (make-string size ?x) "</p>")
+          (should
+           (coding-system-equal
+            (tessera-x-elfeed--document-charset "text/html")
+            'iso-latin-1)))))
+    (should (= (length sizes) 2))
+    (should (apply #'= sizes))))
 
 (ert-deftest tessera-x-elfeed-today-keeps-filter-and-local-boundaries
     ()
