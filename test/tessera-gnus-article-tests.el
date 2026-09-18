@@ -76,6 +76,33 @@
             (should-not (plist-get data :encryption))))
       (when handles (mm-destroy-parts handles)))))
 
+(ert-deftest tessera-gnus-article-observes-text-dispositions ()
+  (let ((mm-verify-option 'never)
+        (mm-decrypt-option 'never))
+    (dolist (type '("plain" "html"))
+      (pcase-dolist
+          (`(,disposition ,expected)
+           '((nil nil)
+             ("inline" nil)
+             ("inline; filename=body.txt" nil)
+             ("attachment" present)
+             ("x-review" present)
+             ("X-Review; filename=body.txt" present)))
+        (let (handles)
+          (unwind-protect
+              (with-temp-buffer
+                (insert "Content-Type: text/" type "\n")
+                (when disposition
+                  (insert "Content-Disposition: " disposition "\n"))
+                (insert "\nBody\n")
+                (setq handles (mm-dissect-buffer t))
+                (should
+                 (eq (plist-get (tessera-gnus-article--mime-content
+                                 handles)
+                                :attachment)
+                     expected)))
+            (when handles (mm-destroy-parts handles))))))))
+
 (ert-deftest tessera-gnus-article-keeps-multipart-attachments ()
   (let ((mm-verify-option 'never)
         (mm-decrypt-option 'never)
@@ -87,6 +114,8 @@
           (dolist (nested '(nil t))
             (dolist (spec '(("attachment; filename=part.mime" present)
                             ("attachment" present)
+                            ("x-review" present)
+                            ("X-Review; filename=part.mime" present)
                             ("inline; filename=part.mime" nil t)
                             (nil present t)
                             (nil nil)))

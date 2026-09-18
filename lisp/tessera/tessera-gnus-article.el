@@ -62,11 +62,11 @@
             '(error present processed unknown)))
 
 (defun tessera-gnus-article--attachment-p (handle)
-  "Return non-nil when MIME HANDLE declares an attachment."
+  "Return non-nil when MIME HANDLE declares an attachment.
+Treat unknown disposition types as attachments, per RFC 2183."
   (let ((disposition (car (mm-handle-disposition handle))))
-    (or (equal disposition "attachment")
-        (and (mm-handle-filename handle)
-             (not (equal disposition "inline"))))))
+    (and (not (equal disposition "inline"))
+         (or disposition (mm-handle-filename handle)))))
 
 (defun tessera-gnus-article--remember-disposition (type _from)
   "Retain attachment declarations on multipart content TYPE.

@@ -312,11 +312,12 @@ Consumers retaining that snapshot will lose access to its contents."
                   (point-min) (point-max)))))
 
 (defun tessera-x--mime-attachment (handle)
-  "Return attachment metadata for a single-part MIME HANDLE."
+  "Return attachment metadata for a single-part MIME HANDLE.
+Treat unknown disposition types as attachments, per RFC 2183."
   (let ((filename (mm-handle-filename handle))
         (disposition (car (mm-handle-disposition handle))))
-    (when (or (equal disposition "attachment")
-              (and filename (not (equal disposition "inline"))))
+    (when (and (not (equal disposition "inline"))
+               (or disposition filename))
       (format "%s (%s)" (or filename "unnamed attachment")
               (mm-handle-media-type handle)))))
 

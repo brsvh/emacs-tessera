@@ -347,7 +347,9 @@
            ;; Native dissection defaults plain text to inline.
            ("body.txt" nil ,(equal type "plain"))
            (nil "attachment; filename=body.txt" nil)
-           (nil "attachment" nil)))
+           (nil "attachment" nil)
+           (nil "x-review" nil)
+           (nil "X-Review; filename=body.txt" nil)))
       (ert-info ((format "%s: %S / %S" type name disposition))
         (let ((item (make-tessera-x-item :id "named-body")))
           (tessera-x-read-message
@@ -611,6 +613,31 @@
        (equal (cdr (assoc "Attachments / MIME parts"
                           (tessera-x-item-metadata item)))
               (format "attached mail.mime (multipart/%s)" type))))))
+
+(ert-deftest tessera-x-multipart-dispositions-control-bodies ()
+  (dolist (type '("mixed" "alternative"))
+    (dolist (disposition '(nil "inline" "attachment" "x-review"))
+      (let ((item (make-tessera-x-item :id "multipart")))
+        (tessera-x-read-message
+         item
+         (lambda ()
+           (insert "Content-Type: multipart/" type "; boundary=x\n")
+           (when disposition
+             (insert "Content-Disposition: " disposition "\n"))
+           (insert "\n--x\nContent-Type: text/plain\n\n"
+                   "Container body\n--x--\n")))
+        (if (member disposition '(nil "inline"))
+            (progn
+              (should (equal (tessera-x-item-body item)
+                             "Container body"))
+              (should-not (assoc "Attachments / MIME parts"
+                                 (tessera-x-item-metadata item))))
+          (should-not (tessera-x-item-body item))
+          (should
+           (equal (cdr (assoc "Attachments / MIME parts"
+                              (tessera-x-item-metadata item)))
+                  (format "unnamed attachment (multipart/%s)"
+                          type))))))))
 
 (ert-deftest tessera-x-inline-multipart-filenames-preserve-bodies ()
   (dolist (type '("mixed" "alternative"))
