@@ -923,13 +923,45 @@ from IDs to contexts with counts, branch paths, and boundaries."
                'tessera-glyph-accent-face 'tessera-glyph-muted-face)
      'help-echo "Unread / total, including folded messages")))
 
-(defun tessera-thread-prefix (context)
+(defvar tessera--thread-prefix-paths
+  (make-hash-table :test #'eq :weakness 'key)
+  "Bounded forward paths cached by shared reverse path identity.
+Values contain a path limit and its immutable forward prefix.")
+
+(defun tessera--thread-prefix-path (tail limit)
+  "Return at most LIMIT root-to-child branches from reverse TAIL.
+Reuse cached ancestor prefixes without retaining dead contexts."
+  (let ((cursor tail) cached pending)
+    (while (and cursor
+                (not (and (setq cached
+                                (gethash
+                                 cursor tessera--thread-prefix-paths))
+                          (= limit (car cached)))))
+      (push cursor pending)
+      (setq cursor (cdr cursor)))
+    (let ((path (and cursor (cdr cached))))
+      (dolist (node pending)
+        (when (< (length path) limit)
+          (setq path (append path (list (car node)))))
+        (puthash node (cons limit path) tessera--thread-prefix-paths))
+      path)))
+
+(defun tessera-thread-prefix (context &optional width)
   "Return the configured tree prefix for native member CONTEXT.
 Align each branch with its parent text using the segment gap.
-Preserve every ancestor column.  Spaces become layout overlays."
+WIDTH, when non-nil, bounds generation to cover that many window
+columns, with extra branches for subsequent layout clipping.
+Without WIDTH, preserve every ancestor column.  Spaces become
+layout overlays; the context always retains its full ancestry."
+  (unless (or (null width) (natnump width))
+    (error "Thread prefix width must be a nonnegative integer"))
   (when-let* ((thread (tessera-entry-context-thread context))
               (tail (tessera--thread-path-tail thread)))
-    (let* ((path (reverse tail))
+    (let* ((indent (+ 2 tessera-entry-segment-gap))
+           (path (if width
+                     (tessera--thread-prefix-path
+                      tail (+ 2 (ceiling width indent)))
+                   (reverse tail)))
            (branch
             (tessera-glyph-render
              (tessera-glyph-resolve
@@ -940,8 +972,7 @@ Preserve every ancestor column.  Spaces become layout overlays."
             (tessera-glyph-render
              (tessera-glyph-resolve
               'vertical tessera--thread-glyph-defaults
-              tessera-thread-glyphs) context))
-           (indent (+ 2 tessera-entry-segment-gap)))
+              tessera-thread-glyphs) context)))
       (concat
        (mapconcat
         (lambda (continues)

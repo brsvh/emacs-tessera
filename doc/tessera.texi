@@ -1778,11 +1778,17 @@ with default semantic styling and count help.  Return @code{nil} without
 thread membership.
 @end defun
 
-@defun tessera-thread-prefix context
+@defun tessera-thread-prefix context &optional width
 Return tree connectors for the native member described by entry
 @var{context}, or @code{nil} when there is no branch path.  Respect
 @code{tessera-thread-glyphs} and the shared glyph style and color
 settings, with @code{tessera-entry-segment-gap} for indentation.
+
+When @var{width} is a nonnegative window width in columns, generate only
+enough ancestor connectors to cover it, with extra columns for later
+layout clipping.  The result can be wider than @var{width}.  Omit
+@var{width} to render the complete branch path.  Neither form changes
+the context's ancestry or navigation data.
 @end defun
 
   These functions are segment providers.  Register the tree as fixed

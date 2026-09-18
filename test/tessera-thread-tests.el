@@ -143,6 +143,36 @@
                        (string-width
                         (substring child 0 branch))))))))))
 
+(ert-deftest tessera-thread-bounded-prefix-keeps-visible-columns ()
+  (let* ((tessera-glyph-style 'ascii)
+         (nodes (tessera-thread-build-contexts
+                 (cl-loop for id from 1 to 2000
+                          collect
+                          (list id (and (> id 1) (1- id)) nil t))))
+         (context (make-tessera-entry-context)))
+    (dolist (width '(80 20 120))
+      (cl-loop for id from 2 to 2000
+               do
+               (setf (tessera-entry-context-thread context)
+                     (gethash id nodes))
+               (should (< (length
+                           (tessera-thread-prefix context width))
+                          (+ width 12))))))
+  (dolist (gap '(0 1 3))
+    (let* ((tessera-entry-segment-gap gap)
+           (node (make-tessera-thread-context
+                  :path (cl-loop for i below 100
+                                 collect (= (% i 3) 0))))
+           (context (make-tessera-entry-context :thread node))
+           (full (tessera-thread-prefix context)))
+      (dolist (width '(0 1 20 80 1000))
+        (should
+         (equal-including-properties
+          (truncate-string-to-width full width)
+          (truncate-string-to-width
+           (tessera-thread-prefix context width) width))))
+      (should (= 100 (length (tessera-thread-context-path node)))))))
+
 (ert-deftest tessera-thread-context-key-includes-all-ancestors ()
   (let ((node (make-tessera-thread-context
                :path (cons t (make-list 26 nil)))))
