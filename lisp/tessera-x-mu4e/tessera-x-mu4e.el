@@ -101,7 +101,8 @@ A custom function may supply an account-specific query."
           (cons "Flags" (plist-get message :flags))))))
 
 (defun tessera-x-mu4e--items (&optional selected)
-  "Read result messages, or SELECTED messages, including folded rows."
+  "Read result messages, or SELECTED messages, including folded rows.
+Inspect the full result buffer, preserving its narrowing and point."
   (unless (derived-mode-p 'mu4e-headers-mode)
     (user-error "Run this command in mu4e Headers"))
   (let* ((seen (make-hash-table))
@@ -113,31 +114,34 @@ A custom function may supply an account-specific query."
          (current (and selected
                        (plist-get (mu4e-message-at-point t) :docid)))
          stack items)
-    (mu4e-headers-for-each
-     (lambda (message)
-       (let ((id (plist-get message :docid)))
-         (unless (gethash id seen)
-           (puthash id t seen)
-           (setq stack
-                 (tessera-x-native-parent-stack
-                  (or (car (tessera-x-message-ids
-                            (plist-get message :message-id)))
-                      id (plist-get message :path))
-                  (if (and mu4e-search-threads
-                           (not (mu4e~headers-thread-root-p message)))
-                      (or (plist-get (plist-get message :meta) :level)
-                          0)
-                    0)
-                  stack))
-           (when (cond
-                  ((not selected) t)
-                  (marked (gethash id mu4e--mark-map))
-                  (region (and (< (line-beginning-position) end)
-                               (>= (line-end-position) begin)))
-                  (t (equal id current)))
-             (let ((item (tessera-x-mu4e--item message)))
-               (setf (tessera-x-item-parent item) (cdadr stack))
-               (push item items)))))))
+    (save-restriction
+      (widen)
+      (mu4e-headers-for-each
+       (lambda (message)
+         (let ((id (plist-get message :docid))
+               (level
+                (if (and mu4e-search-threads
+                         (not (mu4e~headers-thread-root-p message)))
+                    (or (plist-get (plist-get message :meta) :level)
+                        0)
+                  0)))
+           (unless (gethash id seen)
+             (puthash id t seen)
+             (setq stack
+                   (tessera-x-native-parent-stack
+                    (or (car (tessera-x-message-ids
+                              (plist-get message :message-id)))
+                        id (plist-get message :path))
+                    level stack))
+             (when (cond
+                    ((not selected) t)
+                    (marked (gethash id mu4e--mark-map))
+                    (region (and (< (line-beginning-position) end)
+                                 (>= (line-end-position) begin)))
+                    (t (equal id current)))
+               (let ((item (tessera-x-mu4e--item message)))
+                 (setf (tessera-x-item-parent item) (cdadr stack))
+                 (push item items))))))))
     (nreverse items)))
 
 (defun tessera-x-mu4e--read-body (item)
