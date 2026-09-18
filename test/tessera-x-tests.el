@@ -337,6 +337,60 @@
       (should (string-match-p "review.pdf" attachments))
       (should (string-match-p "review.ics" attachments)))))
 
+(ert-deftest tessera-x-mime-disposition-controls-named-text ()
+  (dolist (type '("plain" "html"))
+    (pcase-dolist
+        (`(,name ,disposition ,inline)
+         `((nil "inline; filename=body.txt" t)
+           (nil "inline; filename*=utf-8''body%20text.txt" t)
+           ("body.txt" "inline" t)
+           ;; Native dissection defaults plain text to inline.
+           ("body.txt" nil ,(equal type "plain"))
+           (nil "attachment; filename=body.txt" nil)
+           (nil "attachment" nil)))
+      (ert-info ((format "%s: %S / %S" type name disposition))
+        (let ((item (make-tessera-x-item :id "named-body")))
+          (tessera-x-read-message
+           item
+           (lambda ()
+             (insert "Content-Type: text/" type)
+             (when name (insert "; name=" name))
+             (insert "\n")
+             (when disposition
+               (insert "Content-Disposition: " disposition "\n"))
+             (insert "\n" (if (equal type "html")
+                              "<p>Inline body</p>"
+                            "Inline body"))))
+          (if inline
+              (progn
+                (should (equal (tessera-x-item-body item)
+                               "Inline body"))
+                (should-not (tessera-x-item-note item))
+                (should-not (assoc "Attachments / MIME parts"
+                                   (tessera-x-item-metadata item))))
+            (should-not (tessera-x-item-body item))
+            (should (equal (tessera-x-item-note item)
+                           "No extractable text body"))
+            (should (assoc "Attachments / MIME parts"
+                           (tessera-x-item-metadata item)))))))))
+
+(ert-deftest tessera-x-mime-inline-images-retain-filenames ()
+  (let ((item (make-tessera-x-item :id "inline-image")))
+    (tessera-x-read-message
+     item
+     (lambda ()
+       (insert "Content-Type: multipart/related; boundary=parts\n\n"
+               "--parts\nContent-Type: text/html\n\n"
+               "<p>Inline body</p>\n"
+               "--parts\nContent-Type: image/png\n"
+               "Content-Disposition: inline; filename=logo.png\n\n"
+               "Image payload\n--parts--\n")))
+    (should (equal (tessera-x-item-body item) "Inline body"))
+    (should-not (tessera-x-item-note item))
+    (should (equal (cdr (assoc "Attachments / MIME parts"
+                               (tessera-x-item-metadata item)))
+                   "logo.png (image/png)"))))
+
 (ert-deftest tessera-x-mime-alternatives-fall-back-to-readable-text ()
   (dolist (plain '("" " \t\n" "Readable plain text"))
     (let ((item (make-tessera-x-item :id "alternative"))
@@ -551,6 +605,26 @@
        (equal (cdr (assoc "Attachments / MIME parts"
                           (tessera-x-item-metadata item)))
               (format "attached mail.mime (multipart/%s)" type))))))
+
+(ert-deftest tessera-x-inline-multipart-filenames-preserve-bodies ()
+  (dolist (type '("mixed" "alternative"))
+    (let ((item (make-tessera-x-item :id "inline-multipart")))
+      (tessera-x-read-message
+       item
+       (lambda ()
+         (insert
+          "Content-Type: multipart/" type "; boundary=inner\n"
+          "Content-Disposition: inline; filename=body.mime\n\n"
+          "--inner\nContent-Type: text/plain\n\nInline body\n"
+          "--inner\nContent-Type: text/plain\n"
+          "Content-Disposition: attachment; filename=notes.txt\n\n"
+          "Attachment body\n--inner--\n")))
+      (should (equal (tessera-x-item-body item) "Inline body"))
+      (should-not (tessera-x-item-note item))
+      (when (equal type "mixed")
+        (should (equal (cdr (assoc "Attachments / MIME parts"
+                                   (tessera-x-item-metadata item)))
+                       "notes.txt (text/plain)"))))))
 
 (ert-deftest tessera-x-mime-archives-remain-metadata ()
   (let* ((decoders '(("application/ms-tnef" t "tnef" "-f" "-" "-C")

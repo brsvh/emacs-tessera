@@ -313,10 +313,10 @@ Consumers retaining that snapshot will lose access to its contents."
 
 (defun tessera-x--mime-attachment (handle)
   "Return attachment metadata for a single-part MIME HANDLE."
-  (let ((filename (mm-handle-filename handle)))
-    (when (or filename
-              (equal (car (mm-handle-disposition handle))
-                     "attachment"))
+  (let ((filename (mm-handle-filename handle))
+        (disposition (car (mm-handle-disposition handle))))
+    (when (or (equal disposition "attachment")
+              (and filename (not (equal disposition "inline"))))
       (format "%s (%s)" (or filename "unnamed attachment")
               (mm-handle-media-type handle)))))
 
@@ -410,7 +410,9 @@ order.  Retain attachment metadata from the parts tried."
         (cons (if (equal type "text/html")
                   (tessera-x-html-text text)
                 (string-trim text)) nil)))
-     (t (cons nil (list (format "MIME part (%s)" type)))))))
+     (t
+      (let ((name (or (mm-handle-filename handle) "MIME part")))
+        (cons nil (list (format "%s (%s)" name type))))))))
 
 (defun tessera-x-read-message (item reader)
   "Read raw mail into ITEM using READER in a temporary buffer.
