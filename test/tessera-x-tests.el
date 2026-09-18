@@ -617,34 +617,45 @@
         (delete-directory directory t)))))
 
 (ert-deftest tessera-x-elfeed-http-parses-content-and-charset ()
-  (tessera-x-tests--with-snapshots
-    (with-temp-buffer
-      (let* ((item (tessera-x-tests--item "feed"))
-             (context (tessera-x-context-start
-                       'elfeed "http parser" (list item)))
-             (request
-              (make-tessera-x-elfeed--request :context context))
-             (fetch (make-tessera-x-elfeed--fetch
-                     :request request
-                     :item item))
-             (response (generate-new-buffer " *HTTP fixture*")))
-        (setf (tessera-x-elfeed--request-active request) (list fetch))
-        (with-current-buffer response
-          (set-buffer-multibyte nil)
-          (insert "HTTP/1.1 200 OK\r\n"
-                  "Content-Type: text/html; "
-                  "charset=iso-8859-1\r\n\r\n")
-          (setq-local url-http-response-status 200)
-          (setq-local url-http-end-of-headers (point-marker))
-          (insert (encode-coding-string
-                   "<p>café fetched body</p>" 'iso-latin-1))
-          (tessera-x-elfeed--response nil fetch))
-        (should (eq (tessera-x-context-state context) 'ready))
-        (should-not (buffer-live-p response))
-        (should (equal (tessera-x-item-body item)
-                       "café fetched body"))
-        (should (equal (tessera-x-item-note item)
-                       "Fetched linked page"))))))
+  (dolist (header
+           (list
+            "Content-Type: text/html; charset=iso-8859-1"
+            "Content-Type: text/html ; charset=iso-8859-1"
+            "Content-Type:\ttext/html; charset=iso-8859-1"
+            "Content-Type: TEXT/HTML; CHARSET=\"ISO-8859-1\" \t"
+            (concat "X-Content-Type: application/json\r\n"
+                    "Content-Type: text/html; charset=iso-8859-1")
+            (concat "Set-Cookie: charset=utf-8\r\n"
+                    "Content-Type: text/html; charset=iso-8859-1")
+            "Content-Type: text/html;\r\n\tcharset=iso-8859-1"))
+    (ert-info ((format "Response header: %S" header))
+      (tessera-x-tests--with-snapshots
+        (with-temp-buffer
+          (let* ((item (tessera-x-tests--item "feed"))
+                 (context (tessera-x-context-start
+                           'elfeed "http parser" (list item)))
+                 (request
+                  (make-tessera-x-elfeed--request :context context))
+                 (fetch (make-tessera-x-elfeed--fetch
+                         :request request
+                         :item item))
+                 (response (generate-new-buffer " *HTTP fixture*")))
+            (setf (tessera-x-elfeed--request-active request)
+                  (list fetch))
+            (with-current-buffer response
+              (set-buffer-multibyte nil)
+              (insert "HTTP/1.1 200 OK\r\n" header "\r\n\r\n")
+              (setq-local url-http-response-status 200)
+              (setq-local url-http-end-of-headers (point-marker))
+              (insert (encode-coding-string
+                       "<p>café fetched body</p>" 'iso-latin-1))
+              (tessera-x-elfeed--response nil fetch))
+            (should (eq (tessera-x-context-state context) 'ready))
+            (should-not (buffer-live-p response))
+            (should (equal (tessera-x-item-body item)
+                           "café fetched body"))
+            (should (equal (tessera-x-item-note item)
+                           "Fetched linked page"))))))))
 
 (ert-deftest tessera-x-elfeed-today-keeps-filter-and-local-boundaries
     ()

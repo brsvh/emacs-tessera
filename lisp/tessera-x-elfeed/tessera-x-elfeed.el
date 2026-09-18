@@ -35,6 +35,8 @@
 (require 'tessera-x)
 (require 'tessera-elfeed)
 (require 'elfeed-search)
+(require 'mail-parse)
+(require 'mail-utils)
 (require 'url-http)
 
 (defvar elfeed-tree-filter)
@@ -191,18 +193,21 @@ Nil means fetch every selected HTTP link when fetching is enabled."
                        (<= 200 url-http-response-status 299)
                        (markerp url-http-end-of-headers))
             (error "HTTP failure %s" url-http-response-status))
-          (let* ((headers (buffer-substring-no-properties
-                           (point-min) url-http-end-of-headers))
-                 (case-fold-search t)
-                 (type (if (string-match
-                            "Content-Type: *\\([^;\r\n]+\\)" headers)
-                           (downcase (match-string 1 headers))
-                         "text/html"))
+          (let* ((header
+                  (save-restriction
+                    (narrow-to-region
+                     (point-min) url-http-end-of-headers)
+                    (mail-fetch-field "Content-Type")))
+                 (content-type
+                  (mail-header-parse-content-type
+                   (or header "text/html")))
+                 (type (car content-type))
+                 (encoding (mail-content-type-get
+                            content-type 'charset))
                  (charset
-                  (when (string-match
-                         "charset=[\"']?\\([^;\"' \r\n]+\\)" headers)
+                  (when encoding
                     (mm-charset-to-coding-system
-                     (intern (downcase (match-string 1 headers))))))
+                     (intern (downcase encoding)))))
                  (text (buffer-substring-no-properties
                         url-http-end-of-headers (point-max))))
             (unless (member type '("text/html" "text/plain"
