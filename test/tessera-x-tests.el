@@ -337,6 +337,43 @@
       (should (string-match-p "review.pdf" attachments))
       (should (string-match-p "review.ics" attachments)))))
 
+(ert-deftest tessera-x-mime-normalizes-wire-line-endings ()
+  (dolist (multipart '(nil t))
+    (dolist (ending '("\n" "\r\n"))
+      (let* ((item (make-tessera-x-item :id "line-endings"))
+             (body "First\rpart\ncafé")
+             (part (concat "Content-Type: text/plain; charset=utf-8\n"
+                           "Content-Transfer-Encoding: 8bit\n\n"
+                           body "\n"))
+             (raw
+              (concat
+               "From: Sender <sender@example.invalid>\n"
+               "MIME-Version: 1.0\n"
+               (if multipart
+                   (concat
+                    "Content-Type: multipart/mixed;"
+                    " boundary=outer\n\n"
+                    "--outer\n" part
+                    "--outer\nContent-Type: application/pdf\n"
+                    "Content-Disposition: attachment;\n"
+                    " filename=review.pdf\n"
+                    "Content-Transfer-Encoding: base64\n\n"
+                    "JVBERi0xLjQK\n--outer--\n")
+                 part)))
+             (wire (encode-coding-string
+                    (replace-regexp-in-string "\n" ending raw t t)
+                    'utf-8)))
+        (tessera-x-read-message item (lambda () (insert wire)))
+        (should (equal (tessera-x-item-body item) body))
+        (should-not (tessera-x-item-note item))
+        (let ((metadata (tessera-x-item-metadata item)))
+          (should (equal (cdr (assoc "From" metadata))
+                         "Sender <sender@example.invalid>"))
+          (should (equal (cdr (assoc "Attachments / MIME parts"
+                                     metadata))
+                         (and multipart
+                              "review.pdf (application/pdf)"))))))))
+
 (ert-deftest tessera-x-mime-failures-release-partial-buffers ()
   (dolist (condition '(nil error quit))
     (let ((item (make-tessera-x-item :id "interrupted"))

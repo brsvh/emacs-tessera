@@ -411,6 +411,9 @@ On failure retain metadata and record an explicit content note."
         (set-buffer-multibyte nil)
         (funcall reader)
         (goto-char (point-min))
+        (while (search-forward "\r\n" nil t)
+          (replace-match "\n" t t))
+        (goto-char (point-min))
         (save-restriction
           (mail-narrow-to-head)
           (dolist (field '("From" "To" "Cc" "Keywords" "X-GM-LABELS"))
