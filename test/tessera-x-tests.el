@@ -161,6 +161,27 @@
             (should (eq tessera-x-current-context ready))))
         (should (= cleanup-count 2))))))
 
+(ert-deftest tessera-x-discard-respects-refused-buffer-deletion ()
+  (tessera-x-tests--with-snapshots
+    (with-temp-buffer
+      (let ((context (tessera-x-context-start 'test "discard" nil)))
+        (tessera-x-context-finish context)
+        (let ((buffer (tessera-x-context-buffer context)))
+          (with-current-buffer buffer
+            (setq-local kill-buffer-query-functions
+                        (list (lambda () nil))))
+          (tessera-x-discard-context)
+          (should (buffer-live-p buffer))
+          (should (eq tessera-x-current-context context))
+          (save-window-excursion
+            (tessera-x-show-context)
+            (should (eq (window-buffer) buffer)))
+          (with-current-buffer buffer
+            (setq-local kill-buffer-query-functions nil))
+          (tessera-x-discard-context)
+          (should-not (buffer-live-p buffer))
+          (should-not tessera-x-current-context))))))
+
 (ert-deftest tessera-x-closed-source-cancels-and-never-publishes ()
   (let ((source (generate-new-buffer " *Doomed source*"))
         context cancelled)

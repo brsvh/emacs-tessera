@@ -288,11 +288,11 @@ Consumers retaining that snapshot will lose access to its contents."
   (let* ((context tessera-x-current-context)
          (source (tessera-x-context-source context))
          (buffer (tessera-x-context-buffer context)))
-    (when (buffer-live-p source)
-      (with-current-buffer source
-        (when (eq tessera-x-current-context context)
-          (setq tessera-x-current-context nil))))
-    (when (buffer-live-p buffer) (kill-buffer buffer))))
+    (when (or (not (buffer-live-p buffer)) (kill-buffer buffer))
+      (when (buffer-live-p source)
+        (with-current-buffer source
+          (when (eq tessera-x-current-context context)
+            (setq tessera-x-current-context nil)))))))
 
 ;;;; Source content and threads
 
