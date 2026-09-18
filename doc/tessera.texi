@@ -1754,6 +1754,16 @@ counts affect the representative only.  It can be compared with
 @code{equal} to decide whether a native row needs redrawing.
 @end defun
 
+@defun tessera-thread-context-key-equal-p left right &optional cache
+Return non-@code{nil} when keys @var{left} and @var{right} describe
+the same displayed row.  Without @var{cache}, this is equivalent to
+@code{equal}.  For a batch refresh, pass an @code{eq} hash table shared
+by the row comparisons.  This reuses comparisons of shared ancestors
+instead of traversing their complete paths for every descendant.
+It still detects changes to branches outside the visible window.
+Discard the cache before changing paths or starting another refresh.
+@end defun
+
 @node Thread Layouts and Segments
 @section Thread Layouts and Segments
 

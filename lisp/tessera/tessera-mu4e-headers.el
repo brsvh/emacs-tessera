@@ -871,15 +871,18 @@ Use recipients for personal outgoing mail, as native mu4e does."
        tessera-mu4e-headers--threads))
     width))
 
-(defun tessera-mu4e-headers--sync-line (native &optional force)
+(defun tessera-mu4e-headers--sync-line
+    (native &optional force thread-paths)
   "Render the changed row, or restore it when NATIVE is non-nil.
-FORCE also redraws rows whose message and thread state are unchanged."
+FORCE also redraws rows whose message and thread state are unchanged.
+THREAD-PATHS caches shared ancestor comparisons for this update."
   (when-let* ((body (tessera-mu4e-headers--body-start)))
     (let* ((start (line-beginning-position))
            (end (line-end-position))
            (fringe (- body mu4e--mark-fringe-len))
            (message (get-text-property start 'msg))
            (saved (get-text-property body 'tessera-mu4e-native))
+           (previous (get-text-property body 'tessera-mu4e-state))
            (original (or saved (buffer-substring body end)))
            (state (unless native
                     (list message (tessera-mu4e-headers--mark message)
@@ -890,9 +893,10 @@ FORCE also redraws rows whose message and thread state are unchanged."
               (or force (not saved)
                   ;; Reapplying a mark replaces its hidden text too.
                   (not (equal (get-text-property fringe 'display) ""))
-                  (not (equal state
-                              (get-text-property
-                               body 'tessera-mu4e-state)))))
+                  (not (equal (butlast state) (butlast previous)))
+                  (not (tessera-thread-context-key-equal-p
+                        (nth 2 previous) (nth 2 state)
+                        thread-paths))))
         ;; Native mark edits can move old padding into the fringe.
         ;; Clear the whole row so no clipped decoration survives.
         (tessera-entry-clear-layout start (1+ end))
@@ -963,6 +967,7 @@ FORCE also redraws unchanged messages after presentation changes."
   (save-restriction
     (widen)
     (let ((tessera-mu4e-headers--updating t)
+          (thread-paths (make-hash-table :test #'eq))
           (inhibit-read-only t)
           (inhibit-modification-hooks t)
           (saved-point (tessera-entry-save-point)))
@@ -979,7 +984,8 @@ FORCE also redraws unchanged messages after presentation changes."
                 (setq tessera-mu4e-headers--leading-width width)))
             (goto-char (point-min))
             (while (< (point) (point-max))
-              (tessera-mu4e-headers--sync-line native force)
+              (tessera-mu4e-headers--sync-line
+               native force thread-paths)
               (forward-line 1))
             (when tessera-mu4e-headers--active
               (if mu4e-search-threads

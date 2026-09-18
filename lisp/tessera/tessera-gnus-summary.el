@@ -1156,13 +1156,15 @@ FORCE also redraws entries with unchanged marks."
         (setq force t)))
     (let ((saved-point (tessera-entry-save-point))
           (face-index (tessera-gnus-summary--face-index))
+          (thread-paths (make-hash-table :test #'eq))
           (tessera-gnus-summary--batching t)
           (tessera-gnus-summary--updating t))
       (unwind-protect
           (progn
             (goto-char (point-min))
             (while (< (point) (point-max))
-              (tessera-gnus-summary--sync-line force face-index)
+              (tessera-gnus-summary--sync-line
+               force face-index thread-paths)
               (forward-line 1)))
         (tessera-gnus-summary--reindex)
         (tessera-entry-restore-point saved-point)))))
@@ -1185,10 +1187,12 @@ FORCE also redraws entries with unchanged marks."
           (forward-line 1))))
     (setq gnus-newsgroup-data-reverse nil)))
 
-(defun tessera-gnus-summary--sync-line (&optional force face-index)
+(defun tessera-gnus-summary--sync-line
+    (&optional force face-index thread-paths)
   "Synchronize the current logical article line.
 FORCE also redraws entries whose native marks have not changed.
-FACE-INDEX supplies native face data during a batch update."
+FACE-INDEX supplies native face data during a batch update.
+THREAD-PATHS caches shared ancestor comparisons for that update."
   (let* ((start (line-beginning-position))
          (end (line-end-position))
          (entry
@@ -1207,10 +1211,11 @@ FACE-INDEX supplies native face data during a batch update."
                   (not (equal marks (plist-get metadata :marks)))
                   (not (equal (plist-get metadata :native-face)
                               native-face))
-                  (not (equal
+                  (not (tessera-thread-context-key-equal-p
                         (tessera-thread-context-key
                          (plist-get metadata :thread))
-                        (tessera-thread-context-key thread))))
+                        (tessera-thread-context-key thread)
+                        thread-paths)))
           (tessera-entry-clear-current)
           (tessera-entry-clear-layout start (1+ end))
           (let* ((updated

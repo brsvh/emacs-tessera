@@ -178,7 +178,52 @@
                :path (cons t (make-list 26 nil)))))
     (let ((key (tessera-thread-context-key node)))
       (setf (tessera-thread-context-path node) (make-list 27 nil))
-      (should-not (equal key (tessera-thread-context-key node))))))
+      (dolist (cache (list nil (make-hash-table :test #'eq)))
+        (should-not (tessera-thread-context-key-equal-p
+                     key (tessera-thread-context-key node) cache))))))
+
+(ert-deftest tessera-thread-key-comparison-keeps-row-state ()
+  (let* ((cache (make-hash-table :test #'eq))
+         (keys
+          (list nil
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :path '(t nil)))
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :path '(nil nil)))
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :path '(t nil nil)))
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :first t :total 3))
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :first t :total 4))
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :last t)))))
+    (dolist (left keys)
+      (dolist (right (append keys (reverse keys)))
+        (should (eq (equal left right)
+                    (tessera-thread-context-key-equal-p
+                     left right cache)))))))
+
+(ert-deftest tessera-thread-key-comparison-handles-deep-changes ()
+  (let* ((size 2000)
+         (entries (cl-loop for id from 1 to size
+                           collect
+                           (list id (and (> id 1) (1- id)) nil t)))
+         (old (tessera-thread-build-contexts entries)))
+    (dolist (changed '(nil t))
+      (let* ((updated (if changed
+                          (append entries (list '(extra 1 nil t)))
+                        entries))
+             (new (tessera-thread-build-contexts updated))
+             (cache (make-hash-table :test #'eq)))
+        ;; Visit leaves first too, so comparison cannot rely on order.
+        (dolist (id (append (number-sequence size 1 -1)
+                            (number-sequence 1 size)))
+          (should (eq (not changed)
+                      (tessera-thread-context-key-equal-p
+                       (tessera-thread-context-key (gethash id old))
+                       (tessera-thread-context-key (gethash id new))
+                       cache))))))))
 
 (ert-deftest tessera-thread-tree-survives-narrow-width-allocation ()
   (tessera-gnus-summary--register)

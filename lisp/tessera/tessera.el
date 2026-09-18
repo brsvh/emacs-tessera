@@ -285,6 +285,34 @@ displayed tree, including those outside the current window."
             (and first (tessera-thread-context-unread context))
             (tessera--thread-path-tail context)))))
 
+(defun tessera-thread-context-key-equal-p (left right &optional cache)
+  "Return non-nil when thread keys LEFT and RIGHT describe equal rows.
+CACHE, when non-nil, is an `eq' hash table shared by one refresh.
+Reuse ancestor comparisons for shared paths.  Discard CACHE before
+changing paths or starting another refresh."
+  (if (null cache)
+      (equal left right)
+    (and (equal (butlast left) (butlast right))
+         (let ((old (car (last left)))
+               (new (car (last right)))
+               (same t)
+               pending)
+           (while (and same (not (eq old new)))
+             (let ((known (gethash old cache)))
+               (cond
+                ((and known (eq new (car known)))
+                 (setq same (cdr known)
+                       new old))
+                ((and (consp old) (consp new)
+                      (eq (car old) (car new)))
+                 (push (cons old new) pending)
+                 (setq old (cdr old)
+                       new (cdr new)))
+                (t (setq same nil)))))
+           (dolist (pair pending)
+             (puthash (car pair) (cons (cdr pair) same) cache))
+           same))))
+
 (cl-defstruct tessera-thread-layout
   "Compose ordinary entry layouts for thread HEAD and CHILD members."
   head child)
