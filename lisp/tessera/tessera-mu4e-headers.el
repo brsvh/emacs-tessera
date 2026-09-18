@@ -661,7 +661,8 @@ visibility settings.  Pending operations also show their target."
     (pcase role
       ('thread-tree
        (let* ((window (tessera-entry-context-window context))
-              (width (and window (window-body-width window)))
+              ;; Bound hidden buffers by the selected window's width.
+              (width (window-body-width window))
               (text (tessera-thread-prefix context width)))
          (when text
            (propertize text 'tessera--overflow-help

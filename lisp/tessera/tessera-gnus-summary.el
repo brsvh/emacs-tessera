@@ -683,7 +683,8 @@ Spam and expirable faces take precedence over native attributes."
 (defun tessera-gnus-summary--thread-tree (context)
   "Return CONTEXT's configured thread branches."
   (let* ((window (tessera-entry-context-window context))
-         (width (and window (window-body-width window)))
+         ;; Bound hidden buffers by the selected window's width.
+         (width (window-body-width window))
          (text (tessera-thread-prefix context width)))
     (when text
       (propertize text 'tessera--overflow-help

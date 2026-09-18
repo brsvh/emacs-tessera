@@ -9,6 +9,7 @@
 (require 'ert)
 (require 'tessera-gnus-summary)
 (require 'tessera-gnus-test-support)
+(require 'tessera-mu4e-headers)
 
 (ert-deftest tessera-gnus-narrowing-keeps-thread-contexts ()
   (let ((gnus-show-threads t))
@@ -122,6 +123,22 @@
                    149))))
     (should-not
      (tessera-thread-prefix (make-tessera-entry-context)))))
+
+(ert-deftest tessera-thread-hidden-adapters-bound-prefixes ()
+  (with-temp-buffer
+    (let* ((tessera-glyph-style 'ascii)
+           (width (window-body-width))
+           (node (make-tessera-thread-context
+                  :path (make-list (* width 10) t)))
+           (context (make-tessera-entry-context :thread node)))
+      (should-not (get-buffer-window (current-buffer)))
+      (dolist (text (list (tessera-gnus-summary--thread-tree context)
+                          (tessera-mu4e-headers--field
+                           'thread-tree context)))
+        (should (< (length text) (+ width 12))))
+      (should (= (length (tessera--thread-path-tail node))
+                 (* width 10)))
+      (should (> (length (tessera-thread-prefix context)) width)))))
 
 (ert-deftest tessera-thread-branches-align-with-parent-text ()
   (dolist (tessera-glyph-style '(ascii unicode nerd-icons))
