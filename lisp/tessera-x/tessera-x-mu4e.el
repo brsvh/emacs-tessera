@@ -237,39 +237,53 @@ Inspect the full result buffer, preserving its narrowing and point."
 (defun tessera-x-mu4e--query (context query &optional anchor)
   "Query the local index for CONTEXT using QUERY.
 With ANCHOR, include related messages and keep descendants."
-  (let ((output (generate-new-buffer " *Tessera mu output*"))
-        (errors (generate-new-buffer " *Tessera mu errors*")))
-    (condition-case err
-        (let* ((command
-                (append
-                 (list mu4e-mu-binary "find" "--format=sexp"
-                       "--skip-dups" "--sortfield=date")
-                 (when mu4e-mu-home
-                   (list (concat "--muhome="
-                                 (expand-file-name mu4e-mu-home))))
-                 (when anchor (list "--include-related"))
-                 (list query)))
-               (process
-                (make-process :name "tessera-mu-context"
-                              :command command
-                              :buffer output
-                              :stderr errors
-                              :noquery t
-                              :coding 'utf-8-unix
-                              :connection-type 'pipe
-                              :sentinel #'ignore)))
-          (process-put process 'context context)
-          (process-put process 'anchor anchor)
-          (process-put process 'errors errors)
-          (push (apply-partially #'tessera-x-mu4e--cancel-query
-                                 process output errors)
-                (tessera-x-context-cleanup context))
-          (set-process-sentinel process #'tessera-x-mu4e--query-done)
-          (tessera-x-mu4e--query-done process ""))
-      (error
-       (kill-buffer output)
-       (kill-buffer errors)
-       (tessera-x-context-fail context (error-message-string err)))))
+  (condition-case err
+      (let (output errors process owned)
+        (unwind-protect
+            (let ((command
+                   (append
+                    (list mu4e-mu-binary "find" "--format=sexp"
+                          "--skip-dups" "--sortfield=date")
+                    (when mu4e-mu-home
+                      (list (concat
+                             "--muhome="
+                             (expand-file-name mu4e-mu-home))))
+                    (when anchor (list "--include-related"))
+                    (list query))))
+              ;; Record resources before allowing a pending quit.
+              (let ((inhibit-quit t))
+                (setq output
+                      (generate-new-buffer " *Tessera mu output*")
+                      errors
+                      (generate-new-buffer " *Tessera mu errors*")
+                      process
+                      (make-process :name "tessera-mu-context"
+                                    :command command
+                                    :buffer output
+                                    :stderr errors
+                                    :noquery t
+                                    :coding 'utf-8-unix
+                                    :connection-type 'pipe
+                                    :sentinel #'ignore))
+                (push (apply-partially #'tessera-x-mu4e--cancel-query
+                                       process output errors)
+                      (tessera-x-context-cleanup context))
+                (setq owned t))
+              (process-put process 'context context)
+              (process-put process 'anchor anchor)
+              (process-put process 'errors errors)
+              (set-process-sentinel
+               process #'tessera-x-mu4e--query-done)
+              (tessera-x-mu4e--query-done process ""))
+          (unless owned
+            (tessera-x-mu4e--cancel-query process output errors))))
+    (quit
+     (when (tessera-x-context-pending-p context)
+       (with-current-buffer (tessera-x-context-source context)
+         (tessera-x-cancel-context)))
+     (signal (car err) (cdr err)))
+    (error
+     (tessera-x-context-fail context (error-message-string err))))
   context)
 
 ;;;###autoload

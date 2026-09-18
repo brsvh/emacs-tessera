@@ -1070,6 +1070,72 @@
         (setq-local list-buffers-directory "")
         (should (equal (tessera-x-mu4e--today-query) ""))))))
 
+(ert-deftest tessera-x-mu-query-startup-releases-resources ()
+  (skip-unless (executable-find "sleep"))
+  (tessera-x-tests--with-snapshots
+    (dolist (failure '(quit error))
+      (dolist (stage '(output errors process properties))
+        (ert-info ((format "%s during %s" failure stage))
+          (with-temp-buffer
+            (let ((previous
+                   (tessera-x-context-start 'mu4e "Previous" nil)))
+              (tessera-x-context-finish previous)
+              (let* ((context
+                      (tessera-x-context-start 'mu4e "Query" nil))
+                     (generate (symbol-function 'generate-new-buffer))
+                     (make (symbol-function 'make-process))
+                     (put (symbol-function 'process-put))
+                     (mu4e-mu-binary "mu")
+                     (mu4e-mu-home nil)
+                     buffers process)
+                (unwind-protect
+                    (cl-letf
+                        (((symbol-function 'generate-new-buffer)
+                          (lambda (name &rest args)
+                            (when (equal name
+                                         (format " *Tessera mu %s*"
+                                                 stage))
+                              (signal failure nil))
+                            (let ((buffer (apply generate name args)))
+                              (push buffer buffers)
+                              buffer)))
+                         ((symbol-function 'make-process)
+                          (lambda (&rest args)
+                            (when (eq stage 'process)
+                              (signal failure nil))
+                            (setq process
+                                  (apply make
+                                         :command '("sleep" "5")
+                                         args))))
+                         ((symbol-function 'process-put)
+                          (lambda (&rest args)
+                            (when (eq stage 'properties)
+                              (signal failure nil))
+                            (apply put args))))
+                      (if (eq failure 'quit)
+                          (should
+                           (eq (condition-case err
+                                   (tessera-x-mu4e--query context "x")
+                                 (quit (car err)))
+                               'quit))
+                        (tessera-x-mu4e--query context "x"))
+                      (should
+                       (eq (tessera-x-context-state context)
+                           (if (eq failure 'quit)
+                               'cancelled
+                             'failed)))
+                      (should-not tessera-x--pending-context)
+                      (should-not (tessera-x-context-cleanup context))
+                      (should (eq tessera-x-current-context previous))
+                      (should-not (process-live-p process))
+                      (should-not (cl-some #'buffer-live-p buffers)))
+                  (tessera-x-cancel-context)
+                  (when (process-live-p process)
+                    (delete-process process))
+                  (dolist (buffer buffers)
+                    (when (buffer-live-p buffer)
+                      (kill-buffer buffer))))))))))))
+
 (ert-deftest tessera-x-mu-query-completion-releases-resources ()
   (skip-unless (executable-find "sleep"))
   (tessera-x-tests--with-snapshots
