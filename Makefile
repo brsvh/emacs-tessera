@@ -42,6 +42,11 @@ COMPILE_DEPS := $(filter-out %-pkg.el %-autoloads.el,\
 ELC_FILES := $(LISP_FILES:.el=.elc)
 GENERATED_FILES := $(PKG) $(AUTOLOADS) $(ELC_FILES)
 
+# Rebuild when the stamp outlives the archive it names.
+ifeq ($(wildcard $(file <$(ARCHIVE_STAMP))),)
+.PHONY: $(ARCHIVE_STAMP)
+endif
+
 # bake-format off
 define GENERATE_PKG_ELISP
 (progn
