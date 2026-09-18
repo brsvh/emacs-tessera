@@ -30,6 +30,36 @@
     (should (eq plain (tessera--find-entry-layout
                        definition context)))))
 
+(ert-deftest tessera-thread-gnus-refresh-keeps-shared-paths ()
+  "Unchanged rows must not retain earlier generations of paths."
+  (tessera-gnus-summary--register)
+  (with-temp-buffer
+    (let ((gnus-show-threads t)
+          (tessera-glyph-style 'ascii))
+      (tessera-tests--gnus-rows (number-sequence 0 39))
+      (tessera-gnus-summary--sync-buffer t)
+      (dotimes (index 10)
+        (goto-char (point-min))
+        (forward-line (1+ index))
+        (subst-char-in-region
+         (point) (1+ (point)) (char-after) gnus-unread-mark)
+        (tessera-gnus-summary--sync-buffer))
+      (let ((cells (make-hash-table :test #'eq)))
+        (goto-char (point-min))
+        (while (< (point) (point-max))
+          (let* ((entry (get-text-property
+                         (point) 'tessera-gnus-summary-entry))
+                 (node (plist-get (cdr entry) :thread))
+                 (path (tessera-thread-context-reverse-path node)))
+            (should (eq node
+                        (tessera-gnus-summary--thread-context
+                         (car entry))))
+            (while (and path (not (gethash path cells)))
+              (puthash path t cells)
+              (setq path (cdr path))))
+          (forward-line 1))
+        (should (= 39 (hash-table-count cells)))))))
+
 (ert-deftest tessera-thread-rejects-mixed-leading-regions ()
   (should-error
    (tessera--validate-layout

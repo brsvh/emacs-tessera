@@ -1190,6 +1190,8 @@ FACE-INDEX supplies native face data during a batch update."
       (let* ((marks (buffer-substring-no-properties
                      start (+ start 4)))
              (metadata (cdr entry))
+             (thread (tessera-gnus-summary--thread-context
+                      (car entry)))
              (native-face (tessera-gnus-summary--native-face
                            (car entry) marks face-index))
              (inhibit-read-only t)
@@ -1201,9 +1203,7 @@ FACE-INDEX supplies native face data during a batch update."
                   (not (equal
                         (tessera-thread-context-key
                          (plist-get metadata :thread))
-                        (tessera-thread-context-key
-                         (tessera-gnus-summary--thread-context
-                          (car entry))))))
+                        (tessera-thread-context-key thread))))
           (tessera-entry-clear-current)
           (tessera-entry-clear-layout start (1+ end))
           (let* ((updated (plist-put (copy-sequence metadata)
@@ -1231,6 +1231,11 @@ FACE-INDEX supplies native face data during a batch update."
             (add-text-properties
              start (1+ end)
              (list 'gnus-number number 'gnus-intangible intangible))))
+        ;; Keep path tails shared even when the row needs no redraw.
+        (setf (plist-get
+               (cdr (get-text-property
+                     start 'tessera-gnus-summary-entry)) :thread)
+              thread)
         (tessera-gnus-summary--restore-faces start end)
         (if (invisible-p start)
             (tessera-entry-clear-layout start (1+ end))
