@@ -451,6 +451,8 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
               #'tessera-elfeed-search--apply-layout t t)
     (add-hook 'post-command-hook
               #'tessera-entry-highlight-current nil t)
+    (add-hook 'change-major-mode-hook
+              #'tessera-elfeed-search--disable nil t)
     (setq tessera-elfeed-search--active t)
     (tessera-elfeed-search--refresh)))
 
@@ -463,6 +465,8 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
                  #'tessera-elfeed-search--apply-layout t)
     (remove-hook 'post-command-hook
                  #'tessera-entry-highlight-current t)
+    (remove-hook 'change-major-mode-hook
+                 #'tessera-elfeed-search--disable t)
     (tessera-entry-clear-current)
     (tessera-entry-clear-layout)
     (tessera-elfeed-search--restore-separators)

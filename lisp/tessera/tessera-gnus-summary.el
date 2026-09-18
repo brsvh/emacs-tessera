@@ -1326,6 +1326,8 @@ FACE-INDEX supplies native face data during a batch update."
               #'tessera-gnus-summary--post-command t t)
     (add-hook 'window-size-change-functions
               #'tessera-gnus-summary--resize nil t)
+    (add-hook 'change-major-mode-hook
+              #'tessera-gnus-summary--disable nil t)
     (tessera-gnus-summary--refresh)))
 
 (defun tessera-gnus-summary--disable ()
@@ -1342,6 +1344,8 @@ FACE-INDEX supplies native face data during a batch update."
                  #'tessera-gnus-summary--post-command t)
     (remove-hook 'window-size-change-functions
                  #'tessera-gnus-summary--resize t)
+    (remove-hook 'change-major-mode-hook
+                 #'tessera-gnus-summary--disable t)
     (tessera-entry-clear-current)
     (tessera-entry-clear-layout)
     (tessera--restore-settings

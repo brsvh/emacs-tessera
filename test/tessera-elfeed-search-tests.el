@@ -272,6 +272,28 @@
           (tessera-elfeed-search--disable)
           (should (eq (and hl-line-mode t) enabled)))))))
 
+(ert-deftest tessera-elfeed-search-major-mode-change-cleans-layout ()
+  (let ((elfeed-search-mode-hook nil)
+        (elfeed-db '(:version 4))
+        (elfeed-db-feeds (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
+      (with-temp-buffer
+        (elfeed-search-mode)
+        (tessera-elfeed-search--enable)
+        (let ((inhibit-read-only t))
+          (elfeed-search--print-entry
+           (tessera-elfeed-search-tests--entry))
+          (insert "\n"))
+        (goto-char (point-min))
+        (tessera-elfeed-search--apply-layout)
+        (let ((overlays (overlays-in (point-min) (point-max)))
+              (markers (seq-take tessera--current-entry 2)))
+          (should overlays)
+          (should markers)
+          (fundamental-mode)
+          (should-not (seq-some #'overlay-buffer overlays))
+          (should-not (seq-some #'marker-buffer markers)))))))
+
 (ert-deftest tessera-elfeed-search-restores-global-settings ()
   (let ((elfeed-search-print-entry-function #'ignore)
         (tessera-entry-layout 'single-line))
