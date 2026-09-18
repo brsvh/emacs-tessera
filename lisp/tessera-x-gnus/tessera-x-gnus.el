@@ -146,9 +146,11 @@ current group's Agent overview, which can itself be incomplete."
             (gnus-sorted-ndifference
              gnus-newsgroup-undownloaded numbers))
       (save-excursion
-        (dolist (number numbers)
-          (when (gnus-summary-goto-subject number nil t)
-            (gnus-summary-update-download-mark number)))))))
+        (save-restriction
+          (widen)
+          (dolist (number numbers)
+            (when (gnus-summary-goto-subject number nil t)
+              (gnus-summary-update-download-mark number))))))))
 
 (defun tessera-x-gnus--download (items)
   "Download missing ITEMS into their native Agent groups.

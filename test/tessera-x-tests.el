@@ -309,6 +309,47 @@
             (should (= (point) before))
             (should (= (mark) mark-before))))))))
 
+(ert-deftest tessera-x-gnus-download-marks-respect-narrowing ()
+  (with-temp-buffer
+    (gnus-summary-mode)
+    (let ((inhibit-read-only t))
+      (tessera-tests--gnus-rows '(0 0 0)))
+    (setq-local gnus-newsgroup-name "group")
+    (setq-local gnus-newsgroup-undownloaded '(1 2 3))
+    (setq-local gnus-newsgroup-agentized t)
+    (setq-local gnus-summary-mark-positions '((download . 2)))
+    (let ((gnus-summary-default-score nil))
+      (dolist (number '(1 2 3))
+        (gnus-summary-goto-subject number nil t)
+        (gnus-summary-update-download-mark number))
+      (goto-char (point-min))
+      (forward-line 1)
+      (narrow-to-region (point) (line-beginning-position 2))
+      (let ((start (point-min))
+            (end (point-max))
+            (position (point))
+            (visible (buffer-string)))
+        (cl-letf (((symbol-function 'tessera-x-gnus--available-p)
+                   (lambda (_item) t)))
+          (tessera-x-gnus--refresh-downloads
+           (mapcar (lambda (number)
+                     (make-tessera-x-item :id (cons "group" number)))
+                   '(1 3))))
+        (should (= (point-min) start))
+        (should (= (point-max) end))
+        (should (= (point) position))
+        (should (equal (buffer-string) visible))
+        (should (equal gnus-newsgroup-undownloaded '(2)))
+        (save-restriction
+          (widen)
+          (dolist (number '(1 2 3))
+            (gnus-summary-goto-subject number nil t)
+            (should
+             (eq (char-after (+ (line-beginning-position) 2))
+                 (if (= number 2)
+                     gnus-undownloaded-mark
+                   gnus-downloaded-mark)))))))))
+
 (ert-deftest tessera-x-gnus-agent-policy-keeps-local-today-offline ()
   (tessera-x-tests--with-snapshots
     (let* ((directory (make-temp-file "tessera-agent-" t))
