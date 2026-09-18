@@ -1839,23 +1839,26 @@ positions retain their character offset.  Release the saved marker."
   (when tessera--current-entry
     (pcase-let ((`(,start ,end ,_layout ,decorations)
                  tessera--current-entry))
-      (with-silent-modifications
-        (let ((inhibit-read-only t)
-              (position (marker-position start))
-              (limit (marker-position end)))
-          (while (< position limit)
-            (let ((next (next-single-property-change
-                         position 'tessera--current-face nil limit))
-                  (saved (get-text-property
-                          position 'tessera--current-face)))
-              (when saved
-                (if (car saved)
-                    (put-text-property
-                     position next 'face (car saved))
-                  (remove-text-properties position next '(face nil)))
-                (remove-text-properties
-                 position next '(tessera--current-face nil)))
-              (setq position next)))))
+      (save-restriction
+        (widen)
+        (with-silent-modifications
+          (let ((inhibit-read-only t)
+                (position (marker-position start))
+                (limit (marker-position end)))
+            (while (< position limit)
+              (let ((next (next-single-property-change
+                           position 'tessera--current-face nil limit))
+                    (saved (get-text-property
+                            position 'tessera--current-face)))
+                (when saved
+                  (if (car saved)
+                      (put-text-property
+                       position next 'face (car saved))
+                    (remove-text-properties
+                     position next '(face nil)))
+                  (remove-text-properties
+                   position next '(tessera--current-face nil)))
+                (setq position next))))))
       (dolist (decoration decorations)
         (pcase-let ((`(,overlay ,property ,original ,styled)
                      decoration))

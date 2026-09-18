@@ -932,6 +932,39 @@
         (should (equal-including-properties original (buffer-string)))
         (should-not (buffer-modified-p))))))
 
+(ert-deftest tessera-entry-current-restores-outside-restriction ()
+  "Moving the highlight after narrowing restores excluded entries."
+  (let ((tessera--entry-backends (make-hash-table :test #'eq))
+        (tessera-entry-layout 'two-line))
+    (with-temp-buffer
+      (tessera-entry-tests--insert-current-fixture)
+      (let ((original (buffer-string))
+            (decorations
+             (mapcar
+              (lambda (overlay)
+                (list overlay (overlay-get overlay 'before-string)
+                      (overlay-get overlay 'after-string)))
+              (overlays-in (point-min) (point-max)))))
+        (set-buffer-modified-p nil)
+        (goto-char (point-min))
+        (tessera-entry-highlight-current)
+        (forward-line 1)
+        (narrow-to-region (point) (point-max))
+        (let ((start (point-min)) (end (point-max)))
+          (tessera-entry-highlight-current)
+          (should (= (point) start))
+          (should (= (point-min) start))
+          (should (= (point-max) end))
+          (should (memq 'tessera-entry-current-face
+                        (get-text-property (point) 'face))))
+        (tessera-entry-clear-current)
+        (widen)
+        (should (equal-including-properties original (buffer-string)))
+        (pcase-dolist (`(,overlay ,before ,after) decorations)
+          (should (eq before (overlay-get overlay 'before-string)))
+          (should (eq after (overlay-get overlay 'after-string))))
+        (should-not (buffer-modified-p))))))
+
 (ert-deftest tessera-entry-thread-clipping-keeps-columns-and-anchor ()
   (let* ((tree (propertize "│     │     └─"
                            'tessera--overflow-help "Full message"))
