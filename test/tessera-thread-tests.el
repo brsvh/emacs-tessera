@@ -10,6 +10,31 @@
 (require 'tessera-gnus-summary)
 (require 'tessera-gnus-test-support)
 
+(ert-deftest tessera-gnus-narrowing-keeps-thread-contexts ()
+  (let ((gnus-show-threads t))
+    (with-temp-buffer
+      (tessera-tests--gnus-rows '(0 1 2))
+      (tessera-gnus-summary--register)
+      (tessera-gnus-summary--sync-buffer t)
+      (setq tessera-gnus-summary--active t)
+      (forward-line 1)
+      (narrow-to-region (point) (point-max))
+      (setq tessera-gnus-summary--dirty t)
+      (tessera-gnus-summary--post-command)
+      (should (buffer-narrowed-p))
+      (should (= 2 (get-text-property (point) 'gnus-number)))
+      (widen)
+      (tessera-gnus-summary--post-command)
+      (should (= 3 (hash-table-count tessera-gnus-summary--threads)))
+      (should (= 1 (tessera-thread-context-parent
+                    (gethash 2 tessera-gnus-summary--threads))))
+      (should (= 3 (tessera-thread-context-total
+                    (gethash 1 tessera-gnus-summary--threads))))
+      (dolist (data gnus-newsgroup-data)
+        (should (= (gnus-data-number data)
+                   (get-text-property (1- (gnus-data-pos data))
+                                      'gnus-number)))))))
+
 (ert-deftest tessera-thread-selects-layout-from-context ()
   (let* ((plain (make-tessera-entry-layout))
          (head (make-tessera-entry-layout))

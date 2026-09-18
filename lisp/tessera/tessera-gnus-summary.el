@@ -1145,22 +1145,24 @@ centering and the user's chosen target row to Gnus."
 (defun tessera-gnus-summary--sync-buffer (&optional force)
   "Synchronize all entries, preserving point within its article.
 FORCE also redraws entries with unchanged marks."
-  (let ((width tessera-gnus-summary--thread-width))
-    (tessera-gnus-summary--build-threads)
-    (when (/= width tessera-gnus-summary--thread-width)
-      (setq force t)))
-  (let ((saved-point (tessera-entry-save-point))
-        (face-index (tessera-gnus-summary--face-index))
-        (tessera-gnus-summary--batching t)
-        (tessera-gnus-summary--updating t))
-    (unwind-protect
-        (progn
-          (goto-char (point-min))
-          (while (< (point) (point-max))
-            (tessera-gnus-summary--sync-line force face-index)
-            (forward-line 1)))
-      (tessera-gnus-summary--reindex)
-      (tessera-entry-restore-point saved-point))))
+  (save-restriction
+    (widen)
+    (let ((width tessera-gnus-summary--thread-width))
+      (tessera-gnus-summary--build-threads)
+      (when (/= width tessera-gnus-summary--thread-width)
+        (setq force t)))
+    (let ((saved-point (tessera-entry-save-point))
+          (face-index (tessera-gnus-summary--face-index))
+          (tessera-gnus-summary--batching t)
+          (tessera-gnus-summary--updating t))
+      (unwind-protect
+          (progn
+            (goto-char (point-min))
+            (while (< (point) (point-max))
+              (tessera-gnus-summary--sync-line force face-index)
+              (forward-line 1)))
+        (tessera-gnus-summary--reindex)
+        (tessera-entry-restore-point saved-point)))))
 
 (defun tessera-gnus-summary--reindex ()
   "Restore native integer positions after a batch of row changes."
