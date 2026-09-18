@@ -487,10 +487,7 @@ Nil means explicitly refresh all glyphs and their hover faces."
     (when (gethash 'elfeed-search tessera--entry-backends)
       (tessera-elfeed-search--register))
     (save-window-excursion
-      (dolist (buffer (buffer-list))
-        (with-current-buffer buffer
-          (when tessera-elfeed-search--active
-            (tessera-elfeed-search--refresh)))))))
+      (tessera-elfeed-search--refresh-active-buffers))))
 
 (provide 'tessera-elfeed-search)
 ;;; tessera-elfeed-search.el ends here
