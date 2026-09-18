@@ -194,9 +194,10 @@
       (save-excursion
         (goto-char (point-min))
         (while (not (eobp))
-          (let ((start (point)))
-            (back-to-indentation)
-            (funcall normalizer start (point)))
+          (unless (nth 3 (syntax-ppss))
+            (let ((start (point)))
+              (back-to-indentation)
+              (funcall normalizer start (point))))
           (forward-line 1))))))
 
 (defun elfmt--indent-buffer ()
