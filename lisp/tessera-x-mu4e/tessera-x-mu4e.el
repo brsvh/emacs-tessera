@@ -172,10 +172,13 @@ Inspect the full result buffer, preserving its narrowing and point."
           (anchor (process-get process 'anchor)))
       (when (and context (tessera-x-context-pending-p context))
         (condition-case err
-            (let ((items nil))
+            (let ((items nil)
+                  (status (process-status process))
+                  (code (process-exit-status process)))
               ;; mu exits 2 when the query has no matches.
-              (unless (memq (process-exit-status process) '(0 2))
-                (error "mu find failed: %s"
+              (unless (and (eq status 'exit) (memq code '(0 2)))
+                (error "mu find failed (%s %d): %s"
+                       status code
                        (with-current-buffer
                            (process-get process 'errors)
                          (buffer-string))))

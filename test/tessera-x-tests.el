@@ -572,6 +572,75 @@
         (setq-local list-buffers-directory "")
         (should (equal (tessera-x-mu4e--today-query) ""))))))
 
+(ert-deftest tessera-x-mu-query-distinguishes-signals-from-exits ()
+  (skip-unless (executable-find "sleep"))
+  (tessera-x-tests--with-snapshots
+    (pcase-dolist (`(,command ,status ,code ,state)
+                   '(("exit 0" exit 0 ready)
+                     ("exit 2" exit 2 ready)
+                     (nil signal 2 failed)))
+      (with-temp-buffer
+        (let ((previous
+               (tessera-x-context-start 'mu4e "Previous" nil)))
+          (tessera-x-context-finish previous)
+          (let* ((calls 0)
+                 (tessera-x-context-ready-hook
+                  (list (lambda (_context) (cl-incf calls))))
+                 (context (tessera-x-context-start 'mu4e "Query" nil))
+                 (output (generate-new-buffer " *mu query output*"))
+                 (errors (generate-new-buffer " *mu query errors*"))
+                 (process
+                  (make-process
+                   :name "tessera-query-exit-test"
+                   :command (if command
+                                (list shell-file-name
+                                      shell-command-switch command)
+                              '("sleep" "5"))
+                   :buffer output
+                   :stderr errors
+                   :noquery t
+                   :connection-type 'pipe
+                   :sentinel #'ignore)))
+            (unwind-protect
+                (progn
+                  (process-put process 'context context)
+                  (process-put process 'errors errors)
+                  (push (apply-partially
+                         #'tessera-x-mu4e--cancel-query
+                         process output errors)
+                        (tessera-x-context-cleanup context))
+                  (when (eq status 'signal)
+                    (interrupt-process process))
+                  (let ((deadline (+ (float-time) 5)))
+                    (while (and (process-live-p process)
+                                (< (float-time) deadline))
+                      (accept-process-output process 0.05)))
+                  (should (eq (process-status process) status))
+                  (should (= (process-exit-status process) code))
+                  (tessera-x-mu4e--query-done process "finished\n")
+                  (should
+                   (eq (tessera-x-context-state context) state))
+                  (if (eq state 'ready)
+                      (progn
+                        (should
+                         (eq tessera-x-current-context context))
+                        (should (= calls 1)))
+                    (should (eq tessera-x-current-context previous))
+                    (should (= calls 0))
+                    (should-not (tessera-x-context-buffer context))
+                    (should (string-match-p
+                             "signal 2"
+                             (tessera-x-context-error context))))
+                  (should-not tessera-x--pending-context)
+                  (should-not (tessera-x-context-cleanup context))
+                  (should-not (buffer-live-p output))
+                  (should-not (buffer-live-p errors))
+                  (tessera-x-mu4e--query-done process "late event\n")
+                  (should (= calls (if (eq state 'ready) 1 0))))
+              (tessera-x-cancel-context)
+              (tessera-x-mu4e--cancel-query
+               process output errors))))))))
+
 (ert-deftest tessera-x-mu-query-uses-muhome-and-path-identities ()
   (tessera-x-tests--with-snapshots
     (let* ((directory (make-temp-file "tessera-mu-query-" t))
