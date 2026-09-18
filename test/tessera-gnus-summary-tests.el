@@ -56,9 +56,11 @@
                '(("Alex Jr. <alex@example.test>" nil "Alex Jr.")
                  ("<alex@example.test>" nil "alex@example.test")
                  ("Self <self@example.test>"
-                  "=?UTF-8?B?5p2O5piO?= <li@example.test>" "李明")
+                  "=?UTF-8?B?5p2O5piO?= <li@example.test>" "Self")
                  ("Self <self@example.test>"
-                  "<li@example.test>" "li@example.test")
+                  "<li@example.test>" "Self")
+                 ("<self@example.test>"
+                  "<li@example.test>" "self@example.test")
                  ("Self <self@example.test>" nil "Self")))
         (let* ((header (tessera-gnus-tests--header))
                (from (car spec)))
@@ -81,7 +83,9 @@
                            (concat "From: " from
                                    "\nTo: " (cadr spec)) rendered)))
                 (should help))))))
-      (should (equal gnus-summary-to-prefix "Recipient: ")))))
+      (should (equal gnus-summary-to-prefix "Recipient: "))
+      (should (equal gnus-ignored-from-addresses
+                     "self@example.test")))))
 
 (ert-deftest tessera-gnus-prefix-preserves-native-marks ()
   (let* ((tessera-glyph-style 'ascii)

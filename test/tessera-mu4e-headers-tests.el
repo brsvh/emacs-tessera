@@ -121,9 +121,13 @@
                  ((:name "Self" :email "self@example.test")
                   ((:name "李明" :email "li@example.test")
                    (:name "José" :email "jose@example.test"))
-                  "李明, José")
+                  "Self")
                  ((:name "Self" :email "self@example.test")
-                  ((:email "li@example.test")) "li@example.test")))
+                  ((:email "li@example.test")) "Self")
+                 ((:name "Self" :email "self@example.test")
+                  nil "Self")
+                 ((:email "self@example.test")
+                  ((:email "li@example.test")) "self@example.test")))
         (let* ((message (list :from (list (car spec))
                               :to (cadr spec)
                               :flags '(unread)))
@@ -136,6 +140,10 @@
           (should (string-match-p
                    (regexp-quote (plist-get (car spec) :email))
                    (get-text-property 0 'help-echo text)))
+          (dolist (recipient (cadr spec))
+            (should (string-match-p
+                     (regexp-quote (plist-get recipient :email))
+                     (get-text-property 0 'help-echo text))))
           (should (eq (get-text-property 0 'mouse-face text)
                       'tessera-entry-hover-face))))
       (should (equal mu4e-headers-from-or-to-prefix

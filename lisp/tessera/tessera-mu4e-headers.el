@@ -350,7 +350,6 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (defvar mu4e~headers-docid-post)
 (defvar mu4e~end-of-results)
 
-(declare-function mu4e-personal-address-p "mu4e-contacts")
 (declare-function mu4e~headers-human-date "mu4e-headers")
 (declare-function mu4e-mark-at-point "mu4e-mark")
 (declare-function mu4e~headers-apply-flags "mu4e-headers")
@@ -620,13 +619,8 @@ visibility settings.  Pending operations also show their target."
     (cdr (assq name tessera-mu4e-headers--states)))))
 
 (defun tessera-mu4e-headers--contact (message)
-  "Return contact names for MESSAGE, falling back to email addresses.
-Use recipients for personal outgoing mail, as native mu4e does."
-  (let* ((from (plist-get message :from))
-         (address (plist-get (car from) :email))
-         (contacts (if (and address (mu4e-personal-address-p address))
-                       (plist-get message :to)
-                     from)))
+  "Return sender names for MESSAGE, falling back to email addresses."
+  (let ((contacts (plist-get message :from)))
     (if contacts
         (mapconcat
          (lambda (contact)

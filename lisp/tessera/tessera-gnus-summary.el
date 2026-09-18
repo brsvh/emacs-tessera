@@ -1043,13 +1043,10 @@ Use NATIVE-FACE when supplied, including an explicitly nil face."
     result))
 
 (defun tessera-gnus-summary--author-name (header from)
-  "Return the contact name from HEADER and decoded FROM.
-Keep native recipient selection, omit prefixes, and use an email
-address when no name is available.  News posts retain their author."
-  (let* ((gnus-summary-to-prefix "")
-         (gnus-ignored-from-addresses
-          (and (assq 'To (mail-header-extra header))
-               gnus-ignored-from-addresses))
+  "Return the sender name from HEADER and decoded FROM.
+Use an email address when no name is available, including for mail
+sent by the user."
+  (let* ((gnus-ignored-from-addresses nil)
          (extract gnus-extract-address-components)
          (gnus-extract-address-components
           (lambda (address)

@@ -669,11 +669,11 @@ shown once; hover help records their sources and the full label list.
 Separators are neutral.  Missing extra headers do not cause Tessera to
 retrieve a message solely to discover labels.
 
-  Contact text uses names without recipient prefixes or address
-suffixes, falling back to addresses when names are absent.  Native
-recipient selection remains effective; a news article without a
-recipient shows its author.  Hover help retains full From and available
-To fields.
+  Author text always identifies the sender, including for mail you
+sent.  It uses names without address suffixes, falling back to addresses
+when names are absent.  This applies to every layout, regardless of
+@code{gnus-ignored-from-addresses}.  Hover help retains full From and
+available To fields.
 
 @node Gnus Marks
 @section Gnus Marks and Availability
@@ -897,9 +897,10 @@ the action has already completed.
 identifies whether it came from labels, tags, or both.  Separators
 retain a neutral face.
 
-  Contacts show names with address fallback and retain native recipient
-selection for outgoing mail.  Hover help retains full contact data.
-Dates use native mu4e human-date formatting.
+  Contact text always identifies the sender, including for mail you
+sent.  This applies to every layout.  Names fall back to email addresses
+when absent.  Hover help retains full From and To data.  Dates use native
+mu4e human-date formatting.
 
 @node mu4e State Precedence
 @section mu4e State Precedence
