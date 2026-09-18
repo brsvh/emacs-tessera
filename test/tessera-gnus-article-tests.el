@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'mm-archive)
 (require 'tessera-gnus-article)
 (require 'tessera-gnus-test-support)
 
@@ -74,6 +75,64 @@
             (should-not (plist-get data :signature))
             (should-not (plist-get data :encryption))))
       (when handles (mm-destroy-parts handles)))))
+
+(ert-deftest tessera-gnus-article-keeps-multipart-attachments ()
+  (let ((mm-verify-option 'never)
+        (mm-decrypt-option 'never)
+        (mm-archive-decoders nil)
+        (mm-content-id-alist nil))
+    (tessera-gnus-article--track-content t)
+    (unwind-protect
+        (dolist (type '("mixed" "alternative"))
+          (dolist (nested '(nil t))
+            (dolist (spec '(("attachment; filename=part.mime" present)
+                            ("attachment" present)
+                            ("inline; filename=part.mime" nil t)
+                            (nil present t)
+                            (nil nil)))
+              (let (handles)
+                (unwind-protect
+                    (with-temp-buffer
+                      (insert "MIME-Version: 1.0\n")
+                      (when nested
+                        (insert
+                         "Content-Type: multipart/mixed; boundary=o\n"
+                         "\n--o\nContent-Type: text/plain\n\nBody\n"
+                         "--o\n"))
+                      (insert "Content-Type: multipart/" type
+                              "; boundary=i")
+                      (when (nth 2 spec) (insert "; name=part.mime"))
+                      (insert "\n")
+                      (when (car spec)
+                        (insert "Content-Disposition: " (car spec)
+                                "\n"))
+                      (insert "\n--i\nContent-Type: text/plain\n\n"
+                              "Container body\n--i--\n")
+                      (when nested (insert "--o--\n"))
+                      (setq handles (mm-dissect-buffer t))
+                      (let* ((header (make-full-mail-header
+                                      1 "Multipart" "Author"))
+                             (context (make-tessera-entry-context
+                                       :object header)))
+                        (tessera-gnus-summary--observe-content
+                         header handles)
+                        (should
+                         (eq (tessera-gnus-summary--content-state
+                              :attachment context)
+                             (cadr spec)))))
+                  (when handles (mm-destroy-parts handles)))))))
+      (tessera-gnus-article--track-content nil))))
+
+(ert-deftest
+    tessera-gnus-article-tracks-disposition-only-when-enabled ()
+  (let ((function #'tessera-gnus-article--remember-disposition))
+    (should-not (advice-member-p function 'mm-dissect-multipart))
+    (unwind-protect
+        (progn
+          (tessera-gnus-article--track-content t)
+          (should (advice-member-p function 'mm-dissect-multipart)))
+      (tessera-gnus-article--track-content nil))
+    (should-not (advice-member-p function 'mm-dissect-multipart))))
 
 (ert-deftest tessera-gnus-article-update-preserves-summary-point ()
   (with-temp-buffer

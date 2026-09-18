@@ -61,6 +61,29 @@
   (seq-find (lambda (state) (or (eq state old) (eq state new)))
             '(error present processed unknown)))
 
+(defun tessera-gnus-article--attachment-p (handle)
+  "Return non-nil when MIME HANDLE declares an attachment."
+  (let ((disposition (car (mm-handle-disposition handle))))
+    (or (equal disposition "attachment")
+        (and (mm-handle-filename handle)
+             (not (equal disposition "inline"))))))
+
+(defun tessera-gnus-article--remember-disposition (type _from)
+  "Retain attachment declarations on multipart content TYPE.
+Run before `mm-dissect-multipart' discards the container headers."
+  (save-excursion
+    (save-restriction
+      (mail-narrow-to-head)
+      (let* ((value (mail-fetch-field "Content-Disposition"))
+             (disposition
+              (and value (mail-header-parse-content-disposition
+                          value)))
+             (handle (mm-make-handle nil type nil nil disposition)))
+        (when (tessera-gnus-article--attachment-p handle)
+          (put-text-property 0 (length (car type))
+                             'tessera-gnus-article--attachment t
+                             (car type)))))))
+
 (defun tessera-gnus-article--mime-content (handles)
   "Inspect existing MIME HANDLES without changing or decoding them.
 A processed security part has native result details, not necessarily
@@ -107,6 +130,11 @@ successful verification.  Never infer trust from a result string."
                        (get-text-property 0 'gnus-info (car part)))
                       (error
                        (get-text-property 0 'sec-error (car part))))
+                 (when (get-text-property
+                        0 'tessera-gnus-article--attachment
+                        (car part))
+                   (setq result (plist-put result :attachment
+                                           'present)))
                  (when key
                    (observe key (cond (error 'error)
                                       (info 'processed)
@@ -122,14 +150,10 @@ successful verification.  Never infer trust from a result string."
                      (setq opaque t)
                    (mapc #'walk (cdr part)))))
               ((bufferp (car-safe part))
-               (let ((type (mm-handle-media-type part))
-                     (disposition (mm-handle-disposition part)))
+               (let ((type (mm-handle-media-type part)))
                  (unless (member
                           type tessera-gnus-article--control-types)
-                   (when (or (equal (car disposition) "attachment")
-                             (and (mm-handle-filename part)
-                                  (not (equal (car disposition)
-                                              "inline"))))
+                   (when (tessera-gnus-article--attachment-p part)
                      (setq result (plist-put result :attachment
                                              'present))))))
               ((consp part) (mapc #'walk part)))))
@@ -146,10 +170,14 @@ successful verification.  Never infer trust from a result string."
   "Observe native MIME lifecycle events when ENABLE is non-nil."
   (if enable
       (progn
+        (advice-add 'mm-dissect-multipart :before
+                    #'tessera-gnus-article--remember-disposition)
         (add-hook 'gnus-article-prepare-hook
                   #'tessera-gnus-article--updated t)
         (add-hook 'gnus-part-display-hook
                   #'tessera-gnus-article--queue-update t))
+    (advice-remove 'mm-dissect-multipart
+                   #'tessera-gnus-article--remember-disposition)
     (remove-hook 'gnus-article-prepare-hook
                  #'tessera-gnus-article--updated)
     (remove-hook 'gnus-part-display-hook
