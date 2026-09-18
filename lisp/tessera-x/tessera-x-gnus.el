@@ -345,13 +345,15 @@ overview.  That local index may omit articles absent from the Agent."
                            'local-index))))
     (unless anchor (user-error "No current Gnus article"))
     (when expanded
-      (let ((seen (make-hash-table :test #'equal)))
+      (let ((seen (make-hash-table :test #'equal)) added)
         (dolist (item items)
           (puthash (tessera-x-item-id item) t seen))
         (dolist (item (tessera-x-gnus--overview
                        (list gnus-newsgroup-name)))
           (unless (gethash (tessera-x-item-id item) seen)
-            (push item items)))))
+            (puthash (tessera-x-item-id item) t seen)
+            (push item added)))
+        (setq items (nconc items (nreverse added)))))
     (tessera-x-gnus--build-context
      (tessera-x-subthread items anchor)
      (if expanded

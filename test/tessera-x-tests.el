@@ -474,6 +474,35 @@
                                       (tessera-x-item-body item)))))
         (delete-directory directory t)))))
 
+(ert-deftest tessera-x-gnus-expanded-subthreads-preserve-order ()
+  (let* ((gnus-newsgroup-name "group")
+         (items (cl-loop for id from 1 to 3
+                         collect
+                         (make-tessera-x-item
+                          :id (cons "group" id)
+                          :message-id (number-to-string id)
+                          :references (and (> id 1) '("1"))
+                          :subject (format "Subject %d" id)))))
+    (dolist (loaded (list (list (car items))
+                          (list (car items) (nth 2 items))))
+      (cl-letf (((symbol-function 'tessera-x-gnus--items)
+                 (lambda () (copy-sequence loaded)))
+                ((symbol-function 'gnus-summary-article-number)
+                 (lambda () 1))
+                ((symbol-function 'tessera-x-gnus--overview)
+                 (lambda (_groups)
+                   (append items (list (cadr items)))))
+                ((symbol-function 'tessera-x-gnus--build-context)
+                 (lambda (selected _scope _local-only)
+                   (tessera-x-group-threads selected))))
+        (let ((selected (tessera-x-gnus-prepare-subthread-context t)))
+          (should (equal (mapcar #'tessera-x-item-message-id selected)
+                         (if (cdr loaded) '("1" "3" "2")
+                           '("1" "2" "3"))))
+          (dolist (item selected)
+            (should (equal (tessera-x-item-group item)
+                           "Subject 1"))))))))
+
 (ert-deftest tessera-x-gnus-selection-uses-native-data-without-layout
     ()
   (with-temp-buffer
