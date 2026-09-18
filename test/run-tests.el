@@ -23,19 +23,17 @@
     "tessera-elfeed" "tessera-elfeed-search" "tessera-x-elfeed")
   "Production libraries expected across the Tessera packages.")
 
-(defvar tessera-tests--installed-libraries nil
-  "Alist of library names and installed bytecode files under test.")
+(defvar tessera-tests--expected-libraries nil
+  "Alist of library names and exact production files under test.")
 
 (defun tessera-tests--check-library-source (file)
   "Reject production FILE loaded outside the selected packages."
-  (when (and tessera-tests--installed-libraries
+  (when (and tessera-tests--expected-libraries
              (member (file-name-base file) tessera-tests--libraries))
     (let ((expected (cdr (assoc (file-name-base file)
-                                tessera-tests--installed-libraries))))
-      (unless (and (string-suffix-p ".elc" file)
-                   (file-equal-p file expected))
-        (error "Expected installed library %s, loaded %s"
-               expected file)))))
+                                tessera-tests--expected-libraries))))
+      (unless (file-equal-p file expected)
+        (error "Expected library %s, loaded %s" expected file)))))
 
 (let* ((directory (file-name-directory load-file-name))
        (package-path (or (getenv "TESSERA_TEST_PACKAGE_DIRS")
@@ -48,45 +46,48 @@
            #'file-directory-p
            (directory-files (expand-file-name "../lisp" directory)
                             t "\\`[^.]"))))
-       (tessera-tests--installed-libraries nil)
+       (tessera-tests--expected-libraries nil)
        (load-prefer-newer (not package-path))
        (load-no-native t)
        (native-comp-jit-compilation nil)
        (load-path
         (append library-directories (list directory) load-path)))
-  (when package-path
-    (unless library-directories
-      (error "TESSERA_TEST_PACKAGE_DIRS is empty"))
+  (unless library-directories
+    (error "No Tessera library directories selected"))
+  (let ((suffix (if package-path ".elc" ".el")))
     (dolist (library tessera-tests--libraries)
       (let ((files
              (seq-filter
               #'file-readable-p
               (mapcar
                (lambda (dir)
-                 (expand-file-name (concat library ".elc") dir))
+                 (expand-file-name (concat library suffix) dir))
                library-directories))))
         (unless (= (length files) 1)
-          (error "Expected one installed copy of %s, found %S"
-                 library files))
+          (error "Expected one %s copy, found %S" library files))
         (push (cons library (car files))
-              tessera-tests--installed-libraries)
-        (unless (file-readable-p
-                 (concat (file-name-sans-extension (car files))
-                         ".el"))
-          (error "Missing installed source: %s.el" library))))
-    (dolist (library tessera-tests--libraries)
-      (tessera-tests--check-library-source (locate-library library)))
+              tessera-tests--expected-libraries)
+        (when package-path
+          (unless (file-readable-p
+                   (concat (file-name-sans-extension (car files))
+                           ".el"))
+            (error "Missing installed source: %s.el" library)))))
+    (when package-path
+      (dolist (library tessera-tests--libraries)
+        (tessera-tests--check-library-source
+         (locate-library library))))
     (dolist (entry load-history)
       (when (stringp (car entry))
         (tessera-tests--check-library-source (car entry))))
     (dolist (library tessera-tests--libraries)
       (when (featurep (intern library))
-        (error "Start installed tests before loading `%s'" library))))
+        (error "Start tests before loading `%s'" library))))
   (let ((after-load-functions
          (cons #'tessera-tests--check-library-source
                after-load-functions)))
     (dolist (library tessera-tests--libraries)
-      (require (intern library)))
+      (require (intern library)
+               (cdr (assoc library tessera-tests--expected-libraries))))
     (message "Testing Tessera %s from %s"
              (if package-path "bytecode" "source")
              (string-join library-directories ", "))

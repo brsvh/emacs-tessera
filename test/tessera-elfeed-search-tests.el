@@ -320,7 +320,7 @@
 
 (ert-deftest tessera-elfeed-registers-only-when-enabled ()
   (let ((tessera--entry-backends (make-hash-table :test #'eq)))
-    (load-file (locate-library "tessera-elfeed-search"))
+    (load-file (symbol-file 'tessera-elfeed-search--register 'defun))
     (should-not (gethash 'elfeed-search tessera--entry-backends))
     (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
       (with-temp-buffer
