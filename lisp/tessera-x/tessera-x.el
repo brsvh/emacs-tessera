@@ -342,15 +342,16 @@ attachment declarations before dissection removes those headers."
     (save-excursion
       (save-restriction
         (mail-narrow-to-head)
-        (let ((type (mail-fetch-field "Content-Type"))
-              (disposition (mail-fetch-field "Content-Disposition")))
+        (let* ((value (mail-fetch-field "Content-Type"))
+               (type (and value
+                          (mail-header-parse-content-type value)))
+               (disposition (mail-fetch-field "Content-Disposition")))
           (when (and type
-                     (string-prefix-p "multipart/" (downcase type)))
+                     (string-prefix-p "multipart/" (car type)))
             (setq attachment
                   (tessera-x--mime-attachment
                    (mm-make-handle
-                    nil (mail-header-parse-content-type type)
-                    nil nil
+                    nil type nil nil
                     (and disposition
                          (mail-header-parse-content-disposition
                           disposition)))))))))

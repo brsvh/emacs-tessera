@@ -586,7 +586,13 @@
             (kill-buffer buffer)))))))
 
 (ert-deftest tessera-x-multipart-attachments-stay-out-of-bodies ()
-  (dolist (type '("mixed" "alternative"))
+  (pcase-dolist
+      (`(,type ,header)
+       '(("mixed" "multipart/mixed")
+         ("alternative" "multipart/alternative")
+         ("mixed" "(note) multipart/mixed")
+         ("alternative" "(note) multipart/alternative")
+         ("mixed" "(note)\n Multipart/Mixed")))
     (let ((item (tessera-x-tests--item "multipart")))
       (tessera-x-read-message
        item
@@ -595,7 +601,7 @@
           "MIME-Version: 1.0\n"
           "Content-Type: multipart/mixed; boundary=outer\n\n"
           "--outer\nContent-Type: text/plain\n\nMain body\n"
-          "--outer\nContent-Type: multipart/" type
+          "--outer\nContent-Type: " header
           "; boundary=inner\nContent-Disposition: attachment;\n"
           " filename*=utf-8''attached%20mail.mime\n\n"
           "--inner\nContent-Type: text/plain\n\nAttachment body\n"
