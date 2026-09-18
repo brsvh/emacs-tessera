@@ -481,7 +481,6 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 Nil means explicitly refresh all glyphs and their hover faces."
   (when (or (null option)
             (memq option '(tessera-elfeed-search-glyphs
-                           tessera-thread-glyphs
                            tessera-entry-ellipsis
                            tessera-glyph-style tessera-glyph-color)))
     (when (gethash 'elfeed-search tessera--entry-backends)
