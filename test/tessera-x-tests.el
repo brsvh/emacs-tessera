@@ -328,6 +328,29 @@
     (should (string-match-p "not decrypted"
                             (tessera-x-item-body item)))))
 
+(ert-deftest tessera-x-message-ids-preserve-reference-boundaries ()
+  (let* ((root (tessera-x-tests--item "root@example"))
+         (child (tessera-x-tests--item
+                 "child@example"
+                 (tessera-x-message-ids
+                  "(parent) <root@example><missing@example>")))
+         (other (tessera-x-tests--item
+                 "other@example"
+                 (tessera-x-message-ids
+                  "(parent) <unrelated@example>"))))
+    (should (equal (tessera-x-item-references child)
+                   '("root@example" "missing@example")))
+    (should (equal (tessera-x-subthread (list root child other) root)
+                   (list root child)))
+    (setf (tessera-x-item-subject other) "Unrelated")
+    (tessera-x-group-threads (list root child other))
+    (should (equal (tessera-x-item-group other) "Unrelated")))
+  (should
+   (equal (tessera-x-message-ids
+           ["(comment <fake@example>) <one@example>\r\n <two@example>"
+            "bare@example" nil "(comment only)"])
+          '("one@example" "two@example" "bare@example"))))
+
 (ert-deftest tessera-x-subthreads-handle-missing-parents-and-cycles ()
   (let* ((root (tessera-x-tests--item "root"))
          (child (tessera-x-tests--item "child" '("root" "missing")))

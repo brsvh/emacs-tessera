@@ -36,6 +36,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'mail-parse)
 (require 'mm-decode)
 (require 'shr)
 (require 'tessera)
@@ -427,15 +428,25 @@ On failure retain metadata and record an explicit content note."
   item)
 
 (defun tessera-x-message-ids (value)
-  "Normalize message identifiers in string or list VALUE."
+  "Normalize message identifiers in string, list or vector VALUE.
+Extract bracketed identifiers without comments or surrounding text.
+Also accept bare identifiers supplied by native backends."
   (let ((strings (cond ((vectorp value) (append value nil))
                        ((listp value) value)
                        (t (list value)))))
     (cl-loop for string in strings
              when (stringp string)
-             append (mapcar
-                     (lambda (id) (string-trim id "<" ">"))
-                     (split-string string "[ \t\r\n]+" t)))))
+             append
+             (let ((text (mail-header-remove-comments string))
+                   (start 0)
+                   ids)
+               (if (string-match-p "[<>]" text)
+                   (progn
+                     (while (string-match "<\\([^<>]+\\)>" text start)
+                       (push (match-string 1 text) ids)
+                       (setq start (match-end 0)))
+                     (nreverse ids))
+                 (split-string text "[ \t\r\n]+" t))))))
 
 (defun tessera-x--identity (item)
   "Return ITEM's Message-ID, falling back to backend identity."
