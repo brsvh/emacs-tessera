@@ -162,10 +162,17 @@ Inspect the full result buffer, preserving its narrowing and point."
 (defun tessera-x-mu4e--finish-context (context items)
   "Read local bodies in ITEMS and publish CONTEXT."
   (when (tessera-x-context-pending-p context)
-    (dolist (item items) (tessera-x-mu4e--read-body item))
-    (setf (tessera-x-context-items context)
-          (tessera-x-group-threads items))
-    (tessera-x-context-finish context)))
+    (condition-case err
+        (progn
+          (dolist (item items) (tessera-x-mu4e--read-body item))
+          (setf (tessera-x-context-items context)
+                (tessera-x-group-threads items))
+          (tessera-x-context-finish context))
+      (quit
+       (when (tessera-x-context-pending-p context)
+         (with-current-buffer (tessera-x-context-source context)
+           (tessera-x-cancel-context)))
+       (signal (car err) (cdr err))))))
 
 (defun tessera-x-mu4e--cancel-query (process output errors)
   "Stop PROCESS and release OUTPUT and ERRORS buffers."
@@ -219,6 +226,11 @@ Inspect the full result buffer, preserving its narrowing and point."
                                   :key
                                   #'tessera-x-item-message-id)))))
               (tessera-x-mu4e--finish-context context items))
+          (quit
+           (when (tessera-x-context-pending-p context)
+             (with-current-buffer (tessera-x-context-source context)
+               (tessera-x-cancel-context)))
+           (signal (car err) (cdr err)))
           (error (tessera-x-context-fail
                   context (error-message-string err))))))))
 

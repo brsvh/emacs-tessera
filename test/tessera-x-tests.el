@@ -180,6 +180,55 @@
             (should (eq tessera-x-current-context ready))))
         (should (= cleanup-count 2))))))
 
+(ert-deftest tessera-x-backend-interruptions-cancel-requests ()
+  (tessera-x-tests--with-snapshots
+    (pcase-dolist (`(,backend ,function)
+                   '((gnus tessera-x-gnus--download)
+                     (gnus tessera-x-gnus--read-body)
+                     (gnus tessera-x-group-threads)
+                     (mu4e tessera-x-mu4e--read-body)
+                     (mu4e tessera-x-group-threads)))
+      (with-temp-buffer
+        (let ((previous (tessera-x-context-start backend "Old" nil))
+              (items (list (tessera-x-tests--item "one")))
+              (gnus-agent t)
+              (tessera-x-gnus-body-policy 'download)
+              (cleanup-count 0)
+              interrupted)
+          (tessera-x-context-finish previous)
+          (cl-letf (((symbol-function 'tessera-x-gnus--download)
+                     #'ignore)
+                    ((symbol-function 'tessera-x-gnus--read-body)
+                     #'ignore)
+                    ((symbol-function 'tessera-x-mu4e--read-body)
+                     #'ignore))
+            (cl-letf (((symbol-function function)
+                       (lambda (&rest _)
+                         (setq interrupted tessera-x--pending-context)
+                         (push
+                          (lambda () (cl-incf cleanup-count))
+                          (tessera-x-context-cleanup interrupted))
+                         (signal 'quit nil))))
+              (should
+               (eq (condition-case err
+                       (if (eq backend 'gnus)
+                           (tessera-x-gnus--build-context
+                            items "Interrupted" nil)
+                         (tessera-x-mu4e--finish-context
+                          (tessera-x-context-start
+                           backend "New" items)
+                          items))
+                     (quit (car err)))
+                   'quit))))
+          (should
+           (eq (tessera-x-context-state interrupted) 'cancelled))
+          (should-not tessera-x--pending-context)
+          (should-not (tessera-x-context-cleanup interrupted))
+          (should (= cleanup-count 1))
+          (should (eq tessera-x-current-context previous))
+          (should (buffer-live-p
+                   (tessera-x-context-buffer previous))))))))
+
 (ert-deftest tessera-x-discard-respects-refused-buffer-deletion ()
   (tessera-x-tests--with-snapshots
     (with-temp-buffer
@@ -728,13 +777,14 @@
         (setq-local list-buffers-directory "")
         (should (equal (tessera-x-mu4e--today-query) ""))))))
 
-(ert-deftest tessera-x-mu-query-distinguishes-signals-from-exits ()
+(ert-deftest tessera-x-mu-query-completion-releases-resources ()
   (skip-unless (executable-find "sleep"))
   (tessera-x-tests--with-snapshots
     (pcase-dolist (`(,command ,status ,code ,state)
                    '(("exit 0" exit 0 ready)
                      ("exit 2" exit 2 ready)
-                     (nil signal 2 failed)))
+                     (nil signal 2 failed)
+                     ("exit 0" exit 0 cancelled)))
       (with-temp-buffer
         (let ((previous
                (tessera-x-context-start 'mu4e "Previous" nil)))
@@ -773,7 +823,20 @@
                       (accept-process-output process 0.05)))
                   (should (eq (process-status process) status))
                   (should (= (process-exit-status process) code))
-                  (tessera-x-mu4e--query-done process "finished\n")
+                  (if (eq state 'cancelled)
+                      (progn
+                        (with-current-buffer output
+                          (insert "(:path \"/message\")"))
+                        (cl-letf
+                            (((symbol-function 'tessera-x-mu4e--item)
+                              (lambda (_) (signal 'quit nil))))
+                          (should
+                           (eq (condition-case err
+                                   (tessera-x-mu4e--query-done
+                                    process "finished\n")
+                                 (quit (car err)))
+                               'quit))))
+                    (tessera-x-mu4e--query-done process "finished\n"))
                   (should
                    (eq (tessera-x-context-state context) state))
                   (if (eq state 'ready)
@@ -784,9 +847,11 @@
                     (should (eq tessera-x-current-context previous))
                     (should (= calls 0))
                     (should-not (tessera-x-context-buffer context))
-                    (should (string-match-p
-                             "signal 2"
-                             (tessera-x-context-error context))))
+                    (if (eq state 'failed)
+                        (should (string-match-p
+                                 "signal 2"
+                                 (tessera-x-context-error context)))
+                      (should-not (tessera-x-context-error context))))
                   (should-not tessera-x--pending-context)
                   (should-not (tessera-x-context-cleanup context))
                   (should-not (buffer-live-p output))

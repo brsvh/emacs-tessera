@@ -246,6 +246,11 @@ Download missing bodies unless LOCAL-ONLY forbids it."
           (setf (tessera-x-context-items context)
                 (tessera-x-group-threads items))
           (tessera-x-context-finish context))
+      (quit
+       (when (tessera-x-context-pending-p context)
+         (with-current-buffer (tessera-x-context-source context)
+           (tessera-x-cancel-context)))
+       (signal (car err) (cdr err)))
       (error (tessera-x-context-fail
               context (error-message-string err))))
     context))
