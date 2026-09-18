@@ -10,7 +10,8 @@ INSTALL_INFO ?= install-info
 
 BUILD_FILE := Makefile
 DIST_DIR := dist
-PACKAGE_DIRS := $(patsubst %/,%,$(wildcard lisp/*/))
+PACKAGE_DIRS := $(foreach dir,$(patsubst %/,%,$(wildcard lisp/*/)),\
+	$(if $(wildcard $(dir)/$(notdir $(dir)).el),$(dir)))
 PACKAGES := $(sort $(notdir $(PACKAGE_DIRS)))
 PACKAGE ?=
 

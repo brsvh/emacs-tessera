@@ -4,8 +4,6 @@
 
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
-;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1") (tessera "0.1.0") (tessera-x "0.1.0") (elfeed "4.0.1"))
 ;; Keywords: convenience, mail, news
 ;; URL: https://github.com/brsvh/emacs-tessera
 
@@ -27,17 +25,41 @@
 ;;; Commentary:
 
 ;; Experimental Tessera features for Elfeed.
-;; The `x' in this package family stands for experimental.
+;; The `x' in the package name stands for experimental.
 ;; Currently provides context snapshots independent of layout modes.
 
 ;;; Code:
 
 (require 'tessera-x)
-(require 'tessera-elfeed)
-(require 'elfeed-search)
+(require 'avl-tree)
 (require 'mail-parse)
 (require 'mail-utils)
 (require 'url-http)
+
+(defvar elfeed-db-index)
+(defvar elfeed-search-filter)
+
+(declare-function elfeed-db-ensure "elfeed-db" ())
+(declare-function elfeed-db-get-entry "elfeed-db" (id))
+(declare-function elfeed-deref "elfeed-db" (ref))
+(declare-function elfeed-entry-content "elfeed-db" (entry))
+(declare-function elfeed-entry-content-type "elfeed-db" (entry))
+(declare-function elfeed-entry-date "elfeed-db" (entry))
+(declare-function elfeed-entry-enclosures "elfeed-db" (entry))
+(declare-function elfeed-entry-feed "elfeed-db" (entry))
+(declare-function elfeed-entry-id "elfeed-db" (entry))
+(declare-function elfeed-entry-link "elfeed-db" (entry))
+(declare-function elfeed-entry-tags "elfeed-db" (entry))
+(declare-function elfeed-entry-title "elfeed-db" (entry))
+(declare-function elfeed-feed-title "elfeed-db" (feed))
+(declare-function elfeed-feed-url "elfeed-db" (feed))
+(declare-function elfeed-meta
+                  "elfeed-db" (thing key &optional default))
+(declare-function elfeed-search-filter "elfeed-search"
+                  (filter entry feed &optional count now))
+(declare-function elfeed-search-parse-filter "elfeed-search" (filter))
+(declare-function elfeed-search-selected
+                  "elfeed-search" (&optional ignore-region))
 
 (defvar elfeed-tree-filter)
 (defvar url-http-response-status)
@@ -46,7 +68,6 @@
 (defgroup tessera-x-elfeed nil
   "Experimental Tessera features for Elfeed."
   :group 'tessera-x
-  :group 'tessera-elfeed
   :prefix "tessera-x-elfeed-")
 
 ;;;; Context options
@@ -299,6 +320,7 @@ Suppress HTTP retrieval when LOCAL-ONLY is set."
 Fetch linked HTTP content according to the Elfeed context options.
 Return the request; its ready hook runs when fetching completes."
   (interactive)
+  (require 'elfeed-search)
   (unless (derived-mode-p 'elfeed-search-mode)
     (user-error "Run this command in Elfeed Search"))
   (let ((entries (elfeed-search-selected)))
@@ -310,6 +332,7 @@ Return the request; its ready hook runs when fetching completes."
   "Prepare today's local entries in the current Search or Tree scope.
 Never fetch linked pages.  In Tree, use the native filter at point."
   (interactive)
+  (require 'elfeed-search)
   (let* ((scope
           (cond
            ((derived-mode-p 'elfeed-search-mode) elfeed-search-filter)
@@ -326,14 +349,22 @@ Never fetch linked pages.  In Tree, use the native filter at point."
          (now (float-time))
          (count 0)
          entries)
-    (elfeed-db-visit (entry feed)
-                     (let ((date (elfeed-entry-date entry)))
-                       (when (< date start) (elfeed-db-return))
-                       (when (and (< date end)
-                                  (elfeed-search-filter
-                                   filter entry feed count now))
-                         (cl-incf count)
-                         (push entry entries))))
+    (elfeed-db-ensure)
+    ;; Visit newest first; native filters use this tag to stop early.
+    (catch 'elfeed-db-done
+      (avl-tree-mapc
+       (lambda (id)
+         (let* ((entry (elfeed-db-get-entry id))
+                (date (elfeed-entry-date entry)))
+           (when (< date start)
+             (throw 'elfeed-db-done nil))
+           (when (and (< date end)
+                      (elfeed-search-filter
+                       filter entry (elfeed-entry-feed entry)
+                       count now))
+             (cl-incf count)
+             (push entry entries))))
+       elfeed-db-index))
     (tessera-x-elfeed--build-context
      entries (format "Today, local feed database; filter: %s" scope)
      t)))

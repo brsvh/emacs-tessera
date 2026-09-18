@@ -18,16 +18,17 @@ Documentation License".
 Tessera provides layouts for Elfeed Search, Gnus Summary, and mu4e Headers.  You
 keep using their native commands to read, search, mark, and navigate entries.
 
-The ~tessera~ package contains all display adapters.  The separate ~tessera-x~
-packages provide experimental features; ~x~ means experimental.
+The ~tessera~ package contains all display adapters.  The independent ~tessera-x~
+package provides experimental features; ~x~ means experimental.
 
 ** Getting Started
 
 *** Install
 
-Use Emacs 30.1 or later with Alert installed, and set up the mail or feed
-application you use.  Install ~tessera~ for display features; add the
-corresponding ~tessera-x-*~ package and ~tessera-x~ for experiments.
+Use Emacs 30.1 or later and set up the mail or feed application you use.
+Install ~tessera~ for display features; it requires Alert.  Install ~tessera-x~
+for experiments, independently of ~tessera~ and Alert.  Its backend commands
+require Gnus, mu4e 1.14.3 or later, or Elfeed 4.0.1 or later at runtime.
 
 For a source checkout, add the core directory to ~load-path~:
 
@@ -35,13 +36,18 @@ For a source checkout, add the core directory to ~load-path~:
 (add-to-list 'load-path "/path/to/emacs-tessera/lisp/tessera/")
 #+end_src
 
-For experimental features, also add ~lisp/tessera-x/~ and the selected
-~lisp/tessera-x-*/~ directory.  Each directory is a separate package.
+For experimental features, add ~lisp/tessera-x/~ instead, or add both
+directories to use both packages.  The ~tessera-x-gnus~, ~tessera-x-mu4e~, and
+~tessera-x-elfeed~ features are included in ~tessera-x~.  Loading their libraries
+exposes options without loading the native applications.
+
+When upgrading from separate experimental packages, replace them with
+~tessera-x~ and remove their old ~load-path~ entries.  Existing feature,
+command, and option names remain available.
 
 Alternatively, create archives as described under [[*Build][Build]], then use ~M-x
-package-install-file~ on the desired archives in ~dist/~.  Install ~tessera~ before
-~tessera-x~, then the experimental backend packages.  The archives include their
-Info manuals.
+package-install-file~ on the desired archives in ~dist/~.  The two packages can
+be installed independently.  Their archives include their Info manuals.
 
 For Nix, add this repository as a flake input named ~tessera~ and include
 ~inputs.tessera.overlays.default~ in your nixpkgs overlays.  Select the packages
@@ -51,7 +57,7 @@ you want from that package set, for example:
 (pkgs.emacsPackagesFor pkgs.emacs).emacsWithPackages (
   epkgs: with epkgs; [
     tessera
-    tessera-x-gnus
+    tessera-x
   ]
 )
 #+end_src
@@ -222,7 +228,8 @@ part of the display.
 
 A context snapshot is a read-only buffer containing selected records, metadata,
 and available body text.  Load one of the experimental backend libraries below
-to prepare it.  See the [[file:doc/tessera-x.texi][Tessera X manual]] for shared behavior and interfaces.
+to prepare it.  The [[file:doc/tessera-x.texi][Tessera X manual]] explains content selection and retrieval,
+snapshot management, and Lisp interfaces for consumers and producers.
 
 *** Managing Context Snapshots
 
@@ -263,24 +270,24 @@ user function displays its buffer when preparation finishes:
 Other consumers, including ~gptel~ integrations, can use the same hook.  Tessera
 itself does not send model requests.
 
-** tessera-x-elfeed
+*** tessera-x-elfeed
 
 Load ~tessera-x-elfeed~ with ~require~.  The display mode is optional.  See the
-[[file:doc/tessera-x-elfeed.texi][Tessera X Elfeed manual]].
+[[file:doc/tessera-x.texi][Tessera X manual]].
 
-*** Selected Entries
+**** Selected Entries
 
 In Search, run ~M-x tessera-x-elfeed-prepare-context~.  Native marks take
 precedence over the active region; otherwise the entry at point is used.
 Results are grouped by feed, preserving entry order within each feed.
 
-*** Today's Entries
+**** Today's Entries
 
 Run ~M-x tessera-x-elfeed-prepare-today-context~ in Search or Tree.  It uses the
 current Search filter or Tree filter at point to select today's local entries.
 It always uses stored bodies without fetching pages.
 
-*** Linked-page Retrieval
+**** Linked-page Retrieval
 
 Ordinary selected-entry snapshots fetch linked pages by default and fall back to
 stored feed content on failure.  To fetch only when the stored body is short,
@@ -296,18 +303,18 @@ and limit concurrent requests:
 Set ~tessera-x-elfeed-fetch-linked-content~ to ~nil~ for stored content only.  These
 settings do not affect today's snapshots.
 
-** tessera-x-gnus
+*** tessera-x-gnus
 
 Load ~tessera-x-gnus~ with ~require~ and enable Gnus Agent for the groups you use.
-The display mode is optional.  See the [[file:doc/tessera-x-gnus.texi][Tessera X Gnus manual]].
+The display mode is optional.  See the [[file:doc/tessera-x.texi][Tessera X manual]].
 
-*** Selected Articles
+**** Selected Articles
 
 In Summary, run ~M-x tessera-x-gnus-prepare-context~.  Selection uses the active
 region, then process marks, then the article at point.  Existing marks and read
 state are preserved.
 
-*** Current Subthread
+**** Current Subthread
 
 Run ~M-x tessera-x-gnus-prepare-subthread-context~ for the current article and its
 descendants, including folded entries.  ~C-u~ expands the selection using the
@@ -320,13 +327,13 @@ To use that expanded scope by default:
 (setopt tessera-x-gnus-subthread-scope 'local-index)
 #+end_src
 
-*** Today's Articles
+**** Today's Articles
 
 Run ~M-x tessera-x-gnus-prepare-today-context~ in Summary for the current group,
 or in Group for the group or topic at point.  It reads today's locally indexed
 articles and uses cached Agent bodies only.
 
-*** Body Retrieval
+**** Body Retrieval
 
 Selected-article and subthread snapshots download missing bodies into the Agent
 by default.  To use cached bodies only:
@@ -339,18 +346,18 @@ by default.  To use cached bodies only:
 Missing bodies leave metadata and a content note in the snapshot.  Today's
 snapshots always use this local-only policy.
 
-** tessera-x-mu4e
+*** tessera-x-mu4e
 
 Load ~tessera-x-mu4e~ with ~require~.  It uses local message files and the mu index;
-the display mode is optional.  See the [[file:doc/tessera-x-mu4e.texi][Tessera X mu4e manual]].
+the display mode is optional.  See the [[file:doc/tessera-x.texi][Tessera X manual]].
 
-*** Selected Messages
+**** Selected Messages
 
 In Headers, run ~M-x tessera-x-mu4e-prepare-context~.  Marks take precedence over
 the active region, followed by the message at point.  The command preserves
 pending operations and read state.
 
-*** Current Subthread
+**** Current Subthread
 
 Run ~M-x tessera-x-mu4e-prepare-subthread-context~ for the current message and its
 descendants, including folded rows.  ~C-u~ also searches the local mu index for
@@ -363,7 +370,7 @@ To expand through the index by default:
 (setopt tessera-x-mu4e-subthread-scope 'local-index)
 #+end_src
 
-*** Today's Messages
+**** Today's Messages
 
 Run ~M-x tessera-x-mu4e-prepare-today-context~ in Headers to use its current
 query, or in Main on a bookmark or maildir query.  The result includes today's
@@ -395,7 +402,7 @@ Create all package archives, or just one:
 
 #+begin_src sh
 make archive
-make archive PACKAGE=tessera-x-gnus
+make archive PACKAGE=tessera-x
 #+end_src
 
 Archives are written to ~dist/PACKAGE-VERSION.tar~ with the package's Info manual
@@ -407,6 +414,12 @@ library directories explicitly:
 make all EMACS_LOAD_PATH="/path/to/elfeed /path/to/mu4e"
 #+end_src
 
+The experimental package can be compiled without any external packages:
+
+#+begin_src sh
+make compile PACKAGE=tessera-x
+#+end_src
+
 ~PACKAGE=...~ also selects one package for ~all~, ~compile~, and ~clean~.  ~make clean~
 removes generated Lisp files and package archives.
 
@@ -416,7 +429,7 @@ Build all Info and HTML manuals, or one package's manual:
 
 #+begin_src sh
 make -C doc all
-make -C doc all PACKAGE=tessera-x-gnus
+make -C doc all PACKAGE=tessera-x
 #+end_src
 
 Use ~info~ or ~html~ in place of ~all~ for one format.  Output goes to
@@ -425,7 +438,7 @@ stylesheet.  ~make -C doc clean~ removes these generated manuals.
 
 ** Test
 
-The ERT runner covers all five packages.  Make Elfeed and mu4e libraries
+The ERT runner covers both packages.  Make Elfeed and mu4e libraries
 available even when you normally use only one backend.
 
 *** Source Tests
@@ -444,7 +457,7 @@ a nonzero status if a test fails.
 *** Installed Package Tests
 
 Run the same command with ~TESSERA_TEST_PACKAGE_DIRS~ set to the colon-separated
-directories of all five installed packages.  Each must contain its ~.el~ sources
+directories of both installed packages.  Each must contain its ~.el~ sources
 and ~.elc~ bytecode.  The runner checks that production libraries load from those
 installed copies.
 

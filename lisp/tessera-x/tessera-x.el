@@ -1,11 +1,11 @@
-;;; tessera-x.el --- Shared experimental features for Tessera  -*- lexical-binding: t; -*-
+;;; tessera-x.el --- Experimental features for Emacs communication tools  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Bingshan Chang <chang@bingshan.org>
 
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1") (tessera "0.1.0"))
+;; Package-Requires: ((emacs "30.1"))
 ;; Keywords: convenience, mail, news
 ;; URL: https://github.com/brsvh/emacs-tessera
 
@@ -27,7 +27,7 @@
 ;;; Commentary:
 
 ;; Shared mechanisms for experimental Tessera features.
-;; The `x' in this package family stands for experimental.
+;; The `x' in the package name stands for experimental.
 ;; Context snapshots are one experimental feature, implemented here
 ;; together with shared source-content and thread helpers.
 ;; Context construction does not require a Tessera display mode.
@@ -36,13 +36,12 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'tessera)
 (require 'mm-decode)
 (require 'shr)
 
 (defgroup tessera-x nil
   "Experimental Tessera features."
-  :group 'tessera
+  :group 'applications
   :prefix "tessera-x-")
 
 ;;;; Context snapshots

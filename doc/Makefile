@@ -7,7 +7,7 @@ HTML_CSS_URL ?= https://www.gnu.org/software/emacs/manual.css
 OUTPUT_DIR ?= ../dist/manuals
 PACKAGE ?=
 
-MANUALS := tessera tessera-x tessera-x-gnus tessera-x-mu4e tessera-x-elfeed
+MANUALS := tessera tessera-x
 
 ifneq ($(strip $(PACKAGE)),)
 ifeq ($(filter $(PACKAGE),$(MANUALS)),)

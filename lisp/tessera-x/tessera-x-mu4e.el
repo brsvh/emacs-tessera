@@ -4,8 +4,6 @@
 
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
-;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1") (tessera "0.1.0") (tessera-x "0.1.0") (mu4e "1.14.3"))
 ;; Keywords: convenience, mail, news
 ;; URL: https://github.com/brsvh/emacs-tessera
 
@@ -27,22 +25,31 @@
 ;;; Commentary:
 
 ;; Experimental Tessera features for mu4e.
-;; The `x' in this package family stands for experimental.
+;; The `x' in the package name stands for experimental.
 ;; Currently provides context snapshots independent of layout modes.
 
 ;;; Code:
 
 (require 'tessera-x)
-(require 'tessera-mu4e)
-(require 'mu4e-headers)
-(require 'mu4e-message)
-(require 'mu4e-server)
-(require 'mu4e-query-items)
+
+(defvar mu4e--mark-map)
+(defvar mu4e-mu-binary)
+(defvar mu4e-mu-home)
+(defvar mu4e-search-threads)
+
+(declare-function mu4e-headers-for-each "mu4e-headers" (func))
+(declare-function mu4e-message-at-point
+                  "mu4e-message" (&optional noerror))
+(declare-function mu4e-message-readable-path
+                  "mu4e-message" (&optional msg))
+(declare-function mu4e-query-items
+                  "mu4e-query-items" (&optional type refresh))
+(declare-function mu4e~headers-thread-root-p
+                  "mu4e-headers" (&optional msg))
 
 (defgroup tessera-x-mu4e nil
   "Experimental Tessera features for mu4e."
   :group 'tessera-x
-  :group 'tessera-mu4e
   :prefix "tessera-x-mu4e-")
 
 ;;;; Context options
@@ -257,6 +264,7 @@ With ANCHOR, include related messages and keep descendants."
   "Prepare marked messages, an active region, or the current message.
 Use local mail files and preserve native marks and read state."
   (interactive)
+  (require 'mu4e-headers)
   (let ((items (tessera-x-mu4e--items t)))
     (unless items (user-error "No mu4e messages selected"))
     (let ((context (tessera-x-context-start
@@ -271,6 +279,7 @@ Use local mail files and preserve native marks and read state."
 With prefix LOCAL-INDEX, supplement from the local mu index, ignoring
 the current search filter.  This does not fetch mail from a server."
   (interactive "P")
+  (require 'mu4e-headers)
   (let* ((items (tessera-x-mu4e--items))
          (id (plist-get (mu4e-message-at-point) :docid))
          (anchor (cl-find id items :key #'tessera-x-item-id))
@@ -328,6 +337,9 @@ the current search filter.  This does not fetch mail from a server."
 In Headers use its current query; in Main use the query item at point.
 `mu4e-mu-home' selects the index.  No mailbox synchronization occurs."
   (interactive)
+  (require 'mu4e-message)
+  (require 'mu4e-server)
+  (require 'mu4e-query-items)
   (let* ((base (funcall tessera-x-mu4e-today-query-function))
          (query (if (string-empty-p base) "date:today..now"
                   (format "(%s) AND (date:today..now)" base)))

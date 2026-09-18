@@ -115,60 +115,8 @@
                       projectRoot
                       ;
 
-                    description = "Shared experimental features for Tessera";
-
-                    packageRequires = with finalAttrs; [
-                      tessera
-                    ];
-
+                    description = "Experimental features for Emacs communication tools";
                     pname = "tessera-x";
-                  };
-
-                  tessera-x-elfeed = finalAttrs.callPackage emacs-tessera {
-                    inherit
-                      projectRoot
-                      ;
-
-                    description = "Experimental Tessera features for Elfeed";
-
-                    packageRequires = with finalAttrs; [
-                      elfeed
-                      tessera
-                      tessera-x
-                    ];
-
-                    pname = "tessera-x-elfeed";
-                  };
-
-                  tessera-x-gnus = finalAttrs.callPackage emacs-tessera {
-                    inherit
-                      projectRoot
-                      ;
-
-                    description = "Experimental Tessera features for Gnus";
-
-                    packageRequires = with finalAttrs; [
-                      tessera
-                      tessera-x
-                    ];
-
-                    pname = "tessera-x-gnus";
-                  };
-
-                  tessera-x-mu4e = finalAttrs.callPackage emacs-tessera {
-                    inherit
-                      projectRoot
-                      ;
-
-                    description = "Experimental Tessera features for Mu4e";
-
-                    packageRequires = with finalAttrs; [
-                      mu4e
-                      tessera
-                      tessera-x
-                    ];
-
-                    pname = "tessera-x-mu4e";
                   };
                 };
               in

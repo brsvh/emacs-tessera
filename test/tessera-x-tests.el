@@ -3,7 +3,7 @@
 ;;; Commentary:
 
 ;; Context snapshot ownership, budgets, MIME decoding and scope.
-;; Context snapshots are one feature of the experimental packages.
+;; Context snapshots are one feature of the experimental package.
 
 ;;; Code:
 
@@ -13,6 +13,41 @@
 (require 'tessera-x-mu4e)
 (require 'tessera-x-gnus)
 (require 'tessera-gnus-test-support)
+(require 'gnus-agent)
+(require 'gnus-topic)
+(require 'elfeed-search)
+(require 'mu4e-headers)
+
+(defvar gnus-registry-db)
+
+(ert-deftest tessera-x-compiles-and-loads-independently ()
+  (with-temp-buffer
+    (let ((status
+           (call-process
+            (expand-file-name invocation-name invocation-directory)
+            nil (current-buffer) nil "-Q" "--batch"
+            "-l" (locate-library "run-x-tests")
+            (file-name-directory (locate-library "tessera-x")))))
+      (ert-info ((buffer-string))
+        (should (equal status 0))))))
+
+(ert-deftest tessera-x-gnus-labels-retain-native-metadata ()
+  (let ((header (make-full-mail-header
+                 1 "Subject" "Sender" "" "<id>" "" 0 0 nil
+                 '((x-gm-labels . "(shared \"Gmail\")")
+                   (Keywords . "shared, News,  ")
+                   (TO . "Recipient <to@example.invalid>"))))
+        (gnus-registry-db t))
+    (cl-letf (((symbol-function 'gnus-registry-get-id-key)
+               (lambda (_id _key) '(shared " Registry\nlabel "))))
+      (should (equal (tessera-x-gnus--labels header)
+                     '("shared" "Registry label" "Gmail" "News")))
+      (should (equal (tessera-x-gnus--header-field "To" header)
+                     "Recipient <to@example.invalid>"))
+      (dolist (value '("#1=(x . #1#)" "(x . y)" "((nested))"))
+        (setcdr (assq 'x-gm-labels (mail-header-extra header)) value)
+        (should (equal (tessera-x-gnus--labels header)
+                       '("shared" "Registry label" "News")))))))
 
 (ert-deftest tessera-x-options-belong-to-their-feature ()
   (dolist (entry '((tessera-x-gnus
@@ -782,8 +817,9 @@
            (end (float-time (cdr bounds)))
            (feed (elfeed-feed--create :id "feed" :title "Feed")))
       (puthash "feed" feed elfeed-db-feeds)
-      (cl-loop for date in (list (1- start) start (1+ start) end)
-               for tags in '((keep) (keep) (drop) (keep))
+      (cl-loop for date in (list (1- start) start (1+ start)
+                                 (+ start 2) end)
+               for tags in '((keep) (keep) (drop) (keep) (keep))
                for index from 0
                do
                (let* ((id (cons "feed" (number-to-string index)))
@@ -797,16 +833,21 @@
                               :link "https://example.invalid/item")))
                  (puthash id entry elfeed-db-entries)
                  (avl-tree-enter elfeed-db-index id)))
-      (with-temp-buffer
-        (setq-local major-mode 'elfeed-search-mode)
-        (setq-local elfeed-search-filter "+keep")
-        (cl-letf (((symbol-function 'url-retrieve)
-                   (lambda (&rest _) (ert-fail "Unexpected HTTP"))))
-          (let ((context (tessera-x-elfeed-prepare-today-context)))
-            (should (eq (tessera-x-context-state context) 'ready))
-            (should (equal (mapcar #'tessera-x-item-id
-                                   (tessera-x-context-items context))
-                           '(("feed" . "1"))))))))))
+      (dolist (case '(("+keep" . ("1" "3"))
+                      ("+keep #1" . ("3"))
+                      ("+keep #0" . nil)))
+        (with-temp-buffer
+          (setq-local major-mode 'elfeed-search-mode)
+          (setq-local elfeed-search-filter (car case))
+          (cl-letf (((symbol-function 'url-retrieve)
+                     (lambda (&rest _) (ert-fail "Unexpected HTTP"))))
+            (let ((context (tessera-x-elfeed-prepare-today-context)))
+              (should (eq (tessera-x-context-state context) 'ready))
+              (should
+               (equal (mapcar #'tessera-x-item-id
+                              (tessera-x-context-items context))
+                      (mapcar (lambda (id) (cons "feed" id))
+                              (cdr case)))))))))))
 
 (ert-deftest tessera-x-gnus-overview-filters-dates-and-keeps-headers
     ()

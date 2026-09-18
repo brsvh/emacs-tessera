@@ -28,7 +28,7 @@ Documentation License''.
 
 @dircategory Emacs
 @direntry
-* Tessera X: (tessera-x). Shared experimental features for Tessera.
+* Tessera X: (tessera-x). Experimental features for Gnus, mu4e, and Elfeed.
 @end direntry
 
 @titlepage
@@ -46,215 +46,594 @@ Documentation License''.
 @node Top
 @top Tessera X
 
-Shared experimental features for Tessera.
+  Experimental features for Gnus, mu4e, and Elfeed.
 
 @insertcopying
 @end ifnottex
 
 @menu
-* Introduction::         What this package provides.
-* Getting Started::      Installing and using the package.
-* Reading Snapshots::    Understanding the resulting text.
-* Text Extraction::      Converting message and feed bodies to text.
-* Character Budgets::    Limiting total and per-body text.
-* Snapshot Lifecycle::   Managing snapshots and pending requests.
-* Consuming Snapshots::  Using completed snapshots from Lisp.
-* Producing Snapshots::  Adding sources of snapshots in Lisp.
-* Content Helpers: Content Helper Interfaces.  Text, message, and date helpers.
-* Troubleshooting::      Diagnosing problems and reporting bugs.
-* Copying::              The GNU Free Documentation License.
-* Concept Index::        Topics covered in this manual.
-* Symbol Index::         Commands, options, faces, and interfaces.
+* Introduction::        Purpose, requirements, and a first snapshot.
+* Context Snapshots::   Selecting, collecting, and managing content.
+* Programming Contexts:: Consuming snapshots and adding sources.
+* Copying::             The GNU Free Documentation License.
+* Concept Index::       Topics covered in this manual.
+* Symbol Index::        Commands, options, and interfaces.
 @end menu
 
 @node Introduction
 @chapter Introduction
-@cindex experimental features
-  Tessera X supplies mechanisms shared by experimental Tessera packages.
-The @samp{x} in the package name means @dfn{experimental}.  This version
-provides context snapshots and helpers for reading source content and
-following message relationships.  Context snapshots are one feature of
-this package family.
 
-  A @dfn{context snapshot} is a separate buffer containing source
-material selected from mail, news, or feed entries.  It can be
-inspected, copied, or passed to another application.  Its contents
-include metadata and available body text, independently of the
-abbreviated text shown in a list of messages.  Preparing a snapshot does
-not send a language-model request.
+  Tessera X collects mail, news, and feed content into context
+snapshots.  This chapter introduces the result, the required
+applications, and a first preparation command.
+
+@menu
+* Overview::            Context snapshots and their sources.
+* Requirements::        Installing and loading the package.
+* First Snapshot::      Preparing and viewing a first result.
+@end menu
+
+@node Overview
+@section Overview
+@cindex experimental features
+@cindex context snapshots
+  Tessera X provides experimental features for Gnus, mu4e, and Elfeed.
+The @samp{x} means @dfn{experimental}; the feature implemented in this
+version is content aggregation through context snapshots.
+
+  A @dfn{context snapshot} collects selected records, their metadata,
+and available body text in a separate, read-only buffer.  You can
+inspect it, copy its text, or use it in another application.  Content
+comes from native records and available source text, independently of
+the abbreviated text displayed in message lists.  Preparing a snapshot
+does not send a language-model request.
 
   The @dfn{source buffer} is the buffer from which you start
 preparation.  The @dfn{scope} is the set of messages or entries selected
-for that snapshot, such as marked messages or today's entries in one
-feed.
+for that snapshot: for example, marked messages, replies to the current
+article, or today's entries in one feed.  Each snapshot belongs to the
+request that created it; later changes to marks or search filters do not
+change its contents.
 
-  This manual first explains how to read, limit, and manage snapshots.
-The later chapters on consuming and producing snapshots are for Lisp
-programmers connecting them to other applications.  For selection
-commands and content retrieval, see the manual for your application:
-@ref{Top,,, tessera-x-gnus, Tessera X Gnus}, @ref{Top,,, tessera-x-mu4e,
-Tessera X mu4e}, or @ref{Top,,, tessera-x-elfeed, Tessera X Elfeed}.
-
-@node Getting Started
-@chapter Getting Started
-
-  Install the shared package and one backend package before preparing a
-snapshot.  The backend commands work independently of Tessera's display
-minor modes.
-
-@menu
-* Requirements::        Required packages and loading libraries.
-* First Snapshot::      Preparing and viewing a snapshot.
-@end menu
+  For commands and options, see @ref{Context Snapshots}.  For Lisp
+interfaces that consume snapshots or provide another source of content,
+see @ref{Programming Contexts}.
 
 @node Requirements
 @section Requirements
 @cindex installation
-  Tessera X requires Emacs 30.1 or later and Tessera 0.1.0 or later.
-Tessera itself requires Alert 1.2 or later.
+  Tessera X requires Emacs 30.1 or later.  It is independent of the
+Tessera display package and Alert.  Install and configure the
+application whose content you want to collect:
 
-  With a source checkout, add @file{lisp/tessera/},
-@file{lisp/tessera-x/}, and the selected backend package directory to
-@code{load-path}.  Adding only @file{lisp/} does not locate these
-libraries.  For example, the following configuration loads the Gnus
-snapshot commands; replace the checkout path first.
+@table @asis
+@item Gnus
+Gnus is included with Emacs.  Enable Gnus Agent and configure it for the
+groups you intend to use.  All Gnus snapshot commands require the Agent;
+see @ref{Gnus Download Policy} for body retrieval and @ref{Gnus
+Unplugged,,, gnus, The Gnus Manual} for Agent setup.
+
+@item mu4e
+Use mu4e 1.14.3 or later, with its mail paths, mu executable, and local
+index configured.  Make its libraries available to Emacs.  Snapshots
+read local mail; see @ref{mu4e Local Retrieval}.
+
+@item Elfeed
+Use Elfeed 4.0.1 or later, with its libraries and feed database
+available to Emacs.  Today scopes also support Tree buffers provided by
+an extension using @code{elfeed-tree-mode}; Tessera X does not provide
+that interface.  See @ref{Today Scopes}.
+@end table
+
+  The libraries @code{tessera-x-gnus}, @code{tessera-x-mu4e}, and
+@code{tessera-x-elfeed} are all included in Tessera X.  Loading one
+exposes its options without loading the native application; commands
+load their required application libraries when invoked.  No Tessera X
+minor mode or default key bindings are installed.
+
+  For a source checkout, add @file{lisp/tessera-x/} to @code{load-path}.
+For example, replace the checkout path before evaluating:
 
 @lisp
-(dolist (package '("tessera" "tessera-x" "tessera-x-gnus"))
-  (add-to-list
-   'load-path
-   (expand-file-name package "/path/to/emacs-tessera/lisp/")))
+(add-to-list 'load-path "/path/to/emacs-tessera/lisp/tessera-x/")
 (require 'tessera-x-gnus)
 @end lisp
 
-  Use the selection commands supplied by the package for Gnus, mu4e, or
-Elfeed.  There is no Tessera X minor mode to enable.
+@noindent
+Use the corresponding library for mu4e or Elfeed.  Use @kbd{M-x
+customize-group @key{RET} tessera-x @key{RET}} for shared options, or
+@code{tessera-x-gnus}, @code{tessera-x-mu4e}, and
+@code{tessera-x-elfeed} for application-specific options.  Load the
+owning library before setting its options in an initialization file.
 
 @node First Snapshot
 @section Preparing a First Snapshot
 @cindex snapshot, preparing
-  In a supported source buffer, run the backend's @samp{prepare-context}
-command with @kbd{M-x}.  Once the request has completed, run @kbd{M-x
-tessera-x-show-context} in that same source buffer.  The latter command
-displays the snapshot in a buffer using Special mode.
+  In a supported source buffer, move point to a message or entry and run
+the corresponding command.  With no active region or native selection
+marks, it prepares that record:
 
-  Preparation can finish before the command returns or can remain
-pending while a backend queries an index or retrieves linked content.
-If an older successful snapshot exists, the show command continues to
-display that snapshot until the new request succeeds.  @xref{Request
-States}.
+@table @asis
+@item Gnus Summary
+@kbd{M-x tessera-x-gnus-prepare-context}.
 
-  Some backend commands may retrieve content from the network.  The
-retrieval policy belongs to that backend; it is not controlled by the
-shared character budgets.  Each backend's ``today'' command reads local
-data only.
+@item mu4e Headers
+@kbd{M-x tessera-x-mu4e-prepare-context}.
 
-@node Reading Snapshots
-@chapter Reading Snapshots
+@item Elfeed Search
+@kbd{M-x tessera-x-elfeed-prepare-context}.
+@end table
 
-  A snapshot records the selection at request time.  Subsequent edits to
-a search filter, marks, or displayed row text do not redefine that
-request.
+  By default, Gnus may download a missing body into its Agent, and
+Elfeed may fetch a linked page.  mu4e reads local message files.  To
+keep Gnus and Elfeed preparation local, configure the applicable library
+before running the command:
+
+@lisp
+(require 'tessera-x-gnus)
+(setopt tessera-x-gnus-body-policy 'local-only)
+
+(require 'tessera-x-elfeed)
+(setopt tessera-x-elfeed-fetch-linked-content nil)
+@end lisp
+
+@noindent
+These settings control retrieval; they cannot supply content that is
+absent locally.  See @ref{Retrieving Content} for the policies and their
+scope.
+
+  Once preparation has completed, run @kbd{M-x tessera-x-show-context}
+in the source buffer to view the result.  Preparation itself does not
+select the snapshot buffer.  Some requests finish before their command
+returns; others continue in the background.  While a replacement is
+pending, the show command still displays the previous successful
+snapshot.  See @ref{Snapshot Lifecycle}.
+
+@node Context Snapshots
+@chapter Context Snapshots
+
+  Preparing a context snapshot selects records, obtains available
+content, and collects their metadata and body text in a result buffer.
+The following sections explain each part of that task and the commands
+for managing its results.
 
 @menu
-* Snapshot Contents::   Headers, metadata, and body text.
-* Grouping and Order::  Conversation and feed grouping.
-* Missing Content::     Content notes and empty results.
+* Selecting Content::   Choosing records and their scope.
+* Retrieving Content::  Reading local bodies or fetching content.
+* Snapshot Contents::   Metadata, grouping, text, and size limits.
+* Managing Snapshots: Snapshot Lifecycle.  Completion, viewing, and cancellation.
+* Troubleshooting::     Diagnosing incomplete or unavailable results.
 @end menu
+
+@node Selecting Content
+@section Selecting Content
+@cindex selection
+  Choose a command according to the scope you need: the current native
+selection, a message and its replies, or today's locally indexed
+records.  Selection uses native data, including folded mail and news
+rows.  Display truncation does not limit the collected fields.
+
+@menu
+* Current Selection: Selected Messages and Entries.  Marks, the region, or the record at point.
+* Subthreads::          A message and its descendants.
+* Today Scopes::        Today's records in the native scope.
+@end menu
+
+@node Selected Messages and Entries
+@subsection Selected Messages and Entries
+@cindex marks
+@cindex region
+  The selection commands honor the source application's selection
+rules.  Gnus gives the active region precedence over process marks;
+mu4e and Elfeed give native marks precedence over the region.  Each
+command returns a @code{tessera-x-context} request.  Its completion
+depends on retrieval; see @ref{Request States}.
+
+@deffn Command tessera-x-gnus-prepare-context
+Prepare work articles in the current Gnus Summary buffer.  Use articles
+in the active region, if any; otherwise use articles with process marks,
+or the article at point when there are no such marks.  Signal a user
+error outside Summary or when no articles are selected.
+@end deffn
+
+@deffn Command tessera-x-mu4e-prepare-context
+Prepare marked messages in the current mu4e Headers buffer; if there are
+no marks, use rows intersecting the active region; otherwise use the
+message at point.  Include each selected message only once.  Signal a
+user error outside Headers or when no message is selected.
+@end deffn
+
+@deffn Command tessera-x-elfeed-prepare-context
+Prepare selected entries in the current Elfeed Search buffer.  Native
+marks take precedence over the active region; otherwise select the entry
+at point.  Signal a user error outside Search or for an empty selection.
+@end deffn
+
+  Selection preserves marks, tags, and read state.  It does not open
+messages or execute pending mu4e operations.  Retrieving a Gnus body can
+update its native availability mark; see @ref{Gnus Download Policy}.
+
+@node Subthreads
+@subsection Subthreads
+@cindex descendants
+@cindex subthreads
+@cindex local index expansion
+  A subthread consists of the current mail or news message and its
+@dfn{descendants}: replies to that message, including replies to those
+replies.  These commands retain the current message rather than
+selecting all ancestors and siblings in its conversation.  Elfeed has no
+subthread command.
+
+  The ordinary scope is the current results, including folded rows.
+Tessera follows reply references and, when @code{gnus-show-threads} or
+@code{mu4e-search-threads} is non-@code{nil}, the application's native
+thread structure.  With native threading disabled, it uses references
+alone.  Equal subjects do not by themselves establish a relationship.
+
+@deffn Command tessera-x-gnus-prepare-subthread-context &optional @
+  local-index
+Prepare the current Gnus Summary article and its descendants, returning
+a context request.  A non-@code{nil} @var{local-index}, or an
+interactive prefix such as @kbd{C-u}, supplements loaded records from
+the current group's Agent overview.  Signal a user error outside
+Summary or when there is no current article.
+@end deffn
+
+@defopt tessera-x-gnus-subthread-scope
+The default Gnus subthread scope, initially @code{results}.  The
+alternative @code{local-index} consults the current group's Agent
+overview in addition to loaded results.
+@end defopt
+
+@cindex Agent overview
+  The Agent overview is its local list of article headers.  Expansion
+can find descendants outside a Summary filter, retaining selected
+articles already in Summary without adding duplicates.  Missing or
+stale overview data makes the selection incomplete.  Expansion does not
+search a remote server for unknown descendants; subsequent body
+retrieval follows @ref{Gnus Download Policy}.
+
+@deffn Command tessera-x-mu4e-prepare-subthread-context &optional @
+  local-index
+Prepare the current mu4e Headers message and its descendants, returning
+a context request.  A non-@code{nil} @var{local-index}, or an
+interactive prefix such as @kbd{C-u}, supplements loaded records from
+the local mu index.  Signal a user error outside Headers or when there
+is no current message.
+@end deffn
+
+@defopt tessera-x-mu4e-subthread-scope
+The default mu4e subthread scope, initially @code{results}.  The
+alternative @code{local-index} supplements replies outside the current
+result filter from the local index.
+@end defopt
+
+  mu4e expansion uses the current message's @samp{Message-ID} to find
+related records.  It retains selected descendants already in the
+results, adds descendants from the index, and removes duplicates.  A
+missing identifier fails the request.  The Headers query remains
+unchanged, and no mail is fetched from a server.  Unindexed mail and
+unavailable relatives can still be absent.
+
+  For either command, a non-@code{nil} argument requests expansion
+regardless of the option.  A prefix does not switch back to
+@code{results} when the option already selects @code{local-index}.
+Both options can have global or buffer-local values and affect later
+requests.  For synchronous and asynchronous completion, see
+@ref{Request States}.
+
+@node Today Scopes
+@subsection Today Scopes
+@cindex today scopes
+@cindex offline retrieval
+  Today commands select locally indexed records within the native scope
+of the source buffer.  They never download Gnus bodies or overview data,
+synchronize mail, update feeds, or fetch linked pages.  A valid scope
+with no matches produces a ready empty snapshot; an unsupported buffer
+or an invalid scope is an error.
+
+@deffn Command tessera-x-gnus-prepare-today-context
+Prepare today's local Agent articles, returning a context request.  In
+Summary, use the current group's Agent overview.  In a Group buffer,
+use the group or topic at point.  Signal a user error in unsupported
+buffers or on a Group line identifying neither a group nor a topic.
+@end deffn
+
+@cindex topics
+  A topic selects its own groups and its descendant topics' groups,
+reading duplicate groups only once.  Selection consults their Agent
+overviews rather than only loaded Summary rows.  Groups without an
+agentized method or a readable overview contribute no records.  Records
+without usable dates are excluded; the remaining records are sorted by
+date before conversation grouping.
+
+@deffn Command tessera-x-mu4e-prepare-today-context
+Obtain a base query from @code{tessera-x-mu4e-today-query-function},
+combine it with @samp{date:today..now}, and start an asynchronous local
+index request.  Return the context request.
+@end deffn
+
+  The default query function reads the current Headers query or the
+bookmark or maildir query item on the current Main line.  A Headers
+buffer without a query, or a Main line without a query item, is a user
+error.  This selects from the index, independently of the number of
+currently displayed rows.
+
+  A nonempty base produces @samp{(@var{base}) AND (date:today..now)};
+an empty base uses @samp{date:today..now} alone.  mu interprets the date
+range as today through now.  Tessera does not substitute a fixed
+24-hour interval.
+
+@defopt tessera-x-mu4e-today-query-function
+A no-argument function returning the base mu query string.  The default
+function reads the native Headers or Main scope described above.  It
+runs in the source buffer before the request is created.
+@end defopt
+
+@cindex custom query functions
+  A custom function can supply an account-specific scope or support
+another source buffer.  It must return a string; an empty string leaves
+today's query without an additional restriction.  For example, replace
+the maildir below with one present in the configured index:
+
+@lisp
+(require 'tessera-x-mu4e)
+
+(defun my-tessera-today-query ()
+  "Return the mail scope for today's context."
+  "maildir:/personal/Inbox")
+
+(setopt tessera-x-mu4e-today-query-function
+        #'my-tessera-today-query)
+@end lisp
+
+@noindent
+This option can have a global or buffer-local value.  Changing it does
+not alter a query already in progress.
+
+@deffn Command tessera-x-elfeed-prepare-today-context
+Prepare today's local entries and return a context request.  In Search,
+use @code{elfeed-search-filter}.  In Tree, combine the Tree filter with
+the native Elfeed filter associated with the current line.  Signal a
+user error in unsupported buffers or on a Tree line without a filter.
+@end deffn
+
+  Elfeed visits its local database, including entries outside the
+currently displayed rows.  Its ordinary filter parser and matcher
+preserve restrictions such as tags and result limits.  The filter is
+not rewritten.  A Tree line's displayed label alone does not specify a
+filter.
+
+@cindex local day boundaries
+  Gnus and Elfeed include local midnight and exclude the following
+midnight.  These calendar boundaries are computed when the command
+runs.  Elfeed's native filter restrictions still apply within that
+interval.  Gaps in local data remain gaps in the snapshot; see
+@ref{Retrieving Content} for missing-body behavior.
+
+@node Retrieving Content
+@section Retrieving Content
+
+  After selecting records, preparation reads the bodies available from
+their application.  Gnus can fetch missing Agent bodies, mu4e reads
+local mail files, and Elfeed can replace stored feed text with a linked
+page.  Retrieval policies apply before the character budgets described
+in @ref{Character Budgets}.
+
+@menu
+* Gnus Agent Bodies: Gnus Download Policy.  Local Agent bodies and optional downloads.
+* Local Mail Files: mu4e Local Retrieval.  Mail files and local index queries.
+* Linked Feed Pages: Elfeed Linked Pages.  Stored feed bodies and linked pages.
+@end menu
+
+@node Gnus Download Policy
+@subsection Gnus Agent Bodies
+@cindex Gnus Agent
+@cindex body policy
+  All Gnus snapshot commands read article bodies from the Agent.  The
+Agent must be enabled, and local retrieval requires Agent data for the
+group.  Downloading a missing body additionally requires an agentized
+method.  Loading Tessera X does not configure those facilities.
+
+@defopt tessera-x-gnus-body-policy
+How selected-article and subthread requests obtain bodies.  The initial
+value @code{download} uses native synchronous Agent fetching for absent
+or empty bodies.  The value @code{local-only} reads existing Agent
+bodies.  Today requests always use local-only retrieval, regardless of
+this option.
+@end defopt
+
+  Downloads are grouped by newsgroup.  When they make bodies available
+in the current Summary group, native availability marks are updated.
+Read and process marks are retained, and the articles are not displayed.
+Emacs waits for Agent downloads to finish before the command returns.
+
+  This option can have a global or buffer-local value.  Changes affect
+subsequent requests, not pending requests or existing snapshot buffers.
+The local-only configuration in @ref{First Snapshot} applies to both
+selected-article and subthread preparation.
+
+@cindex missing bodies
+  An inaccessible body receives the note @samp{Body absent from local
+Agent}, unless a more specific download failure is already recorded.
+A group's download failure is recorded on its affected items so that
+other bodies remain usable.  Available metadata is retained even when
+no body can be read.
+
+@node mu4e Local Retrieval
+@subsection Local Mail Files
+@cindex mu find
+@cindex missing message files
+  mu4e snapshots resolve each selected message's readable local path
+through mu4e and read the complete raw message.  They do not display the
+message or alter its flags.  A missing or unreadable file becomes a
+content note; metadata remains available even when the index refers to
+a file that has moved or disappeared.
+
+  Expanded subthreads and today scopes also query the local mu index.
+Queries use @code{mu4e-mu-binary}.  A non-@code{nil} @code{mu4e-mu-home}
+is expanded and passed as @samp{--muhome}; otherwise the executable uses
+its default.  Query results are sorted by date with duplicates removed;
+subthread expansion includes related messages.
+
+  Index and body access can fail independently.  A query with no matches
+produces an empty snapshot.  A failed query or unreadable query output
+fails the request and reports the error.  An individual body-read
+failure retains that record and its note.  The Headers query and result
+buffer remain unchanged.
+
+@node Elfeed Linked Pages
+@subsection Linked Feed Pages
+@cindex fetch eligibility
+  Elfeed preparation first captures each entry's stored feed body.
+Selected-entry requests can then fetch the entry's link and use the page
+text in the snapshot.  This does not modify Elfeed's stored entry.
+Today requests always use stored bodies and never fetch linked pages.
+
+@defopt tessera-x-elfeed-fetch-linked-content
+Whether selected-entry requests fetch linked pages, initially @code{t}.
+A @code{nil} value uses stored feed content only.
+@end defopt
+
+@defopt tessera-x-elfeed-fetch-minimum-characters
+A stored-body length at or above which retrieval is skipped, or
+@code{nil} to fetch every eligible selected link.  Initially @code{nil}.
+A nonnegative integer counts characters after any HTML feed content has
+been rendered to text.
+@end defopt
+
+  Only links beginning with @samp{http://} or @samp{https://} enter the
+queue.  With a numeric threshold, a shorter body is eligible and
+equality skips fetching.  Zero skips all linked-page retrieval.  Entries
+without an eligible link retain their stored content.
+
+@cindex content types
+  Successful responses must have a status in the 200--299 range and a
+supported media type: @samp{text/html}, @samp{application/xhtml+xml}, or
+@samp{text/plain}.  An absent Content-Type is treated as HTML.  The
+declared charset is used when available, with UTF-8 as the fallback for
+undecoded response bytes.
+
+  HTML is rendered with SHR; plain text is trimmed at its boundaries.
+A nonempty result replaces the item's body and receives the note
+@samp{Fetched linked page}.  Metadata and provenance remain.  This is
+not a specialized article extractor, so page navigation can remain in
+the text.  See @ref{Text Extraction}.
+
+@cindex HTTP fallback
+  A startup error, unsupported media type, HTTP failure, empty result,
+or timeout retains stored feed content.  The note begins @samp{Using
+stored feed content:} and records the reason.  An individual failed page
+does not fail the whole snapshot.  If no stored body exists, the entry's
+metadata is still retained.  Attachment and enclosure URLs remain
+metadata; their files are not downloaded as body text.
+
+@cindex timeouts and concurrency
+@defopt tessera-x-elfeed-fetch-timeout
+Seconds allowed for an active linked-page transfer, initially @code{15}.
+The value is a nonnegative integer.  Time in the queue is excluded;
+expiration falls back to stored feed content.
+@end defopt
+
+@defopt tessera-x-elfeed-fetch-concurrency
+Maximum active linked-page transfers for one request, initially
+@code{4}.  The value is a nonnegative integer; values below one are used
+as one.  Different source buffers have independent request limits.
+@end defopt
+
+  Eligibility, timeout, and concurrency are captured when a request is
+built.  Options can have global or buffer-local values; changing them
+does not reconfigure active requests.  Completing transfers in another
+order does not reorder the snapshot.  Character budgets limit the
+rendered result, not the HTTP transfers.
 
 @node Snapshot Contents
 @section Snapshot Contents
-@cindex metadata
-@cindex provenance
-  The text starts with the application name, creation time, selection
-scope, and item count.  Each numbered item has a subject and date,
-followed by available source information and metadata.  Mail and news
-items can include Message-ID, References, an inferred reply relationship
-from the mail reader, full addresses, labels, and MIME-part
-descriptions.  Feed items include entry and feed URLs, authors, tags,
-and enclosure descriptions.
 
-  These fields come from backend records and available raw content, not
-from rendered Tessera rows.  Unknown dates are identified as such.
-Ordinary metadata fields are printed one per line.  Body text follows
-the metadata and retains its line breaks.
-
-@node Grouping and Order
-@section Grouping and Order
-@cindex conversation grouping
-  Mail and news records are grouped using message identifiers and reply
-relationships.  The @samp{Message-ID} header identifies a message;
-@samp{References} lists earlier messages in the conversation.  Thread
-relationships supplied by the mail reader are also used.  Matching
-subjects alone do not join two conversations.  Groups occur in order of
-their first member, and members keep their input order within each
-group.  A group's printed label is the subject of its first member.
-
-  Elfeed groups records by feed URL, preserving the input order within
-that feed.  A backend's local-index expansion or date query can have a
-different input order from its displayed results.  Grouping does not
-imply that all members of a remote conversation have been discovered.
-
-@node Missing Content
-@section Missing Content
-@cindex missing bodies
-@cindex content notes
-  An item can retain useful metadata even when its body cannot be read.
-A @samp{Content note} explains an unavailable body, an extraction error,
-or a backend fallback.  Such an omission need not fail the whole
-request.  Read these notes before treating a snapshot as complete.
-
-  An empty result is also a valid snapshot for commands whose scope can
-be empty, such as a today query.  It still becomes ready and invokes the
-ready hook.  Commands requiring a current selection may instead signal a
-user error before creating a request.
-
-@node Text Extraction
-@chapter Text Extraction
-
-  Snapshots contain plain body text extracted from messages and feed
-content.  The following rules determine which text and attachment
-information are included.
+  The result contains source information and extracted body text, with
+notes explaining unavailable or omitted content.  Grouping and character
+budgets are applied when the snapshot is rendered.
 
 @menu
-* Mail Bodies::         MIME text, attachments, and security parts.
-* HTML Bodies::         Converting HTML to plain text.
+* Metadata: Metadata and Grouping.  Source fields, grouping, and missing content.
+* Text Extraction::     Converting mail and HTML bodies to text.
+* Character Budgets::   Limiting total and per-body text.
 @end menu
 
-@node Mail Bodies
-@section Mail Bodies and Attachments
+@node Metadata and Grouping
+@subsection Metadata and Grouping
+@cindex metadata
+@cindex provenance
+  A snapshot begins with the application name, creation time, scope,
+and item count.  Each numbered item has a full subject or title and a
+date, followed by available metadata and body text.  Unknown dates are
+identified as such.  Ordinary metadata fields occupy separate lines;
+body text retains its line breaks.
+
+@table @asis
+@item Mail and news
+Items include Message-ID, References, any native inferred parent, full
+addresses, and available labels.  Gnus retains newsgroup provenance and
+combines registry marks, Gmail labels, and Keywords.  mu4e retains the
+maildir and flags, and combines labels and tags without duplicates.
+Reading raw mail can refine address and label header metadata.
+
+@item Feeds
+Items include entry and feed URLs, authors, tags, and enclosure URLs
+and media types where available.  The printed group label is the feed
+title.  These fields come from stored entry records.
+@end table
+
+@cindex conversation grouping
+@cindex feed grouping
+  Mail and news items are grouped by connected message identifiers,
+reply references, and native parent relationships.  Equal subjects do
+not merge unrelated conversations.  The first member's subject supplies
+the group label.  Elfeed groups by feed URL rather than title.
+
+  Groups occur in order of their first member, and each group retains
+its input order.  An index expansion or date query can have a different
+input order from the displayed results.  Grouping does not imply that
+all members of a remote conversation have been discovered.
+
+@cindex content notes
+  A @samp{Content note} records unavailable bodies, extraction errors,
+and retrieval fallbacks.  An item with no body can still provide useful
+metadata.  Read these notes before treating a snapshot as complete.
+An empty successful scope also produces a valid snapshot; commands
+requiring a current selection instead reject an empty selection.
+
+@node Text Extraction
+@subsection Text Extraction
 @cindex MIME
 @cindex attachments
+  Body extraction converts available message, feed, or page content to
+plain text.  It retains quotations and signatures, and collects
+attachment descriptions separately from body text.
+
   For a @samp{multipart/alternative} message, extraction prefers a
 direct @samp{text/plain} alternative, then @samp{text/html}, then the
-first available part.  Other multipart messages are traversed in their
-MIME order.  Plain text is decoded using its declared charset when
-possible; HTML is rendered with SHR.  Quotes and signatures are retained
-rather than stripped from the message.
+first available part.  Other multipart messages are traversed in MIME
+order.  Plain text is decoded using its declared charset when possible;
+HTML is rendered with SHR.
 
-  Attachments contribute names and media types to metadata.  Their file
+  Attachments contribute names and media types to metadata; their file
 contents are not inserted as body text.  Other non-text parts are listed
-by type.  @samp{multipart/encrypted} contributes an explicit notice that
-its contents have not been decrypted.  Extraction disables signature
-verification and decryption; it does not open a message or mark it read.
+by type.  Extraction disables signature verification and decryption.
+An encrypted part contributes a notice that it has not been decrypted.
+A MIME error or a message with no extractable body retains metadata and
+an explanatory content note.
 
-  A missing file or MIME error becomes an item's content note.  Messages
-with no extractable body retain their metadata and a corresponding note.
-
-@node HTML Bodies
-@section HTML Bodies
 @cindex HTML conversion
   HTML conversion uses SHR at a width of 80 columns, with images and
-font styling disabled.  It does not fetch images or styles.  The result
-is plain text with surrounding whitespace removed.
-
-  This is document rendering, not a specialized article extractor.  Page
-navigation and other surrounding text may remain.  Whether an HTML page
-is fetched in the first place is a backend policy; the shared conversion
-function only processes the string given to it.
+font styling disabled.  It fetches neither images nor styles.  The
+result is plain text with surrounding whitespace removed.  Rendering
+can retain navigation and other surrounding text from a page.  Whether
+Elfeed first fetches that page is controlled by @ref{Elfeed Linked
+Pages}; conversion itself only processes the supplied content.
 
 @node Character Budgets
-@chapter Character Budgets
+@subsection Character Budgets
 @cindex character budgets
   Budgets limit the body text included in a snapshot.  They count Emacs
 characters, not bytes or language-model tokens.  They do not bound
@@ -297,87 +676,178 @@ Changing an option does not modify pending requests or published
 snapshots.
 
 @node Snapshot Lifecycle
-@chapter Snapshot Lifecycle
+@section Managing Snapshots
 
-  Each source buffer can have one preparation in progress.  While it
-runs, you can continue to view that buffer's last successful snapshot.
-Completed snapshots remain available until you discard them.
+  Each source buffer owns its current request and remembers its latest
+successful snapshot.  Completion, viewing, and cancellation follow the
+same rules for all applications.
 
 @menu
-* Request States::        Pending, ready, cancelled, and failed work.
-* Managing Snapshots::    Showing and discarding completed snapshots.
-* Cancelling a Request::  Stopping preparation in the source buffer.
+* Completion: Request States.  Completion and pending requests.
+* Viewing Snapshots: Managing Snapshots.  Viewing and discarding snapshots.
+* Cancellation: Cancelling a Request.  Stopping work in the source buffer.
 @end menu
 
 @node Request States
-@section Request States
+@subsection Completion and Pending Requests
 @cindex request states
 @cindex asynchronous requests
-  A preparation request is @code{pending} while work remains.  It
-becomes @code{ready} on success, @code{cancelled} if stopped, or
-@code{failed} if preparation cannot complete.  Only a ready result
-replaces the source buffer's latest snapshot.  Failure and cancellation
-leave the previous successful result available.
+  A request is @code{pending} while preparation remains in progress.
+It becomes @code{ready} on success, @code{failed} if preparation cannot
+complete, or @code{cancelled} if stopped.  Only a ready result replaces
+the source buffer's latest snapshot.  Failure and cancellation leave
+its previous successful result available.
 
-  Starting a request cancels pending work from the same source buffer.
-Requests from other source buffers are unaffected.  Killing the source
-buffer or changing its major mode also cancels its pending work.
+  Commands differ in when they complete:
 
-  Some commands finish preparation before returning.  Others continue
-working in the background, for example while downloading a linked page.
-To run Lisp code when a snapshot becomes ready, see @ref{Consuming
-Snapshots}.
+@table @asis
+@item Gnus
+All preparation is synchronous, including any Agent downloads.  The
+command returns after publication or failure.
+
+@item mu4e
+Selected messages and subthreads limited to current results read their
+files synchronously.  Index expansion and today scopes can remain
+pending while a separate mu process runs.
+
+@item Elfeed
+Preparation with stored content only is synchronous.  Selected-entry
+requests remain pending until all eligible linked-page transfers have
+completed or fallen back to stored content.
+@end table
+
+  A successful request publishes a read-only buffer in Special mode,
+including when the valid scope is empty.  Publication does not select a
+window.  The ready hook can notify Lisp consumers after the result is
+installed; its contract is described in @ref{Consuming Snapshots}.
+
+  Starting another request cancels pending work from the same source.
+Other source buffers are unaffected.  Killing the source or changing its
+major mode also cancels pending work.  Completed snapshots have their
+own lifetime; see @ref{Managing Snapshots}.
 
 @node Managing Snapshots
-@section Managing Snapshots
+@subsection Viewing and Discarding Snapshots
+@cindex snapshot ownership
+  Preparing a new snapshot does not kill earlier successful snapshots.
+The source buffer remembers its latest result; each snapshot buffer
+retains its own context.  Killing the source leaves completed snapshots
+alive.
 
 @deffn Command tessera-x-show-context
 Display the latest successful snapshot associated with the current
-buffer.  Signal a user error if its snapshot buffer is no longer live.
-Preparation itself does not select this buffer; this command does.
+buffer.  From a source buffer, select its latest snapshot; from a
+snapshot buffer, select that snapshot.  Signal a user error if no live
+snapshot buffer is associated with the current buffer.
 @end deffn
-
-@cindex snapshot ownership
-  Each successful request creates a separate, read-only buffer in
-Special mode.  Preparing another snapshot does not kill the previous
-one, so previously displayed snapshots remain readable.  The show
-command in the source buffer selects its latest successful snapshot.
-Killing the source buffer leaves completed snapshots alive.
 
 @deffn Command tessera-x-discard-context
 Kill the snapshot associated with the current source or snapshot buffer.
-If it is the source's latest snapshot, the show command can no longer
-display it.  Signal a user error when there is no associated context.
-Programs using that buffer lose access to its contents.
+If it is the source's latest snapshot, clear the source's reference.
+Signal a user error when there is no associated context.  Programs using
+the snapshot buffer lose access to its contents.
 @end deffn
 
-  You can discard an older snapshot from its own buffer without
-affecting the source's latest snapshot.  Ordinary @code{kill-buffer}
-also removes the snapshot; trying to show it afterward reports that no
-live snapshot exists.  Discarding a completed result does not cancel a
-preparation already in progress.
+  Discard an older snapshot from its own buffer without affecting the
+source's latest snapshot.  Ordinary @code{kill-buffer} also removes a
+snapshot; trying to show it afterward reports that no live result
+exists.  Discarding a completed result does not cancel a preparation
+already in progress.
 
 @node Cancelling a Request
-@section Cancelling a Request
+@subsection Cancellation
 @cindex cancellation
+  Cancellation stops pending preparation in one source buffer while
+retaining its successful snapshots.  It prevents callbacks from
+publishing the cancelled request as a new result.
+
 @deffn Command tessera-x-cancel-context
 Stop preparation in the current source buffer, including any pending
-retrieval.  Retain all successful snapshots.  Do nothing when that
-source has no preparation in progress.
+retrieval.  Retain successful snapshots.  Do nothing when that source
+has no request in progress.
 @end deffn
 
-  Run this command in the source buffer, not in a previously published
-snapshot buffer.  The command can stop an asynchronous index query or
-page download.  It cannot undo a completed Gnus download or interrupt a
-synchronous operation that is currently occupying Emacs.
+  Run this command in the source buffer.  It can stop an asynchronous
+mu index query or linked-page download.  It cannot undo a completed Gnus
+download or interrupt a synchronous operation currently occupying Emacs.
+For automatic cancellation on a new request or source-buffer changes,
+see @ref{Request States}.
+
+@node Troubleshooting
+@section Troubleshooting
+
+  When a snapshot is unavailable or incomplete, first distinguish a
+selection or request failure from an individual item's content note.
+The following checks help locate the relevant setting or data source.
+
+@table @asis
+@item Preparation fails
+Check that the native application is installed and configured and that
+the command supports the current buffer.  Gnus needs an enabled Agent; a
+download also needs an agentized method.  For a mu query failure, check
+@code{mu4e-mu-binary}, @code{mu4e-mu-home}, and the reported error.  See
+@ref{Requirements} and @ref{Retrieving Content}.
+
+@item Expected records are missing
+Check selection marks and the active region first.  For replies,
+distinguish loaded results from local-index expansion; neither can find
+records absent from its source.  Today scopes depend on the group,
+query, or filter at point and the available local data.  Elfeed result
+limits and date restrictions still apply.  See @ref{Selecting Content}.
+
+@item Body text is absent or shorter than expected
+Read content notes for missing files, absent Agent bodies, MIME errors,
+and linked-page fallback.  Elfeed may skip a link because fetching is
+disabled, the stored body reaches the threshold, or the URL is
+ineligible.  Truncation notices instead indicate character budgets.
+Metadata and notices can exceed the total budget.  See @ref{Retrieving
+Content} and @ref{Snapshot Contents}.
+
+@item Retrieval is slow
+Elfeed's timeout applies to each active transfer, excluding queue time;
+its concurrency limit applies to one request.  Gnus downloads are
+synchronous.  Character budgets do not limit retrieval work.
+See @ref{Retrieving Content} and @ref{Request States}.
+
+@item No live snapshot can be shown
+Check that preparation succeeded in this source buffer and that its
+result buffer is still alive.  A failed or cancelled request does not
+publish a replacement; another successful request changes the source's
+latest reference.  See @ref{Managing Snapshots}.
+
+@item A consumer does not receive the result
+Check the ready hook's configuration, the request's completion state,
+and errors from earlier hook functions.  See @ref{Consuming Snapshots}
+for hook execution and failure handling.
+@end table
+
+@cindex bug reports
+  Report reproducible problems at
+@url{https://github.com/brsvh/emacs-tessera/issues}.  Include Emacs,
+package and application versions, the command, relevant options, and
+expected and observed behavior.  Include source material only when
+needed and after removing private information.
+
+@node Programming Contexts
+@chapter Programming Contexts
+
+  Lisp programs can consume a completed snapshot or produce snapshots
+from another source.  This chapter describes those interfaces and their
+ownership, completion, and cleanup contracts.  They belong to an
+experimental package; private helpers containing @samp{--} are not
+extension interfaces.
+
+@menu
+* Consuming Snapshots::  Reading completed contexts and using hooks.
+* Producing Snapshots::  Supplying records and completing requests.
+* Content Helpers: Content Helper Interfaces.  Text, message, and date helpers.
+@end menu
 
 @node Consuming Snapshots
-@chapter Consuming Snapshots
+@section Consuming Snapshots
 
-  This chapter is for Lisp programmers using snapshots in another
-application.  A @dfn{consumer} is code that reads or processes a
-completed snapshot.  It can use the ready hook to run when preparation
-succeeds.
+  A @dfn{consumer} is Lisp code that reads or processes a completed
+snapshot.  It can use the ready hook to run when preparation succeeds.
 
 @defvar tessera-x-current-context
 A buffer-local reference to the latest successful context from a source
@@ -444,28 +914,29 @@ not depend on gptel or install consumer bindings; request submission and
 response display belong to the consumer.
 
 @node Producing Snapshots
-@chapter Producing Snapshots
+@section Producing Snapshots
 
-  This chapter is for Lisp programmers adding a source of snapshots.  A
-@dfn{producer} supplies records, starts a request in the source buffer,
-obtains available content, and finishes the request.  For asynchronous
-work it also registers cleanup and checks request identity before
-handling a callback.  The following interfaces belong to the
-experimental package; private helpers containing @samp{--} are not
-extension interfaces.
+  A @dfn{producer} supplies records, starts a request in the source
+buffer, obtains available content, and finishes the request.  For
+asynchronous work it also registers cleanup and checks request identity
+before handling a callback.
 
   Snapshot request objects are distinct from the entry contexts used to
 render display rows.  @xref{Entry Contexts,,, tessera, Tessera}.
 
 @menu
-* Source Items::        Records supplied by a snapshot producer.
-* Context Objects::     Request data and completed results.
+* Records: Source Items.  Source items and context objects.
 * Request Lifecycle::   Starting, finishing, and cleaning up work.
 * Producer Example::    A small synchronous snapshot producer.
 @end menu
 
 @node Source Items
-@section Source Items
+@subsection Source Items and Context Objects
+
+  Producers use one item record per source message or entry and a
+context object for the request as a whole.  Fill records while the
+request is pending; consumers read them after successful publication.
+
 @cindex source items
 @deftp {Data Type} tessera-x-item
 A record supplied by a backend.  Construct one with
@@ -524,8 +995,6 @@ An optional explanation of missing content or retrieval behavior.
   Construct separate records for a request.  The shared API does not
 recursively copy items or protect their fields from later mutation.
 
-@node Context Objects
-@section Context Objects
 @cindex context objects
 @deftp {Data Type} tessera-x-context
 A request and its eventual result.  Producers normally obtain it from
@@ -559,7 +1028,7 @@ register cleanup; consumers should read ready results without changing
 them.
 
 @node Request Lifecycle
-@section Request Lifecycle
+@subsection Request Lifecycle
 
   Start the request before retrieving content, then finish or fail it
 after checking that it is still current.  Register resource cleanup
@@ -618,7 +1087,7 @@ fail the request when its scope cannot be queried or its result cannot
 be published.
 
 @node Producer Example
-@section A Producer Example
+@subsection A Producer Example
 
   This small synchronous producer demonstrates ownership and completion.
 It is suitable for evaluating in a scratch buffer after loading
@@ -642,20 +1111,23 @@ configured ready hooks.
 @end lisp
 
 @node Content Helper Interfaces
-@chapter Content Helper Interfaces
+@section Content Helper Interfaces
 
   Snapshot producers can use these functions to extract text, follow
 message relationships, and select records by date.  They operate on
 supplied text and records rather than display rows.
 
 @menu
-* Reading Raw Messages::  Extracting message headers and body text.
+* Text Conversion: Reading Raw Messages.  Extracting message and HTML text.
 * Message Relations: Message Relationships.  Identities, descendants, and conversations.
 * Local Day Boundaries::  Finding the current calendar day.
 @end menu
 
 @node Reading Raw Messages
-@section Reading Raw Messages
+@subsection Reading and Converting Content
+
+  These helpers extract headers and body text from supplied messages or
+HTML.  Retrieval remains the producer's responsibility.
 
 @defun tessera-x-read-message item reader
 Call the no-argument function @var{reader} in a temporary unibyte
@@ -667,7 +1139,7 @@ information.  Record failures as content notes and return @var{item}.
 
 @defun tessera-x-html-text html
 Return a plain-text rendering of the string @var{html}, using the
-conversion behavior described in @ref{HTML Bodies}.
+conversion behavior described in @ref{Text Extraction}.
 @end defun
 
   Neither function selects a source window.  The reader is responsible
@@ -675,7 +1147,7 @@ for obtaining its input and must signal an error when it cannot insert a
 usable message.
 
 @node Message Relationships
-@section Message Relationships
+@subsection Message Relationships
 
   Normalize identities and retain native parent relationships before
 selecting descendants or grouping conversations.  These operations use
@@ -725,8 +1197,11 @@ publication.  It preserves separate metadata fields such as the original
 newsgroup or maildir.
 
 @node Local Day Boundaries
-@section Local Day Boundaries
+@subsection Local Day Boundaries
 @cindex local day boundaries
+  Use calendar boundaries to select records from today's local date,
+including days whose length changes with daylight saving time.
+
 @defun tessera-x-today-bounds
 Return a cons of local midnight and the following local midnight as
 Emacs time values.  Compute calendar boundaries in the current local
@@ -736,51 +1211,6 @@ time zone, rather than adding a fixed number of seconds.
   Gnus and Elfeed use the half-open interval from the first boundary up
 to, but excluding, the second.  mu4e instead delegates date selection to
 its native @samp{date:today..now} query.
-
-@node Troubleshooting
-@chapter Troubleshooting
-
-  Use these topics when a snapshot is unavailable, its text is
-incomplete, or a configured consumer does not run.
-
-@menu
-* No Live Snapshot::    When there is no result to display.
-* Incomplete Text: Incomplete Snapshot Text.  Missing bodies and truncated text.
-* Consumer Failures: Consumer Hook Failures.  Diagnosing completion hooks.
-* Reporting Bugs::      Information to include in a bug report.
-@end menu
-
-@node No Live Snapshot
-@section No Live Snapshot
-
-  If showing a snapshot reports that no live result exists, first check
-that preparation completed in this source buffer.  A failed or cancelled
-request does not create a result, and an explicitly killed result cannot
-be shown again.  Preparing another snapshot can replace the reference.
-
-@node Incomplete Snapshot Text
-@section Incomplete Snapshot Text
-
-  If the text is shorter than expected, inspect content notes and budget
-notices separately.  If the text exceeds the budget, check the size of
-metadata and notices.  They are deliberately retained.
-
-@node Consumer Hook Failures
-@section Consumer Hook Failures
-@cindex hook failures
-  If a consumer is not called, confirm that it was added to the ready
-hook before preparation, that the request became ready, and that no
-earlier hook function signalled an error.  Backend manuals describe
-errors in selection and retrieval.
-
-@node Reporting Bugs
-@section Reporting Bugs
-
-  Report reproducible problems at
-@url{https://github.com/brsvh/emacs-tessera/issues}.  Include the
-package and Emacs versions, backend, command, relevant option values,
-and a small description of the observed and expected behavior.  Include
-source material only when needed and after removing private information.
 
 @node Copying
 @appendix GNU Free Documentation License
