@@ -205,6 +205,15 @@ Nil means fetch every selected HTTP link when fetching is enabled."
   "Complete timed out FETCH using its stored feed content."
   (tessera-x-elfeed--complete fetch nil "HTTP timeout"))
 
+(defun tessera-x-elfeed--bom-charset ()
+  "Return the coding system identified by the HTTP body's BOM."
+  (save-excursion
+    (goto-char url-http-end-of-headers)
+    (cond
+     ((looking-at "\xEF\xBB\xBF") 'utf-8-with-signature)
+     ((looking-at "\xFE\xFF") 'utf-16be-with-signature)
+     ((looking-at "\xFF\xFE") 'utf-16le-with-signature))))
+
 (defun tessera-x-elfeed--meta-charset (meta)
   "Return the coding system declared by the HTML META element."
   (let* ((pragma (dom-attr meta 'http-equiv))
@@ -268,7 +277,8 @@ Nil means fetch every selected HTTP link when fetching is enabled."
                  (encoding (mail-content-type-get
                             content-type 'charset))
                  (charset
-                  (or (when encoding
+                  (or (tessera-x-elfeed--bom-charset)
+                      (when encoding
                         (mm-charset-to-coding-system
                          (intern (downcase encoding))))
                       (tessera-x-elfeed--document-charset type)))

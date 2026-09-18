@@ -1465,6 +1465,20 @@
           iso-latin-1 "café")
          ("text/html; charset=utf-8"
           "<meta charset=\"iso-8859-1\">" utf-8 "café")
+         ("text/html; charset=iso-8859-1" ""
+          utf-8-with-signature "café")
+         ("text/html" "<meta charset=iso-8859-1>"
+          utf-8-with-signature "café")
+         ("text/html" "" utf-16le-with-signature "中文正文")
+         ("text/html; charset=utf-8" "<meta charset=utf-8>"
+          utf-16be-with-signature "中文正文")
+         ("application/xhtml+xml" "<?xml version=\"1.0\"?>"
+          utf-16le-with-signature "café")
+         ("application/xhtml+xml" "<?xml version=\"1.0\"?>"
+          utf-16be-with-signature "café")
+         ("text/plain" "" utf-8-with-signature "café")
+         ("text/plain" "" utf-16le-with-signature "中文正文")
+         ("text/plain" "" utf-16be-with-signature "中文正文")
          ("text/html" "" utf-8 "中文正文")
          ("text/plain" "<meta charset=\"iso-8859-1\">"
           utf-8 "café")))
