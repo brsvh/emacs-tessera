@@ -184,6 +184,27 @@
       (should (string-match-p "review.pdf" attachments))
       (should (string-match-p "review.ics" attachments)))))
 
+(ert-deftest tessera-x-multipart-attachments-stay-out-of-bodies ()
+  (dolist (type '("mixed" "alternative"))
+    (let ((item (tessera-x-tests--item "multipart")))
+      (tessera-x-read-message
+       item
+       (lambda ()
+         (insert
+          "MIME-Version: 1.0\n"
+          "Content-Type: multipart/mixed; boundary=outer\n\n"
+          "--outer\nContent-Type: text/plain\n\nMain body\n"
+          "--outer\nContent-Type: multipart/" type
+          "; boundary=inner\nContent-Disposition: attachment;\n"
+          " filename*=utf-8''attached%20mail.mime\n\n"
+          "--inner\nContent-Type: text/plain\n\nAttachment body\n"
+          "--inner--\n--outer--\n")))
+      (should (equal "Main body" (tessera-x-item-body item)))
+      (should
+       (equal (cdr (assoc "Attachments / MIME parts"
+                          (tessera-x-item-metadata item)))
+              (format "attached mail.mime (multipart/%s)" type))))))
+
 (ert-deftest tessera-x-encrypted-body-never-runs-crypto ()
   (let ((item (tessera-x-tests--item "encrypted"))
         (mm-decrypt-option 'always))

@@ -304,10 +304,52 @@ Consumers retaining that snapshot will lose access to its contents."
     (string-trim (buffer-substring-no-properties
                   (point-min) (point-max)))))
 
+(defun tessera-x--mime-attachment (handle)
+  "Return attachment metadata for a single-part MIME HANDLE."
+  (let ((filename (mm-handle-filename handle)))
+    (when (or filename
+              (equal (car (mm-handle-disposition handle))
+                     "attachment"))
+      (format "%s (%s)" (or filename "unnamed attachment")
+              (mm-handle-media-type handle)))))
+
+(defun tessera-x--dissect-message (function &rest arguments)
+  "Call MIME dissection FUNCTION with ARGUMENTS, retaining metadata.
+Native multipart handles discard their container headers.  Capture
+attachment declarations before dissection removes those headers."
+  (let* ((attachment
+          (save-excursion
+            (save-restriction
+              (mail-narrow-to-head)
+              (let ((type (mail-fetch-field "Content-Type"))
+                    (disposition
+                     (mail-fetch-field "Content-Disposition")))
+                (when (and type
+                           (string-prefix-p "multipart/"
+                                            (downcase type)))
+                  (tessera-x--mime-attachment
+                   (mm-make-handle
+                    nil (mail-header-parse-content-type type)
+                    nil nil
+                    (and disposition
+                         (mail-header-parse-content-disposition
+                          disposition)))))))))
+         (handle (apply function arguments)))
+    (when (and attachment (stringp (car handle)))
+      (put-text-property 0 (length (car handle))
+                         'tessera-x--attachment attachment
+                         (car handle)))
+    handle))
+
 (defun tessera-x--mime-part (handle)
   "Extract (BODY . ATTACHMENTS) from MIME HANDLE without actions."
-  (let ((type (mm-handle-media-type handle)))
+  (let ((type (mm-handle-media-type handle))
+        (attachment (if (stringp (car handle))
+                        (get-text-property 0 'tessera-x--attachment
+                                           (car handle))
+                      (tessera-x--mime-attachment handle))))
     (cond
+     (attachment (cons nil (list attachment)))
      ((equal type "multipart/encrypted")
       (cons "[Encrypted content; not decrypted.]" nil))
      ((stringp (car handle))
@@ -325,12 +367,6 @@ Consumers retaining that snapshot will lose access to its contents."
              (results (mapcar #'tessera-x--mime-part chosen)))
         (cons (string-join (delq nil (mapcar #'car results)) "\n\n")
               (cl-mapcan #'cdr results))))
-     ((or (mm-handle-filename handle)
-          (equal (car (mm-handle-disposition handle)) "attachment"))
-      (cons nil (list (format "%s (%s)"
-                              (or (mm-handle-filename handle)
-                                  "unnamed attachment")
-                              type))))
      ((member type '("text/plain" "text/html"))
       (let* ((charset (mail-content-type-get
                        (mm-handle-type handle) 'charset))
@@ -364,7 +400,12 @@ On failure retain metadata and record an explicit content note."
         (let* ((mm-verify-option 'never)
                (mm-decrypt-option 'never)
                (mm-content-id-alist nil)
-               (handle (mm-dissect-buffer t)))
+               (dissect (symbol-function 'mm-dissect-buffer))
+               (handle
+                (cl-letf (((symbol-function 'mm-dissect-buffer)
+                           (apply-partially
+                            #'tessera-x--dissect-message dissect)))
+                  (mm-dissect-buffer t))))
           (unwind-protect
               (pcase-let ((`(,body . ,attachments)
                            (tessera-x--mime-part handle)))
