@@ -38,6 +38,7 @@
 (require 'subr-x)
 (require 'mail-parse)
 (require 'mm-decode)
+(require 'mm-archive)
 (require 'shr)
 (require 'tessera)
 
@@ -402,7 +403,8 @@ attachment declarations before dissection removes those headers."
 (defun tessera-x-read-message (item reader)
   "Read raw mail into ITEM using READER in a temporary buffer.
 READER inserts a complete message.  Extract MIME text and attachment
-metadata without displaying mail, verifying signatures or decrypting.
+metadata without unpacking archives, displaying mail, verifying
+signatures or decrypting.
 On failure retain metadata and record an explicit content note."
   (condition-case err
       (with-temp-buffer
@@ -418,6 +420,7 @@ On failure retain metadata and record an explicit content note."
                     (mail-decode-encoded-word-string value)))))
         (let* ((mm-verify-option 'never)
                (mm-decrypt-option 'never)
+               (mm-archive-decoders nil)
                (mm-content-id-alist nil)
                (tessera-x--mime-buffers nil)
                (dissect (symbol-function 'mm-dissect-buffer))

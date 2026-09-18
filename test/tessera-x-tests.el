@@ -408,6 +408,41 @@
                           (tessera-x-item-metadata item)))
               (format "attached mail.mime (multipart/%s)" type))))))
 
+(ert-deftest tessera-x-mime-archives-remain-metadata ()
+  (let* ((decoders '(("application/ms-tnef" t "tnef" "-f" "-" "-C")
+                     ("application/zip" t "unzip" "-x" "%f" "-d")))
+         (mm-archive-decoders (copy-tree decoders))
+         (item (make-tessera-x-item :id "archives"))
+         (calls 0))
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (&rest _) "/available/decoder"))
+              ((symbol-function 'mm-dissect-archive)
+               (lambda (handle)
+                 (cl-incf calls)
+                 handle)))
+      (tessera-x-read-message
+       item
+       (lambda ()
+         (insert
+          "Content-Type: multipart/mixed; boundary=outer\n\n"
+          "--outer\nContent-Type: text/plain\n\nMain body\n"
+          "--outer\nContent-Type: application/ms-tnef\n"
+          "Content-Disposition: attachment; filename=winmail.dat\n\n"
+          "TNEF payload\n"
+          "--outer\nContent-Type: application/zip\n"
+          "Content-Disposition: attachment; filename=archive.zip\n\n"
+          "ZIP payload\n--outer--\n"))))
+    (should (= calls 0))
+    (should (equal mm-archive-decoders decoders))
+    (should (equal (tessera-x-item-body item) "Main body"))
+    (should-not (tessera-x-item-note item))
+    (should
+     (equal
+      (cdr (assoc "Attachments / MIME parts"
+                  (tessera-x-item-metadata item)))
+      (concat "winmail.dat (application/ms-tnef), "
+              "archive.zip (application/zip)")))))
+
 (ert-deftest tessera-x-encrypted-body-never-runs-crypto ()
   (let ((item (tessera-x-tests--item "encrypted"))
         (mm-decrypt-option 'always))
