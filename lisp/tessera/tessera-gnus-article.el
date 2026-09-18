@@ -186,22 +186,25 @@ successful verification.  Never infer trust from a result string."
                (buffer-live-p (get-buffer gnus-summary-buffer)))
       (let ((handles gnus-article-mime-handles))
         (with-current-buffer gnus-summary-buffer
-          (when (and tessera-gnus-summary--active
-                     gnus-current-headers)
-            (when (tessera-gnus-summary--observe-content
-                   gnus-current-headers handles)
-              (let ((saved-point (tessera-entry-save-point)))
-                (unwind-protect
-                    (when-let* ((position
-                                 (text-property-any
-                                  (point-min) (point-max) 'gnus-number
-                                  (mail-header-number
-                                   gnus-current-headers))))
-                      (goto-char position)
-                      (let ((tessera-gnus-summary--updating t))
-                        (tessera-gnus-summary--sync-line t)))
-                  (tessera-entry-restore-point saved-point)))
-              (tessera-entry-highlight-current))))))))
+          (save-restriction
+            (widen)
+            (when (and tessera-gnus-summary--active
+                       gnus-current-headers)
+              (when (tessera-gnus-summary--observe-content
+                     gnus-current-headers handles)
+                (let ((saved-point (tessera-entry-save-point))
+                      (article
+                       (mail-header-number gnus-current-headers)))
+                  (unwind-protect
+                      (when-let* ((position
+                                   (text-property-any
+                                    (point-min) (point-max)
+                                    'gnus-number article)))
+                        (goto-char position)
+                        (let ((tessera-gnus-summary--updating t))
+                          (tessera-gnus-summary--sync-line t)))
+                    (tessera-entry-restore-point saved-point)))
+                (tessera-entry-highlight-current)))))))))
 
 (provide 'tessera-gnus-article)
 ;;; tessera-gnus-article.el ends here

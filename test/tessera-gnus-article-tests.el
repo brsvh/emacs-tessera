@@ -105,6 +105,42 @@
                          (cadr target)))
             (should (= (point) (tessera-entry-point)))))))))
 
+(ert-deftest tessera-gnus-article-updates-outside-summary-narrowing ()
+  (with-temp-buffer
+    (let ((gnus-show-threads t)
+          (tessera-gnus-summary--active t)
+          (tessera-glyph-style 'ascii))
+      (tessera-gnus-summary--register)
+      (tessera-tests--gnus-rows)
+      (tessera-gnus-summary--sync-buffer)
+      (setq-local gnus-current-headers
+                  (gnus-data-header (gnus-data-find 1)))
+      (forward-line 2)
+      (narrow-to-region (line-beginning-position)
+                        (line-beginning-position 2))
+      (let ((summary (current-buffer))
+            (visible (buffer-string)))
+        (with-temp-buffer
+          (gnus-article-mode)
+          (setq-local gnus-summary-buffer summary)
+          (setq-local gnus-article-mime-handles
+                      (mm-make-handle
+                       (current-buffer) '("application/pdf")
+                       nil nil '("attachment")))
+          (tessera-gnus-article--updated))
+        (should (buffer-narrowed-p))
+        (should (equal (buffer-string) visible))
+        (should (= (point) (point-min)))
+        (should (= (gnus-summary-article-number) 3))
+        (save-restriction
+          (widen)
+          (goto-char (point-min))
+          (let* ((entry (get-text-property
+                         (point) 'tessera-gnus-summary-entry))
+                 (content (plist-get (cdr entry) :content)))
+            (should (eq (plist-get content :attachment)
+                        'present))))))))
+
 (ert-deftest tessera-gnus-article-coalesces-native-content-events ()
   (with-temp-buffer
     (let ((summary (current-buffer))
