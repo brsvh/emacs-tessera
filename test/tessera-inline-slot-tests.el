@@ -19,12 +19,12 @@
          (reference '(:slots status (status :reserve t))))
     (cl-letf (((symbol-function 'display-graphic-p)
                (lambda (&optional _frame) nil)))
-      (let ((empty (tessera--render-segment
-                    reference definition context)))
+      (let ((empty
+             (tessera--render-segment reference definition context)))
         (should (= (tessera--rendered-segment-width empty) 6)))
       (setf (tessera-entry-context-object context) '(:status unread))
-      (let ((filled (tessera--render-segment
-                     reference definition context)))
+      (let ((filled
+             (tessera--render-segment reference definition context)))
         (should (= (tessera--rendered-segment-width filled) 6))
         (should-not (tessera--rendered-segment-truncate filled))
         (should (= 1 (cl-count ?* (tessera--rendered-segment-string

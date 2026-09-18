@@ -52,8 +52,8 @@
        (load-prefer-newer (not package-path))
        (load-no-native t)
        (native-comp-jit-compilation nil)
-       (load-path (append library-directories (list directory)
-                          load-path)))
+       (load-path
+        (append library-directories (list directory) load-path)))
   (when package-path
     (unless library-directories
       (error "TESSERA_TEST_PACKAGE_DIRS is empty"))

@@ -480,8 +480,8 @@ Each item is (TEXT . SOURCES); equal names share one display label."
          (gmail (tessera-gnus-summary--gmail-labels
                  (tessera-gnus-summary--header-field "X-GM-LABELS"
                                                      header)))
-         (keywords (tessera-gnus-summary--header-field "Keywords"
-                                                       header))
+         (keywords
+          (tessera-gnus-summary--header-field "Keywords" header))
          labels)
     (when (stringp keywords)
       (setq keywords (split-string keywords "," t "[[:space:]]+")))
@@ -606,8 +606,8 @@ parents and adopted roots.  Threading follows `gnus-show-threads'."
 (defun tessera-gnus-summary--state (slot context)
   "Return the native state of SLOT in CONTEXT."
   (let* ((spec (assq slot tessera-gnus-summary--states))
-         (marks (plist-get (tessera-entry-context-metadata context)
-                           :marks))
+         (marks
+          (plist-get (tessera-entry-context-metadata context) :marks))
          (mark (aref marks (cadr spec)))
          (variant
           (seq-find
@@ -778,8 +778,8 @@ value.  Signal an error if neither value is an ASCII character."
 
 (defun tessera-gnus-summary--subject (context)
   "Return the article subject in CONTEXT."
-  (let ((subject (mail-header-subject
-                  (tessera-entry-context-object context)))
+  (let ((subject
+         (mail-header-subject (tessera-entry-context-object context)))
         (thread (tessera-entry-context-thread context)))
     (propertize
      (if (string-empty-p subject) "(no subject)" subject)
@@ -815,8 +815,8 @@ value.  Signal an error if neither value is an ASCII character."
 
 (defun tessera-gnus-summary--date (context)
   "Return the native formatted date in CONTEXT."
-  (let ((date (mail-header-date
-               (tessera-entry-context-object context))))
+  (let ((date
+         (mail-header-date (tessera-entry-context-object context))))
     (propertize
      (condition-case nil (gnus-user-date date)
        (error date))
@@ -861,8 +861,8 @@ value.  Signal an error if neither value is an ASCII character."
     (with-current-buffer buffer
       (when-let* ((entry (get-text-property
                           position 'tessera-gnus-summary-entry)))
-        (let* ((content (tessera-gnus-summary--content-data (car
-                                                             entry)))
+        (let* ((content
+                (tessera-gnus-summary--content-data (car entry)))
                (state (plist-get content key))
                (details
                 (plist-get content
@@ -1108,8 +1108,8 @@ Gnus applies its native row face before running the update hook."
       (while (< start end)
         (let ((next (next-single-property-change
                      start 'tessera-gnus-summary-face nil end))
-              (saved (get-text-property
-                      start 'tessera-gnus-summary-face)))
+              (saved
+               (get-text-property start 'tessera-gnus-summary-face)))
           (when saved
             (put-text-property start next 'face (car saved)))
           (setq start next))))))
@@ -1179,8 +1179,10 @@ FORCE also redraws entries with unchanged marks."
       (save-excursion
         (goto-char (point-min))
         (while (< (point) (point-max))
-          (when-let* ((data (gethash (get-text-property
-                                      (point) 'gnus-number) entries)))
+          (when-let* ((data
+                       (gethash
+                        (get-text-property (point) 'gnus-number)
+                        entries)))
             (setf (gnus-data-pos data) (1+ (point))))
           (forward-line 1))))
     (setq gnus-newsgroup-data-reverse nil)))
@@ -1191,14 +1193,14 @@ FORCE also redraws entries whose native marks have not changed.
 FACE-INDEX supplies native face data during a batch update."
   (let* ((start (line-beginning-position))
          (end (line-end-position))
-         (entry (get-text-property
-                 start 'tessera-gnus-summary-entry)))
+         (entry
+          (get-text-property start 'tessera-gnus-summary-entry)))
     (when (and entry (>= (- end start) 4))
-      (let* ((marks (buffer-substring-no-properties
-                     start (+ start 4)))
+      (let* ((marks
+              (buffer-substring-no-properties start (+ start 4)))
              (metadata (cdr entry))
-             (thread (tessera-gnus-summary--thread-context
-                      (car entry)))
+             (thread
+              (tessera-gnus-summary--thread-context (car entry)))
              (native-face (tessera-gnus-summary--native-face
                            (car entry) marks face-index))
              (inhibit-read-only t)
@@ -1213,8 +1215,8 @@ FACE-INDEX supplies native face data during a batch update."
                         (tessera-thread-context-key thread))))
           (tessera-entry-clear-current)
           (tessera-entry-clear-layout start (1+ end))
-          (let* ((updated (plist-put (copy-sequence metadata)
-                                     :marks marks))
+          (let* ((updated
+                  (plist-put (copy-sequence metadata) :marks marks))
                  (rendered (tessera-gnus-summary--render
                             (car entry) updated native-face))
                  (number (get-text-property start 'gnus-number))
@@ -1355,8 +1357,7 @@ FACE-INDEX supplies native face data during a batch update."
                  #'tessera-gnus-summary--disable t)
     (tessera-entry-clear-current)
     (tessera-entry-clear-layout)
-    (tessera--restore-settings
-     tessera-gnus-summary--saved-settings)
+    (tessera--restore-settings tessera-gnus-summary--saved-settings)
     (setq tessera-gnus-summary--saved-settings nil
           tessera-gnus-summary--appearance nil
           tessera-gnus-summary--dirty nil

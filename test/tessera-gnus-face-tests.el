@@ -220,8 +220,7 @@
         (context (make-tessera-entry-context))
         (tessera-glyph-style 'ascii))
     (dolist (tessera-glyph-color '(t nil "blue"))
-      (let* ((text (tessera-glyph-render
-                    glyph context))
+      (let* ((text (tessera-glyph-render glyph context))
              (face (get-text-property 0 'face text)))
         (pcase tessera-glyph-color
           ('t (should (memq 'warning (ensure-list face))))
@@ -242,8 +241,8 @@
       (tessera-tests--gnus-rows)
       (tessera-gnus-summary--sync-buffer)
       (setq gnus-newsgroup-scored '((1 . 20)))
-      (let ((native-face (symbol-function
-                          'tessera-gnus-summary--native-face))
+      (let ((native-face
+             (symbol-function 'tessera-gnus-summary--native-face))
             (calls (make-hash-table))
             index-seen)
         (cl-letf (((symbol-function

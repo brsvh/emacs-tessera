@@ -57,8 +57,8 @@
 (ert-deftest tessera-mu4e-narrowing-keeps-full-buffer-state ()
   (tessera-mu4e-tests--with-thread
     (tessera-mu4e-headers--disable)
-    (let ((native (buffer-substring-no-properties
-                   (point-min) (point-max))))
+    (let ((native
+           (buffer-substring-no-properties (point-min) (point-max))))
       (tessera-mu4e--enable-headers)
       (mu4e~headers-goto-docid 2)
       (narrow-to-region (line-beginning-position)

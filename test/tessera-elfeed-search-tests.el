@@ -54,11 +54,9 @@
     (with-temp-buffer
       (elfeed-search--print-entry entry)
       (should-not (string-match-p "\n" (buffer-string)))
-      (let ((rendered
-             (buffer-substring (point-min) (point-max))))
+      (let ((rendered (buffer-substring (point-min) (point-max))))
         (should
-         (tessera-tests--property-position
-          'display "\n" rendered))
+         (tessera-tests--property-position 'display "\n" rendered))
         (should (string-match-p "\\*" rendered))
         (should (string-match-p "Example Feed" rendered))
         (should (string-match-p
@@ -71,28 +69,24 @@
           'help-echo "Enclosure: application/pdf" rendered)))
       (goto-char (point-min))
       (search-forward "A useful Elfeed entry")
-      (should (equal (get-text-property
-                      (match-beginning 0) 'face)
+      (should (equal (get-text-property (match-beginning 0) 'face)
                      '(tessera-elfeed-search-unread-title-face
                        tessera-elfeed-search-title-face)))
       (should (equal (get-text-property
                       (match-beginning 0) 'follow-link)
                      [elfeed-entry]))
       (search-forward "Example Feed")
-      (should (eq (get-text-property
-                   (match-beginning 0) 'face)
+      (should (eq (get-text-property (match-beginning 0) 'face)
                   'tessera-elfeed-search-unread-feed-face))
       (search-forward "https://example.invalid/entry")
-      (should (eq (get-text-property
-                   (match-beginning 0) 'face)
+      (should (eq (get-text-property (match-beginning 0) 'face)
                   'tessera-elfeed-search-unread-url-face))
       (should (eq (face-attribute
                    'tessera-elfeed-search-url-face
                    :slant nil 'default)
                   'italic))
       (search-forward "emacs")
-      (should (eq (get-text-property
-                   (match-beginning 0) 'face)
+      (should (eq (get-text-property (match-beginning 0) 'face)
                   'tessera-elfeed-search-tag-face))
       (goto-char (point-max))
       (re-search-backward "[[:digit:]]")
@@ -105,8 +99,7 @@
   (let* ((entry (tessera-elfeed-search-tests--entry))
          (elfeed-db '(:version 4))
          (elfeed-db-feeds (make-hash-table :test #'equal))
-         (feed (elfeed-feed--create
-                :id (elfeed-entry-feed-id entry)))
+         (feed (elfeed-feed--create :id (elfeed-entry-feed-id entry)))
          (tessera-entry-layout 'two-line)
          (tessera-glyph-style 'ascii)
          (allocator
@@ -340,8 +333,8 @@
           (goto-char (point-min))
           (delete-region (point) (line-end-position))
           (elfeed-search--print-entry entry)
-          (should (= count (length (overlays-in
-                                    (point-min) (point-max))))))
+          (should (= count
+                     (length (overlays-in (point-min) (point-max))))))
         (should (= 1 (count-lines (point-min) (point-max))))
         (should (eq entry (get-text-property
                            (point-min) 'elfeed-entry)))))))

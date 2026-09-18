@@ -144,8 +144,8 @@
              :ascii "!"
              :face tessera-glyph-warning-face)
             (status-new :ascii "+")))
-         (context (make-tessera-entry-context
-                   :object '(:flags (unread new))))
+         (context
+          (make-tessera-entry-context :object '(:flags (unread new))))
          (slot (tessera-mu4e-headers--slot 'status))
          (tessera-glyph-style 'ascii)
          (tessera-glyph-color t))
@@ -205,8 +205,8 @@
 
 (ert-deftest tessera-glyph-ellipsis-preserves-clipped-anchor ()
   (let* ((tessera-entry-ellipsis "..")
-         (text (propertize "Long thread"
-                           'tessera--overflow-help "Help")))
+         (text
+          (propertize "Long thread" 'tessera--overflow-help "Help")))
     (put-text-property 10 11 'tessera-entry-point t text)
     (should (equal (tessera--truncate-string text 5 'head) "..ead"))
     (should (equal (tessera--truncate-string text 5 'tail) "Lon.."))

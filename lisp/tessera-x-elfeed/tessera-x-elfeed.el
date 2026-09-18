@@ -116,8 +116,8 @@ Nil means fetch every selected HTTP link when fetching is enabled."
   "Group ITEMS by feed identity, retaining their order per feed."
   (let ((groups (make-hash-table :test #'equal)) order)
     (dolist (item items)
-      (let ((key (cdr (assoc "Feed URL"
-                             (tessera-x-item-metadata item)))))
+      (let ((key
+             (cdr (assoc "Feed URL" (tessera-x-item-metadata item)))))
         (unless (gethash key groups) (push key order))
         (push item (gethash key groups))))
     (cl-mapcan (lambda (key) (nreverse (gethash key groups)))

@@ -48,8 +48,7 @@
           (should (= (aref text position) (nth 1 spec)))
           (should (equal (get-text-property position 'face text)
                          (nth 2 spec)))
-          (should (eq (get-text-property
-                       position 'tessera-glyph text)
+          (should (eq (get-text-property position 'tessera-glyph text)
                       t))
           (should (equal (funcall help nil (current-buffer) 1)
                          (string-join (nth 3 spec) "; ")))))
@@ -73,8 +72,7 @@
                (position (text-property-not-all
                           0 (length text)
                           'tessera-glyph nil text)))
-          (should (eq (get-text-property
-                       position 'tessera-glyph text)
+          (should (eq (get-text-property position 'tessera-glyph text)
                       t))
           (should
            (eq (get-text-property position 'face text)
@@ -99,8 +97,8 @@
                      (seen nil personal))
                     ((:flags (seen list)) (seen nil list))
                     ((:flags (seen) :priority low) (seen low nil))))
-      (let ((context (tessera-mu4e-headers--context
-                      (car spec) nil nil)))
+      (let ((context
+             (tessera-mu4e-headers--context (car spec) nil nil)))
         (should
          (equal (mapcar
                  (lambda (slot)
@@ -129,8 +127,8 @@
         (let* ((message (list :from (list (car spec))
                               :to (cadr spec)
                               :flags '(unread)))
-               (context (tessera-mu4e-headers--context
-                         message nil nil))
+               (context
+                (tessera-mu4e-headers--context message nil nil))
                (text (tessera-mu4e-headers--field 'contact context)))
           (should (equal text (nth 2 spec)))
           (should (equal (get-text-property 0 'face text)
@@ -316,8 +314,8 @@
                 (should (looking-at "Subject"))
                 (should (= 1 (mu4e-headers-prev 2)))
                 (should (looking-at "Subject"))
-                (let* ((message (copy-sequence
-                                 (mu4e-message-at-point)))
+                (let* ((message
+                        (copy-sequence (mu4e-message-at-point)))
                        (flags (if (memq 'seen
                                         (plist-get message :flags))
                                   '(unread replied flagged)

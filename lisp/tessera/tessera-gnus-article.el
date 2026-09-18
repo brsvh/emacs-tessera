@@ -72,8 +72,7 @@ successful verification.  Never infer trust from a result string."
                         :encryption nil))
           opaque)
       (cl-labels
-          ((observe
-             (key state details)
+          ((observe (key state details)
              (setq result
                    (plist-put result key
                               (tessera-gnus-article--merge-state
@@ -86,13 +85,12 @@ successful verification.  Never infer trust from a result string."
                        (plist-put result field
                                   (cons details
                                         (plist-get result field)))))))
-           (walk
-             (part)
+           (walk (part)
              (cond
               ((stringp (car-safe part))
                (let* ((type (substring-no-properties (car part)))
-                      (protocol (get-text-property
-                                 0 'protocol (car part)))
+                      (protocol
+                       (get-text-property 0 'protocol (car part)))
                       (key
                        (cond
                         ((or (equal type "multipart/signed")
@@ -105,10 +103,10 @@ successful verification.  Never infer trust from a result string."
                                   (string-suffix-p "_enveloped-data"
                                                    protocol)))
                          :encryption)))
-                      (info (get-text-property
-                             0 'gnus-info (car part)))
-                      (error (get-text-property
-                              0 'sec-error (car part))))
+                      (info
+                       (get-text-property 0 'gnus-info (car part)))
+                      (error
+                       (get-text-property 0 'sec-error (car part))))
                  (when key
                    (observe key (cond (error 'error)
                                       (info 'processed)

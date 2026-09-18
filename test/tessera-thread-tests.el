@@ -356,8 +356,8 @@
        for (top bottom) in
        '((0.2 0.07) (0.05 0.07) (0.05 0.07) (0.05 0.3) (0.2 0.3))
        do
-       (let* ((layout (get-text-property
-                       (point) 'tessera--entry-layout))
+       (let* ((layout
+               (get-text-property (point) 'tessera--entry-layout))
               (above (nth 2 (caar layout))))
          (should (= bottom (cadr layout)))
          (should (= top (plist-get
@@ -459,15 +459,15 @@
     (let ((gnus-show-threads t)
           (tessera-glyph-style 'unicode))
       (tessera-tests--gnus-rows '(2 3))
-      (let* ((entry (get-text-property
-                     (point) 'tessera-gnus-summary-entry))
+      (let* ((entry
+              (get-text-property (point) 'tessera-gnus-summary-entry))
              (header (car entry)))
         (setf (mail-header-subject header) "Author: test subject")
         (dolist (author '("李明 / José Álvarez" "solo@example.test"))
           (setcdr entry (plist-put (cdr entry) :author author))
           (tessera-gnus-summary--build-threads)
-          (let* ((text (tessera-gnus-summary--render
-                        header (cdr entry)))
+          (let* ((text
+                  (tessera-gnus-summary--render header (cdr entry)))
                  (position (tessera-entry-point text)))
             (should position)
             (should (eq (aref text position) (aref author 0)))
@@ -476,9 +476,9 @@
                          (1+ position) 'tessera-entry-point text))
             (should
              (cl-loop for pos below position
-                      thereis (equal (get-text-property
-                                      pos 'display text)
-                                     "\n")))))))))
+                      thereis
+                      (equal (get-text-property pos 'display text)
+                             "\n")))))))))
 
 (ert-deftest tessera-thread-deep-paths-share-ancestors ()
   (let* ((size 2000)

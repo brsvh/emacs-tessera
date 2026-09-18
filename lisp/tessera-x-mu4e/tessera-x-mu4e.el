@@ -81,8 +81,7 @@ A custom function may supply an account-specific query."
    :id (or (plist-get message :docid) (plist-get message :path))
    :message-id (car (tessera-x-message-ids
                      (plist-get message :message-id)))
-   :references (tessera-x-message-ids
-                (plist-get message :references))
+   :references (tessera-x-message-ids (plist-get message :references))
    :subject (plist-get message :subject)
    :date (plist-get message :date)
    :data (list :path (plist-get message :path))

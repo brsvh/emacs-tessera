@@ -438,14 +438,10 @@ aggregate unread state, while contacts retain native message state."
      (passed "Forwarded")
      (personal "Personal")
      (list "Mailing list"))
-    (attach
-     (attach "Attachment present"))
-    (signed
-     (signed "Signed; not verified"))
-    (encrypted
-     (encrypted "Encrypted"))
-    (calendar
-     (calendar "Calendar invitation")))
+    (attach (attach "Attachment present"))
+    (signed (signed "Signed; not verified"))
+    (encrypted (encrypted "Encrypted"))
+    (calendar (calendar "Calendar invitation")))
   "Native glyph variants and help labels, grouped by slot.")
 
 (defvar tessera-mu4e-headers--auxiliary
@@ -647,8 +643,8 @@ Use recipients for personal outgoing mail, as native mu4e does."
                              (window-buffer window)))))
     (with-current-buffer buffer
       (when-let* ((message (get-text-property position 'msg))
-                  (node (tessera-mu4e-headers--thread-context
-                         message)))
+                  (node
+                   (tessera-mu4e-headers--thread-context message)))
         (let* ((parent (tessera-thread-context-parent node))
                (from (and parent
                           (mu4e~headers-field-for-docid
@@ -897,8 +893,9 @@ FORCE also redraws rows whose message and thread state are unchanged."
               (or force (not saved)
                   ;; Reapplying a mark replaces its hidden text too.
                   (not (equal (get-text-property fringe 'display) ""))
-                  (not (equal state (get-text-property
-                                     body 'tessera-mu4e-state)))))
+                  (not (equal state
+                              (get-text-property
+                               body 'tessera-mu4e-state)))))
         ;; Native mark edits can move old padding into the fringe.
         ;; Clear the whole row so no clipped decoration survives.
         (tessera-entry-clear-layout start (1+ end))
@@ -910,10 +907,10 @@ FORCE also redraws rows whose message and thread state are unchanged."
               (insert original)
               (remove-text-properties
                start (1+ (point))
-               '(tessera-mu4e-native nil
-                                     tessera-mu4e-state nil
-                                     tessera--entry-layout nil
-                                     tessera--layout-overlay nil))
+               '( tessera-mu4e-native nil
+                  tessera-mu4e-state nil
+                  tessera--entry-layout nil
+                  tessera--layout-overlay nil))
               (remove-text-properties fringe body '(display nil)))
           (let ((text (tessera-entry-render 'mu4e-headers message)))
             (put-text-property 0 (length text)
@@ -938,8 +935,8 @@ FORCE also redraws rows whose message and thread state are unchanged."
       (unless native
         ;; Even unchanged rows must share this generation's paths.
         ;; Only native messages and marks need mutable-data copies.
-        (when-let* ((snapshot (get-text-property
-                               body 'tessera-mu4e-state)))
+        (when-let* ((snapshot
+                     (get-text-property body 'tessera-mu4e-state)))
           (setf (nth 2 snapshot) (nth 2 state)))
         (if (and mu4e-search-threads
                  (tessera-mu4e-thread-fold-at start))
@@ -991,8 +988,8 @@ FORCE also redraws unchanged messages after presentation changes."
               (if mu4e-search-threads
                   (tessera-mu4e-thread-pad-folds
                    tessera-mu4e-headers--threads)
-                (remove-overlays
-                 nil nil 'tessera-mu4e-fold-padding t))
+                (remove-overlays nil nil
+                                 'tessera-mu4e-fold-padding t))
               (tessera-mu4e-headers--hide-footer)))
         (tessera-entry-restore-point saved-point)))))
 

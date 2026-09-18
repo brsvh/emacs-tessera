@@ -1149,11 +1149,11 @@ Return the number of columns still overflowing."
       (let* ((target (tessera--rendered-segment-target-width segment))
              (natural (tessera--rendered-segment-width segment))
              (maximum (tessera--rendered-segment-max-width segment))
-             (desired (if (and maximum
-                               (tessera--rendered-segment-truncate
-                                segment))
-                          (min natural maximum)
-                        natural))
+             (desired
+              (if (and maximum
+                       (tessera--rendered-segment-truncate segment))
+                  (min natural maximum)
+                natural))
              (increase (min spare-width (- desired target))))
         (setf (tessera--rendered-segment-target-width segment)
               (+ target increase))
@@ -1164,9 +1164,10 @@ Return the number of columns still overflowing."
     (left right slot-width available-width)
   "Fit LEFT and RIGHT segments beside SLOT-WIDTH in AVAILABLE-WIDTH."
   (let* ((segments (append left right))
-         (overflow (max 0 (- (tessera--single-line-width
-                              left right slot-width)
-                             available-width))))
+         (overflow
+          (max 0
+               (- (tessera--single-line-width left right slot-width)
+                  available-width))))
     (setq overflow
           (tessera--shrink-segments
            segments overflow
@@ -1201,8 +1202,8 @@ Return the number of columns still overflowing."
 (defun tessera--ellipsis (width)
   "Return the configured truncation marker within WIDTH columns.
 Use a period if the marker's first character is too wide to fit."
-  (let ((text (truncate-string-to-width
-               tessera-entry-ellipsis width)))
+  (let ((text
+         (truncate-string-to-width tessera-entry-ellipsis width)))
     (if (and (> width 0) (string-empty-p text)) "." text)))
 
 (defun tessera--truncate-string (string width method)
@@ -1317,8 +1318,7 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
   "Return GLYPH's Unicode text when it can display on FRAME."
   (let ((text (tessera-glyph-unicode glyph)))
     (when (and text (display-graphic-p frame)
-               (tessera--glyph-string-displayable-p
-                text frame))
+               (tessera--glyph-string-displayable-p text frame))
       text)))
 
 (defun tessera--nerd-icons-available-p ()
@@ -1661,8 +1661,8 @@ LEADING-WIDTH supplies the shared minimum width of that area."
                       (funcall leading-width context)
                     (or leading-width 0)))
          (slot-width (max minimum (or (cdr slot-area) 0)))
-         (padding (tessera--space
-                   (- slot-width (or (cdr slot-area) 0))))
+         (padding
+          (tessera--space (- slot-width (or (cdr slot-area) 0))))
          (slots (if (eq glyph-align 'left)
                     (concat (car slot-area) padding)
                   (concat padding (car slot-area))))
@@ -1769,8 +1769,8 @@ span using the face of the character under the pointer."
          (position 0)
          (end (length text)))
     (while (< position end)
-      (let ((next (next-single-property-change
-                   position 'face text end)))
+      (let ((next
+             (next-single-property-change position 'face text end)))
         (put-text-property position next 'mouse-face
                            (list :inherit nil) text)
         (setq position next)))
@@ -1795,8 +1795,7 @@ span using the face of the character under the pointer."
          (position 0)
          (length (length rendered))
          (content prefix)
-         (pending (tessera--padding-string
-                   tessera-entry-top-padding))
+         (pending (tessera--padding-string tessera-entry-top-padding))
          placements)
     (put-text-property 0 (length prefix) 'display
                        '(space :width 0) prefix)

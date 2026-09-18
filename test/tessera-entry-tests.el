@@ -246,8 +246,7 @@
        (cl-some
         (lambda (name)
           (when-let* ((string (overlay-get overlay name)))
-            (tessera-tests--property-position
-             property value string)))
+            (tessera-tests--property-position property value string)))
         '(before-string after-string)))
      (overlays-in (point-min) (point-max)))))
 
@@ -456,8 +455,7 @@
     (should (equal text "*"))
     (should (equal (get-text-property 0 'help-echo text)
                    "Indicator"))
-    (should (eq (get-text-property
-                 0 'tessera-glyph text)
+    (should (eq (get-text-property 0 'tessera-glyph text)
                 t))))
 
 (ert-deftest tessera-entry-render-falls-back-from-nerd-icons ()
@@ -505,8 +503,8 @@
             (should (eq (get-text-property
                          position 'tessera-glyph display)
                         t))
-            (let ((hover (get-text-property
-                          position 'mouse-face display)))
+            (let ((hover
+                   (get-text-property position 'mouse-face display)))
               (should (equal (cadr hover)
                              'tessera-entry-hover-face))
               (should (equal
@@ -607,8 +605,7 @@
                       :date "2026"
                       :status unread
                       :local-hover t)))
-                 (title-position
-                  (string-match "Subject" display)))
+                 (title-position (string-match "Subject" display)))
             (should (equal (get-text-property title-position
                                               'mouse-face display)
                            '(link)))))
@@ -795,8 +792,9 @@
           (let ((count
                  (length (overlays-in (point-min) (point-max)))))
             (tessera-entry-apply-layout (point-min) end)
-            (should (= count (length (overlays-in
-                                      (point-min) (point-max))))))
+            (should
+             (= count
+                (length (overlays-in (point-min) (point-max))))))
           (should-not (get-text-property end 'face))
           (should-not (get-text-property end 'line-height))
           (should (equal original (buffer-string)))
@@ -854,8 +852,7 @@
         (dotimes (position start)
           (should (equal (get-text-property position 'display text)
                          '(space :width 0)))
-          (should (equal (get-text-property
-                          position 'mouse-face text)
+          (should (equal (get-text-property position 'mouse-face text)
                          '(:inherit nil))))
         (should (eq (get-text-property start 'mouse-face text)
                     hover))
@@ -1094,14 +1091,15 @@
                       (should
                        (cl-loop for position from index below end
                                 always
-                                (equal face (get-text-property
-                                             position 'face text))))
+                                (equal face
+                                       (get-text-property
+                                        position 'face text))))
                       (when (get-text-property
                              index 'line-height text)
                         (setq padded t))
                       (when (plist-member
-                             (cdr-safe (get-text-property
-                                        index 'display text))
+                             (cdr-safe
+                              (get-text-property index 'display text))
                              :align-to)
                         (setq aligned t))))))))
           (should aligned)

@@ -24,8 +24,8 @@
                     fetch-timeout fetch-concurrency)))
     (let ((prefix (symbol-name (car entry))))
       (dolist (suffix (cdr entry))
-        (let ((option (intern (concat prefix "-"
-                                      (symbol-name suffix)))))
+        (let ((option
+               (intern (concat prefix "-" (symbol-name suffix)))))
           (should (get option 'standard-value))
           (should
            (equal prefix
@@ -389,10 +389,10 @@
   (tessera-x-tests--with-snapshots
     (with-temp-buffer
       (let* ((item (tessera-x-tests--item "feed"))
-             (context (tessera-x-context-start 'elfeed "test"
-                                               (list item)))
-             (request (make-tessera-x-elfeed--request
-                       :context context))
+             (context
+              (tessera-x-context-start 'elfeed "test" (list item)))
+             (request
+              (make-tessera-x-elfeed--request :context context))
              (fetch (make-tessera-x-elfeed--fetch
                      :request request
                      :item item))
@@ -416,8 +416,8 @@
         (let* ((item (tessera-x-tests--item "redirect"))
                (context (tessera-x-context-start
                          'elfeed "redirect" (list item)))
-               (request (make-tessera-x-elfeed--request
-                         :context context))
+               (request
+                (make-tessera-x-elfeed--request :context context))
                (url-dead-buffer-list nil)
                (buffers (cl-loop repeat 3 collect
                                  (generate-new-buffer " *Redirect*")))
@@ -478,8 +478,8 @@
     (with-temp-buffer
       (let* ((items (cl-loop repeat 1000 collect
                              (tessera-x-tests--item "feed")))
-             (context (tessera-x-context-start
-                       'elfeed "failure" items))
+             (context
+              (tessera-x-context-start 'elfeed "failure" items))
              (request (make-tessera-x-elfeed--request
                        :context context
                        :queue (copy-sequence items))))
@@ -607,8 +607,8 @@
       (let* ((item (tessera-x-tests--item "feed"))
              (context (tessera-x-context-start
                        'elfeed "http parser" (list item)))
-             (request (make-tessera-x-elfeed--request
-                       :context context))
+             (request
+              (make-tessera-x-elfeed--request :context context))
              (fetch (make-tessera-x-elfeed--fetch
                      :request request
                      :item item))
@@ -696,17 +696,17 @@
                      (lambda (_) '(nnmaildir "fixture")))
                     ((symbol-function 'gnus-agent-method-p)
                      (lambda (_) t)))
-            (let ((items (tessera-x-gnus--overview
-                          '("group") bounds)))
+            (let ((items
+                   (tessera-x-gnus--overview '("group") bounds)))
               (should (= (length items) 1))
               (should (equal (tessera-x-item-id (car items))
                              '("group" . 2)))
               (should (equal (tessera-x-item-subject (car items))
                              "日本語 review"))
               (should (equal
-                       (cdr (assoc "Labels"
-                                   (tessera-x-item-metadata
-                                    (car items))))
+                       (cdr
+                        (assoc "Labels"
+                               (tessera-x-item-metadata (car items))))
                        "design,review")))))
       (delete-file file))))
 

@@ -311,8 +311,7 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
   "Return the interactive date segment for CONTEXT."
   (elfeed-add-properties
    (elfeed-search-format-date
-    (elfeed-entry-date
-     (tessera-elfeed-search--entry context)))
+    (elfeed-entry-date (tessera-elfeed-search--entry context)))
    'face (if (eq (tessera-elfeed-search--select-status context)
                  'unread)
              'tessera-elfeed-search-unread-date-face
@@ -367,10 +366,8 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
      (date . tessera-elfeed-search--date))
    :glyph-slots (list (tessera-elfeed-search--status-slot))
    :layouts
-   `((single-line
-      . ,(tessera-elfeed-search--single-line-layout))
-     (two-line
-      . ,(tessera-elfeed-search--two-line-layout)))))
+   `((single-line . ,(tessera-elfeed-search--single-line-layout))
+     (two-line . ,(tessera-elfeed-search--two-line-layout)))))
 
 ;;;; Rendering and lifecycle
 
@@ -459,8 +456,7 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (defun tessera-elfeed-search--disable ()
   "Disable Tessera rendering in the current Elfeed search buffer."
   (when tessera-elfeed-search--active
-    (tessera--restore-settings
-     tessera-elfeed-search--saved-settings)
+    (tessera--restore-settings tessera-elfeed-search--saved-settings)
     (remove-hook 'elfeed-search-update-hook
                  #'tessera-elfeed-search--apply-layout t)
     (remove-hook 'post-command-hook

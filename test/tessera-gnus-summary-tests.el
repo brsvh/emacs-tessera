@@ -70,8 +70,8 @@
                   (plist-put (tessera-gnus-tests--metadata t) :author
                              (tessera-gnus-summary--author-name
                               header from)))
-                 (rendered (tessera-gnus-summary--render
-                            header metadata)))
+                 (rendered
+                  (tessera-gnus-summary--render header metadata)))
             (should (equal (plist-get metadata :author) (nth 2 spec)))
             (should (string-match-p
                      (regexp-quote (nth 2 spec)) rendered))
@@ -144,8 +144,8 @@
                          :metadata (list :marks marks))))
           (cl-progv (list mark) (list character)
             (tessera-gnus-summary--register)
-            (let* ((backend (gethash 'gnus-summary
-                                     tessera--entry-backends))
+            (let* ((backend
+                    (gethash 'gnus-summary tessera--entry-backends))
                    (slot (seq-find
                           (lambda (slot)
                             (eq (tessera-glyph-slot-name slot)
@@ -205,13 +205,11 @@
             (should (equal (substring-no-properties text 0 4)
                            marks)))
           (should (tessera-gnus-summary--unread-p context))
-          (should (eq (tessera-gnus-summary--state
-                       'secondary context)
+          (should (eq (tessera-gnus-summary--state 'secondary context)
                       'processable))
           (setf (tessera-entry-context-metadata context)
                 (tessera-gnus-tests--metadata))
-          (should-not
-           (tessera-gnus-summary--unread-p context)))))))
+          (should-not (tessera-gnus-summary--unread-p context)))))))
 
 (ert-deftest tessera-gnus-custom-marks-restore-existing-and-new
     ()
@@ -351,8 +349,8 @@
         (insert mark))
       (tessera-gnus-summary--sync-line)
       (let* ((start (line-beginning-position))
-             (entry (get-text-property
-                     start 'tessera-gnus-summary-entry)))
+             (entry
+              (get-text-property start 'tessera-gnus-summary-entry)))
         (should (= (aref (plist-get (cdr entry) :marks) 0)
                    gnus-ticked-mark))
         (should (= (get-text-property (+ start 5) 'gnus-number) 42))
@@ -599,8 +597,8 @@
     (should (eq (plist-get (tessera-gnus-summary--content-data header)
                            :attachment) 'unknown))
     (with-temp-buffer
-      (let ((handle (mm-make-handle (current-buffer)
-                                    '("text/plain"))))
+      (let ((handle
+             (mm-make-handle (current-buffer) '("text/plain"))))
         (should (tessera-gnus-summary--observe-content header handle))
         (should-not (tessera-gnus-summary--observe-content
                      header handle))

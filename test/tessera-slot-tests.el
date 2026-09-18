@@ -51,8 +51,8 @@
          nil definition context)))
       (setf (tessera-entry-context-object context) 'present)
       (setq calls 0)
-      (let ((shown (tessera--render-slot-group
-                    optional definition context))
+      (let ((shown
+             (tessera--render-slot-group optional definition context))
             (reserved (tessera--render-slot-group
                        '((status :optional t :reserve t))
                        definition context)))
@@ -198,8 +198,7 @@
                              (get-text-property
                               index 'help-echo text)))
               (should (equal '(raise 0.1)
-                             (get-text-property
-                              index 'display text)))
+                             (get-text-property index 'display text)))
               (should (get-text-property index 'mouse-face text)))))))
     (should (equal-including-properties original glyph-text))))
 

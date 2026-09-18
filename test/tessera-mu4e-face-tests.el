@@ -23,8 +23,8 @@
                      (:flags (seen passed))
                      (:flags (seen) :meta (:related t))))
     (let* ((input (propertize "Subject" 'help-echo "Details"))
-           (native (mu4e~headers-apply-flags
-                    message (copy-sequence input)))
+           (native
+            (mu4e~headers-apply-flags message (copy-sequence input)))
            (text (tessera-mu4e-headers--styled-text 'subject message
                                                     input))
            (faces (get-text-property 0 'face text)))

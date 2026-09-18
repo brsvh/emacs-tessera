@@ -81,8 +81,8 @@
                        (plist-get (get-text-property
                                    (overlay-start fold) 'msg) :docid)
                        contexts)))
-      (let ((overlay (make-overlay (overlay-start fold)
-                                   (overlay-end fold))))
+      (let ((overlay
+             (make-overlay (overlay-start fold) (overlay-end fold))))
         (overlay-put overlay 'tessera-entry-overlay t)
         (overlay-put overlay 'tessera-mu4e-fold-padding t)
         (overlay-put overlay 'evaporate t)
