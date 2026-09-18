@@ -54,6 +54,34 @@
                (progn ,@body)
              (tessera-mu4e-headers--disable)))))))
 
+(ert-deftest tessera-mu4e-narrowing-keeps-full-buffer-state ()
+  (tessera-mu4e-tests--with-thread
+    (tessera-mu4e-headers--disable)
+    (let ((native (buffer-substring-no-properties
+                   (point-min) (point-max))))
+      (tessera-mu4e--enable-headers)
+      (mu4e~headers-goto-docid 2)
+      (narrow-to-region (line-beginning-position)
+                        (save-excursion (forward-line 1) (point)))
+      (setq tessera-mu4e-headers--dirty t)
+      (tessera-mu4e-headers--refresh)
+      (should (buffer-narrowed-p))
+      (should (= 5 (hash-table-count tessera-mu4e-headers--threads)))
+      (should (= 1 (tessera-thread-context-parent
+                    (gethash 2 tessera-mu4e-headers--threads))))
+      (tessera-mu4e-headers--disable)
+      (should (buffer-narrowed-p))
+      (should (= 2 (mu4e~headers-docid-at-point)))
+      (widen)
+      (should (equal native (buffer-substring-no-properties
+                             (point-min) (point-max))))
+      (should-not (text-property-not-all
+                   (point-min) (point-max) 'tessera-mu4e-native nil))
+      (should-not
+       (seq-some (lambda (overlay)
+                   (overlay-get overlay 'tessera-entry-overlay))
+                 (overlays-in (point-min) (point-max)))))))
+
 (ert-deftest tessera-mu4e-thread-tree-survives-narrow-allocation ()
   (tessera-mu4e-headers--register)
   (let* ((definition (tessera--find-entry-backend 'mu4e-headers))
