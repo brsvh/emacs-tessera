@@ -319,6 +319,20 @@ Consumers retaining that snapshot will lose access to its contents."
       (format "%s (%s)" (or filename "unnamed attachment")
               (mm-handle-media-type handle)))))
 
+(defvar tessera-x--mime-buffers nil
+  "Buffers allocated during the dynamically bound MIME extraction.")
+
+(defun tessera-x--copy-mime-buffer (function)
+  "Call FUNCTION, recording buffers before it can fail or quit."
+  (let ((allocate (symbol-function 'generate-new-buffer)))
+    (cl-letf (((symbol-function 'generate-new-buffer)
+               (lambda (&rest arguments)
+                 (let ((inhibit-quit t))
+                   (push (apply allocate arguments)
+                         tessera-x--mime-buffers)
+                   (car tessera-x--mime-buffers)))))
+      (funcall function))))
+
 (defun tessera-x--dissect-message (function &rest arguments)
   "Call MIME dissection FUNCTION with ARGUMENTS, retaining metadata.
 Native multipart handles discard their container headers.  Capture
@@ -405,24 +419,34 @@ On failure retain metadata and record an explicit content note."
         (let* ((mm-verify-option 'never)
                (mm-decrypt-option 'never)
                (mm-content-id-alist nil)
+               (tessera-x--mime-buffers nil)
                (dissect (symbol-function 'mm-dissect-buffer))
-               (handle
+               (copy (symbol-function 'mm-copy-to-buffer))
+               handle)
+          (unwind-protect
+              (progn
                 (cl-letf (((symbol-function 'mm-dissect-buffer)
                            (apply-partially
-                            #'tessera-x--dissect-message dissect)))
-                  (mm-dissect-buffer t))))
-          (unwind-protect
-              (pcase-let ((`(,body . ,attachments)
-                           (tessera-x--mime-part handle)))
-                (setf (tessera-x-item-body item) body)
-                (when attachments
-                  (push (cons "Attachments / MIME parts"
-                              (string-join attachments ", "))
-                        (tessera-x-item-metadata item)))
-                (when (string-empty-p (or body ""))
-                  (setf (tessera-x-item-note item)
-                        "No extractable text body")))
-            (mm-destroy-parts handle))))
+                            #'tessera-x--dissect-message dissect))
+                          ((symbol-function 'mm-copy-to-buffer)
+                           (apply-partially
+                            #'tessera-x--copy-mime-buffer copy)))
+                  (setq handle (mm-dissect-buffer t)))
+                (pcase-let ((`(,body . ,attachments)
+                             (tessera-x--mime-part handle)))
+                  (setf (tessera-x-item-body item) body)
+                  (when attachments
+                    (push (cons "Attachments / MIME parts"
+                                (string-join attachments ", "))
+                          (tessera-x-item-metadata item)))
+                  (when (string-empty-p (or body ""))
+                    (setf (tessera-x-item-note item)
+                          "No extractable text body"))))
+            (unwind-protect
+                (mm-destroy-parts handle)
+              (dolist (buffer tessera-x--mime-buffers)
+                (when (buffer-live-p buffer)
+                  (kill-buffer buffer)))))))
     (error (setf (tessera-x-item-note item)
                  (error-message-string err))))
   item)

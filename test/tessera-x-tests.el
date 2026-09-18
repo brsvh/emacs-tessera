@@ -337,6 +337,56 @@
       (should (string-match-p "review.pdf" attachments))
       (should (string-match-p "review.ics" attachments)))))
 
+(ert-deftest tessera-x-mime-failures-release-partial-buffers ()
+  (dolist (condition '(nil error quit))
+    (let ((item (make-tessera-x-item :id "interrupted"))
+          (copy (symbol-function 'mm-copy-to-buffer))
+          (unrelated (generate-new-buffer " *mm*"))
+          (calls 0)
+          buffers)
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'mm-copy-to-buffer)
+                       (lambda ()
+                         (let ((buffer (funcall copy)))
+                           (push buffer buffers)
+                           (when (and (= (cl-incf calls) 3) condition)
+                             (signal condition '("MIME interrupted")))
+                           buffer))))
+              (should
+               (eq (condition-case err
+                       (progn
+                         (tessera-x-read-message
+                          item
+                          (lambda ()
+                            (insert
+                             "From: Sender <sender@example.invalid>\n"
+                             "Content-Type: multipart/mixed;"
+                             " boundary=outer\n\n"
+                             "--outer\nContent-Type: text/plain\n\n"
+                             "First body\n"
+                             "--outer\nContent-Type: text/plain\n\n"
+                             "Second body\n--outer--\n")))
+                         nil)
+                     (quit (car err)))
+                   (and (eq condition 'quit) 'quit))))
+            (should (= (length buffers) 3))
+            (should-not (cl-some #'buffer-live-p buffers))
+            (should (buffer-live-p unrelated))
+            (should
+             (equal
+              (cdr (assoc "From" (tessera-x-item-metadata item)))
+              "Sender <sender@example.invalid>"))
+            (when (eq condition 'error)
+              (should (string-match-p "MIME interrupted"
+                                      (tessera-x-item-note item))))
+            (unless condition
+              (should (equal (tessera-x-item-body item)
+                             "First body\n\nSecond body"))))
+        (dolist (buffer (cons unrelated buffers))
+          (when (buffer-live-p buffer)
+            (kill-buffer buffer)))))))
+
 (ert-deftest tessera-x-multipart-attachments-stay-out-of-bodies ()
   (dolist (type '("mixed" "alternative"))
     (let ((item (tessera-x-tests--item "multipart")))
