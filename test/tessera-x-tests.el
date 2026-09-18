@@ -1350,6 +1350,60 @@
             (should (equal (tessera-x-item-note item)
                            "Fetched linked page"))))))))
 
+(ert-deftest tessera-x-elfeed-http-detects-document-charset ()
+  (pcase-dolist
+      (`(,type ,declaration ,coding ,body)
+       `(("text/html" "<meta charset=\"gb18030\">"
+          chinese-gbk "中文正文")
+         ("text/html" "<meta charset='iso-8859-1'>"
+          iso-latin-1 "café")
+         ("text/html"
+          ,(concat "<meta http-equiv='Content-Type' "
+                   "content='text/html; charset=iso-8859-1'>")
+          iso-latin-1 "café")
+         ("application/xhtml+xml"
+          "<?xml version=\"1.0\" encoding=\"iso-8859-1\"?>"
+          iso-latin-1 "café")
+         ("text/html; charset=utf-8"
+          "<meta charset=\"iso-8859-1\">" utf-8 "café")
+         ("text/html" "" utf-8 "中文正文")
+         ("text/plain" "<meta charset=\"iso-8859-1\">"
+          utf-8 "café")))
+    (ert-info ((format "%s: %s" type declaration))
+      (tessera-x-tests--with-snapshots
+        (with-temp-buffer
+          (let* ((item (tessera-x-tests--item "feed"))
+                 (context (tessera-x-context-start
+                           'elfeed "document charset" (list item)))
+                 (request
+                  (make-tessera-x-elfeed--request :context context))
+                 (fetch (make-tessera-x-elfeed--fetch
+                         :request request
+                         :item item))
+                 (response (generate-new-buffer " *HTTP fixture*"))
+                 (html
+                  (if (string-prefix-p "<?xml" declaration)
+                      (concat declaration "<html><body>"
+                              body "</body></html>")
+                    (concat "<html><head>" declaration
+                            "</head><body>" body "</body></html>"))))
+            (setf (tessera-x-elfeed--request-active request)
+                  (list fetch))
+            (with-current-buffer response
+              (set-buffer-multibyte nil)
+              (insert "HTTP/1.1 200 OK\r\nContent-Type: " type
+                      "\r\nX-Charset: utf-8\r\n\r\n")
+              (setq-local url-http-response-status 200)
+              (setq-local url-http-end-of-headers (point-marker))
+              (insert (encode-coding-string html coding))
+              (tessera-x-elfeed--response nil fetch))
+            (should (eq (tessera-x-context-state context) 'ready))
+            (should-not (buffer-live-p response))
+            (should (equal (tessera-x-item-body item)
+                           (if (equal type "text/plain") html body)))
+            (should (equal (tessera-x-item-note item)
+                           "Fetched linked page"))))))))
+
 (ert-deftest tessera-x-elfeed-today-keeps-filter-and-local-boundaries
     ()
   (tessera-x-tests--with-snapshots
