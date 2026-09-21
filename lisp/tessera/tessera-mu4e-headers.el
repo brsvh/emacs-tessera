@@ -355,6 +355,9 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (declare-function mu4e~headers-apply-flags "mu4e-headers")
 (declare-function mu4e~headers-thread-root-p "mu4e-headers")
 (declare-function mu4e-get-headers-buffer "mu4e-window")
+(declare-function mu4e-select-other-view "mu4e-helpers")
+(declare-function mu4e-headers-view-message "mu4e-headers")
+(declare-function mu4e-thread-next "mu4e-thread")
 (declare-function mu4e~headers-docid-at-point "mu4e-headers")
 (declare-function mu4e~headers-field-for-docid "mu4e-headers")
 
@@ -466,6 +469,9 @@ These flags follow `mu4e-headers-visible-flags'.")
   "Snapshot of layout and logical navigation settings.")
 (defvar-local tessera-mu4e-headers--saved-hl-line nil
   "Whether native line highlighting was enabled.")
+
+(defvar tessera-mu4e-headers--moving nil
+  "Non-nil while an outer native header move is in progress.")
 
 ;;;; Thread contexts from native result rows
 
@@ -1067,13 +1073,108 @@ Return RESULT unchanged, including native docids and positions."
     (tessera-mu4e-headers--position-point))
   result)
 
-(defun tessera-mu4e-headers--command (function &rest arguments)
-  "Normalize interactive navigation by FUNCTION with ARGUMENTS.
-Thread commands also serve native fold-boundary calculations;
-those noninteractive calls must retain their original positions."
-  (let ((interactive (called-interactively-p 'any)))
-    (prog1 (apply function arguments)
-      (when interactive (tessera-mu4e-headers--position-point)))))
+(defun tessera-mu4e-headers--position-after-move (_result)
+  "Normalize the layout anchor after identity-changing navigation."
+  (tessera-mu4e-headers--position-point))
+
+(defun tessera-mu4e-headers--move (function &rest arguments)
+  "Run native move FUNCTION with ARGUMENTS atomically.
+Retain native return values.  A numeric result identifies the
+selected target; otherwise restore point and all headers windows."
+  (let ((buffer (mu4e-get-headers-buffer)))
+    (if (or tessera-mu4e-headers--moving
+            (not (buffer-live-p buffer))
+            (not (buffer-local-value
+                  'tessera-mu4e-headers--active buffer)))
+        (apply function arguments)
+      (let ((tessera-mu4e-headers--moving t))
+        (tessera--navigation-call
+         buffer function arguments #'numberp
+         #'tessera-mu4e-headers--moved)))))
+
+(defun tessera-mu4e-headers--move-interactively
+    (function &rest arguments)
+  "Run interactive navigation FUNCTION with ARGUMENTS atomically."
+  (if (called-interactively-p 'any)
+      (apply #'tessera-mu4e-headers--move function arguments)
+    (apply function arguments)))
+
+(defun tessera-mu4e-headers--docid (buffer)
+  "Return the selected native message identity in BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (mu4e~headers-docid-at-point))))
+
+(defun tessera-mu4e-headers--move-to-identity-1
+    (buffer function arguments)
+  "Run FUNCTION with ARGUMENTS for BUFFER by message identity."
+  (let ((before (tessera-mu4e-headers--docid buffer))
+        (tessera-mu4e-headers--moving t))
+    (tessera--navigation-call
+     buffer function arguments
+     (lambda (_result)
+       (not (eql before
+                 (tessera-mu4e-headers--docid buffer))))
+     #'tessera-mu4e-headers--position-after-move)))
+
+(defun tessera-mu4e-headers--move-to-identity
+    (function &rest arguments)
+  "Run identity-changing FUNCTION with ARGUMENTS atomically."
+  (let ((buffer (mu4e-get-headers-buffer)))
+    (if (or (not (called-interactively-p 'any))
+            tessera-mu4e-headers--moving
+            (not (buffer-live-p buffer))
+            (not (buffer-local-value
+                  'tessera-mu4e-headers--active buffer)))
+        (apply function arguments)
+      (tessera-mu4e-headers--move-to-identity-1
+       buffer function arguments))))
+
+(defun tessera-mu4e-headers--fold-move-to-identity
+    (function &rest arguments)
+  "Run folding navigation FUNCTION with ARGUMENTS.
+Do so only when the current thread has a following target."
+  (let ((buffer (mu4e-get-headers-buffer)))
+    (if (or (not (called-interactively-p 'any))
+            tessera-mu4e-headers--moving
+            (not (buffer-live-p buffer))
+            (not (buffer-local-value
+                  'tessera-mu4e-headers--active buffer)))
+        (apply function arguments)
+      (when-let* ((target
+                   (with-current-buffer buffer
+                     (mu4e-thread-next))))
+        (tessera-mu4e-headers--move-to-identity-1
+         buffer
+         (lambda (&rest native-arguments)
+           (cl-letf (((symbol-function 'mu4e-thread-next)
+                      (lambda () target)))
+             (apply function native-arguments)))
+         arguments)))))
+
+(defun tessera-mu4e-headers--view-prev-or-next
+    (function move backwards)
+  "Call native view FUNCTION using MOVE and BACKWARDS.
+Select the other view and display the new message after MOVE returns
+a native docid.  Suppress those view side effects at a boundary."
+  (let ((select-function
+         (symbol-function 'mu4e-select-other-view))
+        (view-function
+         (symbol-function 'mu4e-headers-view-message))
+        move-result
+        result)
+    (cl-letf (((symbol-function 'mu4e-select-other-view) #'ignore)
+              ((symbol-function 'mu4e-headers-view-message) #'ignore))
+      (setq result
+            (funcall
+             function
+             (lambda (&rest arguments)
+               (setq move-result (apply move arguments)))
+             backwards)))
+    (if (not (numberp move-result))
+        result
+      (funcall select-function)
+      (funcall view-function))))
 
 (defun tessera-mu4e-headers--update (function &rest arguments)
   "Preserve a layout anchor across native FUNCTION with ARGUMENTS.
@@ -1096,25 +1197,50 @@ message only while it remains selected after the native update."
 (defun tessera-mu4e-headers--navigation (enable)
   "Install navigation integration when ENABLE is non-nil, or remove."
   (tessera-mu4e-thread-track enable)
-  (dolist (function '(mu4e~headers-move
-                      mu4e~headers-prev-or-next-unread
+  (if enable
+      (advice-add 'mu4e--view-prev-or-next :around
+                  #'tessera-mu4e-headers--view-prev-or-next)
+    (advice-remove 'mu4e--view-prev-or-next
+                   #'tessera-mu4e-headers--view-prev-or-next))
+  (if enable
+      (advice-add 'mu4e~headers-move :around
+                  #'tessera-mu4e-headers--move)
+    (advice-remove 'mu4e~headers-move
+                   #'tessera-mu4e-headers--move))
+  (dolist (function '(mu4e~headers-prev-or-next-unread
                       mu4e-headers-goto-message-id))
     (if enable
         (advice-add function :filter-return
                     #'tessera-mu4e-headers--moved)
       (advice-remove function #'tessera-mu4e-headers--moved)))
   (dolist (function '(mu4e-headers-prev-thread
-                      mu4e-headers-next-thread
-                      mu4e-thread-goto-root
-                      mu4e-thread-fold-goto-next
-                      mu4e-thread-unfold-goto-next
-                      mu4e-thread-fold-toggle-goto-next
+                      mu4e-headers-next-thread))
+    (if enable
+        (advice-add function :around
+                    #'tessera-mu4e-headers--move-interactively)
+      (advice-remove function
+                     #'tessera-mu4e-headers--move-interactively)))
+  (dolist (function '(mu4e-thread-goto-root
+                      mu4e-headers-thread-goto-root
+                      mu4e-view-headers-prev-unread
+                      mu4e-view-headers-next-unread
                       mu4e-view-headers-prev-thread
                       mu4e-view-headers-next-thread))
     (if enable
         (advice-add function :around
-                    #'tessera-mu4e-headers--command)
-      (advice-remove function #'tessera-mu4e-headers--command)))
+                    #'tessera-mu4e-headers--move-to-identity)
+      (advice-remove function
+                     #'tessera-mu4e-headers--move-to-identity)))
+  (dolist (function '(mu4e-thread-fold-goto-next
+                      mu4e-thread-unfold-goto-next
+                      mu4e-thread-fold-toggle-goto-next
+                      mu4e-headers-thread-fold-toggle-goto-next))
+    (if enable
+        (advice-add
+         function :around
+         #'tessera-mu4e-headers--fold-move-to-identity)
+      (advice-remove
+       function #'tessera-mu4e-headers--fold-move-to-identity)))
   (if enable
       (progn
         (advice-add 'mu4e~headers-update-handler :around

@@ -23,10 +23,10 @@
 (tessera-elfeed-search--register)
 
 (defun tessera-elfeed-search-tests--entry
-    (&optional tags enclosures)
-  "Return an Elfeed entry with TAGS and ENCLOSURES for tests."
+    (&optional tags enclosures id)
+  "Return an Elfeed entry with TAGS, ENCLOSURES, and optional ID."
   (elfeed-entry--create
-   :id '("https://example.invalid/feed" . "entry")
+   :id (or id '("https://example.invalid/feed" . "entry"))
    :title "A useful Elfeed entry"
    :link "https://example.invalid/entry"
    :date 1755475200.0
@@ -55,6 +55,9 @@
       (elfeed-search--print-entry entry)
       (should-not (string-match-p "\n" (buffer-string)))
       (let ((rendered (buffer-substring (point-min) (point-max))))
+        (should
+         (= (tessera-entry-point rendered)
+            (string-match "A useful Elfeed entry" rendered)))
         (should
          (tessera-tests--property-position 'display "\n" rendered))
         (should (string-match-p "\\*" rendered))
@@ -341,6 +344,608 @@
         (should-not (local-variable-p 'tessera-entry-layout))
         (should (eq tessera-entry-layout 'single-line))
         (should (eq (key-binding (kbd "C-n")) #'next-line))))))
+
+(ert-deftest tessera-elfeed-search-proxies-local-navigation ()
+  (let ((moves 0)
+        (shows 0)
+        (elfeed-db '(:version 4))
+        (elfeed-db-feeds (make-hash-table :test #'equal))
+        (elfeed-search-remain-on-entry '(show)))
+    (cl-letf (((symbol-function 'elfeed-search-update) #'ignore)
+              ((symbol-function 'elfeed-show-entry)
+               (lambda (_entry)
+                 (setq shows (1+ shows)))))
+      (with-temp-buffer
+        (setq major-mode 'elfeed-search-mode)
+        (use-local-map (copy-keymap elfeed-search-mode-map))
+        (let* ((next
+                (lambda ()
+                  (interactive)
+                  (setq moves (1+ moves))
+                  (ignore-errors (line-move 1))
+                  (when-let*
+                      ((entry
+                        (tessera-elfeed-search--entry-at-point)))
+                    (elfeed-search-show-entry entry))))
+               (previous
+                (lambda ()
+                  (interactive)
+                  (setq moves (1+ moves))
+                  (elfeed-search-show-entry
+                   (tessera-elfeed-search--entry-at-point))
+                  (ignore-errors (line-move -1))))
+               (replacement
+                (lambda ()
+                  (interactive)
+                  (setq moves (1+ moves))
+                  (ignore-errors (line-move 1))
+                  (when-let*
+                      ((entry
+                        (tessera-elfeed-search--entry-at-point)))
+                    (elfeed-search-show-entry entry))))
+               entries)
+          (local-set-key (kbd "n") next)
+          (local-set-key (kbd "p") previous)
+          (dotimes (index 3)
+            (let ((entry
+                   (tessera-elfeed-search-tests--entry
+                    nil nil
+                    (cons "https://example.invalid/feed"
+                          (format "entry-%d" index)))))
+              (push entry entries)
+              (let ((start (point)))
+                (insert
+                 (propertize (format "  Entry %d" index)
+                             'elfeed-entry entry))
+                (put-text-property
+                 (+ start 2) (+ start 3)
+                 'tessera-entry-point t)
+                (insert "\n"))))
+          (setq entries (nreverse entries))
+          (goto-char (point-min))
+          (forward-char 4)
+          (tessera-elfeed-search--enable)
+          (let ((point (point)))
+            (should-not
+             (call-interactively (key-binding (kbd "p"))))
+            (should (= (point) point))
+            (should (eq (tessera-elfeed-search--entry-at-point)
+                        (car entries)))
+            (should (zerop moves))
+            (should (zerop shows)))
+          (call-interactively (key-binding (kbd "n")))
+          (should (= moves 1))
+          (should (= shows 1))
+          (should (= (point) (tessera-entry-point)))
+          (should (= (current-column) 2))
+          (should (eq (tessera-elfeed-search--entry-at-point)
+                      (cadr entries)))
+          (local-set-key (kbd "n") replacement)
+          (call-interactively (key-binding (kbd "n")))
+          (should (= moves 2))
+          (should (= shows 2))
+          (should (eq (tessera-elfeed-search--entry-at-point)
+                      (nth 2 entries)))
+          (let ((point (point)))
+            (should-not
+             (call-interactively (key-binding (kbd "n"))))
+            (should (= (point) point))
+            (should (= moves 2))
+            (should (= shows 2)))
+          (call-interactively (key-binding (kbd "p")))
+          (should (= moves 3))
+          (should (= shows 3))
+          (should (= (point) (tessera-entry-point)))
+          (should (eq (tessera-elfeed-search--entry-at-point)
+                      (cadr entries)))
+          (tessera-elfeed-search--disable)
+          (should (eq (key-binding (kbd "n")) replacement))
+          (should (eq (key-binding (kbd "p")) previous))
+          (should-not tessera-elfeed-search--active)
+          (should-not
+           (memq 'tessera-elfeed-search--emulation-map-alist
+                 emulation-mode-map-alists))
+          (should-not
+           (advice-member-p
+            #'tessera-elfeed-search--show-entry
+            'elfeed-search-show-entry)))))))
+
+(ert-deftest tessera-elfeed-search-preserves-command-continuity ()
+  (let ((elfeed-search-remain-on-entry '(show))
+        (last-command nil)
+        observed)
+    (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
+      (save-window-excursion
+        (with-temp-buffer
+          (switch-to-buffer (current-buffer))
+          (setq major-mode 'elfeed-search-mode)
+          (use-local-map (copy-keymap elfeed-search-mode-map))
+          (let ((command
+                 (lambda ()
+                   (interactive)
+                   (push last-command observed)
+                   (ignore-errors (line-move 1)))))
+            (local-set-key (kbd "n") command)
+            (dolist (id '(first second third))
+              (insert
+               (propertize
+                "Entry\n" 'elfeed-entry
+                (tessera-elfeed-search-tests--entry
+                 nil nil (cons "feed" (symbol-name id))))))
+            (goto-char (point-min))
+            (tessera-elfeed-search--enable)
+            (execute-kbd-macro (kbd "n n"))
+            (should (equal (nreverse observed)
+                           (list nil command)))
+            (tessera-elfeed-search--disable)))))))
+
+(ert-deftest tessera-elfeed-search-probes-custom-wrap-target ()
+  (with-temp-buffer
+    (setq major-mode 'elfeed-search-mode)
+    (let* ((first
+            (tessera-elfeed-search-tests--entry
+             nil nil '("feed" . "first")))
+           (second
+            (tessera-elfeed-search-tests--entry
+             nil nil '("feed" . "second")))
+           (calls 0)
+           (command
+            (lambda ()
+              (interactive)
+              (setq calls (1+ calls))
+              (goto-char (point-max))
+              (forward-line -1))))
+      (dolist (entry (list first second))
+        (insert (propertize "Entry\n" 'elfeed-entry entry)))
+      (goto-char (point-min))
+      (should
+       (tessera-elfeed-search--call-navigation
+        command 'previous))
+      (should (= calls 1))
+      (should (eq second
+                  (tessera-elfeed-search--entry-at-point))))))
+
+(ert-deftest tessera-elfeed-search-probes-counted-line-target ()
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (setq major-mode 'elfeed-search-mode)
+      (dotimes (index 2)
+        (insert
+         (propertize
+          "Entry\n" 'elfeed-entry
+          (tessera-elfeed-search-tests--entry
+           nil nil (cons "feed" (number-to-string index))))))
+      (goto-char (point-min))
+      (let ((point (point))
+            (current-prefix-arg 3))
+        (should-not
+         (tessera-elfeed-search--call-navigation
+          #'next-line 'next))
+        (should (= point (point)))))))
+
+(ert-deftest tessera-elfeed-search-probes-custom-missing-target ()
+  (let ((elfeed-db '(:version 4))
+        (elfeed-db-feeds (make-hash-table :test #'equal))
+        (elfeed-search-remain-on-entry '(show))
+        (hook-calls 0)
+        (elfeed-untag-hook
+         (list (lambda (&rest _arguments)
+                 (setq hook-calls (1+ hook-calls)))))
+        (shows 0))
+    (cl-letf (((symbol-function 'elfeed-search-update-entry)
+               #'ignore)
+              ((symbol-function 'elfeed-show-entry)
+               (lambda (_entry)
+                 (setq shows (1+ shows)))))
+      (with-temp-buffer
+        (setq major-mode 'elfeed-search-mode)
+        (let* ((first
+                (tessera-elfeed-search-tests--entry
+                 '(unread) nil '("feed" . "first")))
+               (second
+                (tessera-elfeed-search-tests--entry
+                 nil nil '("feed" . "second")))
+               (calls 0)
+               (command
+                (lambda ()
+                  (interactive)
+                  (setq calls (1+ calls))
+                  (elfeed-search-show-entry first))))
+          (dolist (entry (list first second))
+            (insert (propertize "Entry\n" 'elfeed-entry entry)))
+          (goto-char (point-min))
+          (should-not
+           (tessera-elfeed-search--call-navigation command 'next))
+          (should (zerop calls))
+          (should (elfeed-tagged-p 'unread first))
+          (should (zerop hook-calls))
+          (should (zerop shows)))))))
+
+(ert-deftest tessera-elfeed-search-finds-command-below-proxy ()
+  (let ((native-map (make-sparse-keymap))
+        (remap-map (make-sparse-keymap)))
+    (define-key native-map (kbd "p")
+                #'elfeed-search-previous-entry)
+    (define-key remap-map
+                [remap elfeed-search-previous-entry]
+                #'previous-line)
+    (cl-letf (((symbol-function 'current-active-maps)
+               (lambda (&rest _arguments)
+                 (list tessera-elfeed-search--navigation-map
+                       tessera-elfeed-search--navigation-map
+                       remap-map native-map))))
+      (should
+       (eq (tessera-elfeed-search--command (kbd "p"))
+           #'previous-line)))))
+
+(ert-deftest tessera-elfeed-search-preserves-display-call-order ()
+  (let ((elfeed-db '(:version 4))
+        (elfeed-db-feeds (make-hash-table :test #'equal))
+        (elfeed-search-remain-on-entry '(show))
+        shown)
+    (cl-letf (((symbol-function 'elfeed-search-update) #'ignore)
+              ((symbol-function 'elfeed-show-entry)
+               (lambda (entry)
+                 (push entry shown)
+                 t)))
+      (with-temp-buffer
+        (setq major-mode 'elfeed-search-mode)
+        (use-local-map (copy-keymap elfeed-search-mode-map))
+        (let ((first
+               (tessera-elfeed-search-tests--entry
+                nil nil '("feed" . "first")))
+              (second
+               (tessera-elfeed-search-tests--entry
+                nil nil '("feed" . "second"))))
+          (dolist (entry (list first second))
+            (let ((start (point)))
+              (insert (propertize "  Entry" 'elfeed-entry entry))
+              (put-text-property
+               (+ start 2) (+ start 3) 'tessera-entry-point t)
+              (insert "\n")))
+          (goto-char (point-min))
+          (tessera-elfeed-search--enable)
+          (should
+           (tessera-elfeed-search--call-navigation
+            (lambda ()
+              (interactive)
+              (elfeed-search-show-entry second)
+              (elfeed-search-show-entry first))
+            'next))
+          (should (eq (tessera-elfeed-search--entry-at-point)
+                      first))
+          (should (= (point) (tessera-entry-point)))
+          (should (equal shown (list first second)))
+          (setq shown nil)
+          (should
+           (tessera-elfeed-search--call-navigation
+            (lambda ()
+              (interactive)
+              (forward-line 1)
+              (elfeed-search-show-entry first)
+              (elfeed-search-show-entry second))
+            'next))
+          (should (equal shown (list second first)))
+          (should (eq (tessera-elfeed-search--entry-at-point)
+                      second))
+          (should (= (point) (tessera-entry-point)))
+          (tessera-elfeed-search--disable))))))
+
+(ert-deftest tessera-elfeed-search-preserves-custom-display-result ()
+  (let* ((shown nil)
+         (display
+          (lambda (link)
+            (setq shown link)
+            'custom-result))
+         (feed
+          (elfeed-feed--create
+           :id "https://example.invalid/feed"
+           :meta (list :show-entry display)))
+         (elfeed-db '(:version 4))
+         (elfeed-db-feeds (make-hash-table :test #'equal))
+         (elfeed-search-remain-on-entry '(show))
+         (first
+          (tessera-elfeed-search-tests--entry
+           nil nil '("feed" . "first")))
+         (second
+          (tessera-elfeed-search-tests--entry
+           nil nil '("feed" . "second"))))
+    (puthash "https://example.invalid/feed" feed
+             elfeed-db-feeds)
+    (with-temp-buffer
+      (setq major-mode 'elfeed-search-mode)
+      (dolist (entry (list first second))
+        (insert (propertize "  Entry\n" 'elfeed-entry entry)))
+      (goto-char (point-min))
+      (should-not
+       (tessera-elfeed-search--call-navigation
+        (lambda ()
+          (interactive)
+          (elfeed-search-show-entry first))
+        'previous))
+      (should-not shown)
+      (should
+       (eq
+        'custom-result
+        (tessera-elfeed-search--call-navigation
+         (lambda ()
+           (interactive)
+           (forward-line 1)
+           (elfeed-search-show-entry second))
+         'next)))
+      (should (equal shown "https://example.invalid/entry")))))
+
+(ert-deftest tessera-elfeed-search-preserves-show-result-in-command ()
+  (let* ((display (lambda (_link) 'custom-result))
+         (feed
+          (elfeed-feed--create
+           :id "https://example.invalid/feed"
+           :meta (list :show-entry display)))
+         (elfeed-db '(:version 4))
+         (elfeed-db-feeds (make-hash-table :test #'equal))
+         (elfeed-search-remain-on-entry '(show))
+         (first
+          (tessera-elfeed-search-tests--entry
+           nil nil '("feed" . "first")))
+         (second
+          (tessera-elfeed-search-tests--entry
+           nil nil '("feed" . "second")))
+         observed)
+    (puthash "https://example.invalid/feed" feed
+             elfeed-db-feeds)
+    (with-temp-buffer
+      (setq major-mode 'elfeed-search-mode)
+      (dolist (entry (list first second))
+        (insert (propertize "  Entry\n" 'elfeed-entry entry)))
+      (goto-char (point-min))
+      (tessera-elfeed-search--call-navigation
+       (lambda ()
+         (interactive)
+         (setq observed
+               (elfeed-search-show-entry first))
+         (when observed
+           (forward-line 1)))
+       'next)
+      (should (eq observed 'custom-result))
+      (should (eq second
+                  (tessera-elfeed-search--entry-at-point))))))
+
+(ert-deftest tessera-elfeed-search-rolls-back-display-errors ()
+  (let ((elfeed-db '(:version 4))
+        (elfeed-db-feeds (make-hash-table :test #'equal))
+        (elfeed-search-remain-on-entry '(show))
+        (first
+         (tessera-elfeed-search-tests--entry
+          nil nil '("feed" . "first")))
+        (second
+         (tessera-elfeed-search-tests--entry
+          nil nil '("feed" . "second"))))
+    (with-temp-buffer
+      (setq major-mode 'elfeed-search-mode)
+      (dolist (entry (list first second))
+        (insert (propertize "  Entry\n" 'elfeed-entry entry)))
+      (goto-char (point-min))
+      (let ((point (point)))
+        (cl-letf (((symbol-function 'elfeed-search-update) #'ignore)
+                  ((symbol-function 'elfeed-show-entry)
+                   (lambda (&rest _)
+                     (error "Display failed"))))
+          (should-error
+           (tessera-elfeed-search--call-navigation
+            (lambda ()
+              (interactive)
+              (forward-line 1)
+              (elfeed-search-show-entry second))
+            'next)
+           :type 'error))
+        (should (= point (point)))
+        (should (eq first
+                    (tessera-elfeed-search--entry-at-point)))))))
+
+(ert-deftest tessera-elfeed-search-runs-native-show-effects-in-command
+    ()
+  (let ((elfeed-db '(:version 4))
+        (elfeed-db-feeds (make-hash-table :test #'equal))
+        (elfeed-search-remain-on-entry '(show))
+        observed
+        shown)
+    (cl-letf (((symbol-function 'elfeed-search-update-entry) #'ignore)
+              ((symbol-function 'elfeed-show-entry)
+               (lambda (entry)
+                 (push entry shown))))
+      (with-temp-buffer
+        (setq major-mode 'elfeed-search-mode)
+        (let ((first
+               (tessera-elfeed-search-tests--entry
+                '(unread) nil '("feed" . "first")))
+              (second
+               (tessera-elfeed-search-tests--entry
+                '(unread) nil '("feed" . "second"))))
+          (dolist (entry (list first second))
+            (insert (propertize "  Entry\n" 'elfeed-entry entry)))
+          (goto-char (point-min))
+          (tessera-elfeed-search--call-navigation
+           (lambda ()
+             (interactive)
+             (forward-line 1)
+             (elfeed-search-show-entry second)
+             (setq observed
+                   (not (elfeed-tagged-p 'unread second))))
+           'next)
+          (should observed)
+          (should (equal shown (list second))))))))
+
+(ert-deftest tessera-elfeed-search-blocks-boundary-show-effects ()
+  (let ((elfeed-db '(:version 4))
+        (elfeed-db-feeds (make-hash-table :test #'equal))
+        (elfeed-search-remain-on-entry '(show))
+        (hook-calls 0)
+        (elfeed-untag-hook
+         (list (lambda (&rest _arguments)
+                 (setq hook-calls (1+ hook-calls)))))
+        shown)
+    (cl-letf (((symbol-function 'elfeed-search-update) #'ignore)
+              ((symbol-function 'elfeed-search-update-entry) #'ignore)
+              ((symbol-function 'elfeed-show-entry)
+               (lambda (entry)
+                 (push entry shown))))
+      (with-temp-buffer
+        (setq major-mode 'elfeed-search-mode)
+        (let ((entry
+               (tessera-elfeed-search-tests--entry '(unread))))
+          (insert (propertize "  Entry\n" 'elfeed-entry entry))
+          (goto-char (point-min))
+          (set-mark (point-min))
+          (setq mark-ring (list (copy-marker (point-max))))
+          (let ((ring (mapcar #'marker-position mark-ring)))
+            (tessera-elfeed-search--call-navigation
+             (lambda ()
+               (interactive)
+               (elfeed-search-show-entry entry)
+               (push-mark (point) t))
+             'previous)
+            (should (equal ring
+                           (mapcar #'marker-position mark-ring))))
+          (should (elfeed-tagged-p 'unread entry))
+          (should (zerop hook-calls))
+          (should-not shown))))))
+
+(ert-deftest tessera-elfeed-search-commits-native-untag-hook ()
+  (let ((elfeed-db '(:version 4))
+        (elfeed-db-feeds (make-hash-table :test #'equal))
+        (elfeed-search-remain-on-entry '(show))
+        calls
+        observed-tags
+        shown)
+    (cl-letf (((symbol-function 'elfeed-search-update-entry)
+               #'ignore)
+              ((symbol-function 'elfeed-show-entry)
+               (lambda (entry)
+                 (push entry shown))))
+      (with-temp-buffer
+        (setq major-mode 'elfeed-search-mode)
+        (let* ((first
+                (tessera-elfeed-search-tests--entry
+                 '(unread) nil '("feed" . "first")))
+               (second
+                (tessera-elfeed-search-tests--entry
+                 '(unread) nil '("feed" . "second")))
+               (elfeed-untag-hook
+                (list
+                 (lambda (entries tags)
+                   (setq observed-tags
+                         (copy-sequence
+                          (elfeed-entry-tags (car entries))))
+                   (setf (elfeed-entry-tags (car entries))
+                         '(unread hook-added))
+                   (push (list entries tags) calls)))))
+          (dolist (entry (list first second))
+            (insert (propertize "  Entry\n" 'elfeed-entry entry)))
+          (goto-char (point-min))
+          (tessera-elfeed-search--call-navigation
+           (lambda ()
+             (interactive)
+             (forward-line 1)
+             (elfeed-search-show-entry second))
+           'next)
+          (should (equal observed-tags '(unread)))
+          (should (equal (elfeed-entry-tags second)
+                         '(hook-added)))
+          (should (equal shown (list second)))
+          (should (equal calls
+                         (list (list (list second) '(unread))))))))))
+
+(ert-deftest tessera-elfeed-search-preserves-origin-hook-timing ()
+  (let ((elfeed-db '(:version 4))
+        (elfeed-db-feeds (make-hash-table :test #'equal))
+        (elfeed-search-remain-on-entry '(show))
+        observed-tags
+        shown)
+    (cl-letf (((symbol-function 'elfeed-search-update-entry)
+               #'ignore)
+              ((symbol-function 'elfeed-show-entry)
+               (lambda (entry)
+                 (push entry shown))))
+      (with-temp-buffer
+        (setq major-mode 'elfeed-search-mode)
+        (let* ((first
+                (tessera-elfeed-search-tests--entry
+                 '(unread) nil '("feed" . "first")))
+               (second
+                (tessera-elfeed-search-tests--entry
+                 nil nil '("feed" . "second")))
+               (elfeed-untag-hook
+                (list
+                 (lambda (entries _tags)
+                   (setq observed-tags
+                         (copy-sequence
+                          (elfeed-entry-tags (car entries))))))))
+          (dolist (entry (list first second))
+            (insert (propertize "  Entry\n" 'elfeed-entry entry)))
+          (goto-char (point-min))
+          (tessera-elfeed-search--call-navigation
+           (lambda ()
+             (interactive)
+             (elfeed-search-show-entry first)
+             (elfeed-tag first 'later)
+             (forward-line 1))
+           'next)
+          (should (equal observed-tags '(unread)))
+          (should (equal (elfeed-entry-tags first) '(later)))
+          (should (equal shown (list first)))
+          (should (eq second
+                      (tessera-elfeed-search--entry-at-point))))))))
+
+(ert-deftest tessera-elfeed-search-kill-releases-navigation ()
+  (let ((buffer (generate-new-buffer " *tessera-elfeed-kill*")))
+    (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
+      (with-current-buffer buffer
+        (setq major-mode 'elfeed-search-mode)
+        (tessera-elfeed-search--enable)
+        (should-not
+         (advice-member-p
+          #'tessera-elfeed-search--show-entry
+          'elfeed-search-show-entry))
+        (should
+         (memq 'tessera-elfeed-search--emulation-map-alist
+               emulation-mode-map-alists))
+        (kill-buffer buffer)))
+    (should-not (buffer-live-p buffer))
+    (should-not
+     (advice-member-p
+      #'tessera-elfeed-search--show-entry
+      'elfeed-search-show-entry))
+    (should-not
+     (memq 'tessera-elfeed-search--emulation-map-alist
+           emulation-mode-map-alists))))
+
+(ert-deftest tessera-elfeed-search-shares-navigation-integration ()
+  (let ((first (generate-new-buffer " *tessera-elfeed-first*"))
+        (second (generate-new-buffer " *tessera-elfeed-second*"))
+        (tessera-elfeed-search--navigation-users 0)
+        (emulation-mode-map-alists
+         (copy-sequence emulation-mode-map-alists)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (setq major-mode 'elfeed-search-mode)
+              (tessera-elfeed-search--enable)))
+          (should (= 2 tessera-elfeed-search--navigation-users))
+          (with-current-buffer first
+            (tessera-elfeed-search--disable))
+          (should (= 1 tessera-elfeed-search--navigation-users))
+          (should
+           (memq 'tessera-elfeed-search--emulation-map-alist
+                 emulation-mode-map-alists))
+          (kill-buffer second)
+          (should (zerop tessera-elfeed-search--navigation-users))
+          (should-not
+           (memq 'tessera-elfeed-search--emulation-map-alist
+                 emulation-mode-map-alists)))
+      (when (buffer-live-p first) (kill-buffer first))
+      (when (buffer-live-p second) (kill-buffer second)))))
 
 (ert-deftest tessera-elfeed-registers-only-when-enabled ()
   (let ((tessera--entry-backends (make-hash-table :test #'eq)))

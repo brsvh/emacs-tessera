@@ -277,6 +277,18 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
   :set #'tessera-gnus-summary--set-glyphs
   :group 'tessera-gnus-summary)
 
+;;;; Navigation options
+
+(defcustom tessera-gnus-summary-boundary-navigation nil
+  "Whether article navigation may continue beyond this summary.
+When nil, Tessera blocks both `gnus-auto-extend-newsgroup' and
+`gnus-auto-select-next' after an article command exhausts the
+articles already in the summary.  When non-nil, those two native
+options retain their normal meanings and values; this option does
+not enable either native behavior by itself."
+  :type 'boolean
+  :group 'tessera-gnus-summary)
+
 ;;;; Faces
 
 (defface tessera-gnus-summary-subject-face
@@ -434,6 +446,40 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 
 (defvar tessera-gnus-summary--batching nil
   "Non-nil while article positions will be rebuilt as one batch.")
+
+(defvar tessera-gnus-summary--navigating nil
+  "Non-nil while an outer native summary move is in progress.")
+
+(defvar tessera-gnus-summary--navigation-functions
+  '(gnus-summary-next-subject
+    gnus-summary-next-article
+    gnus-summary-next-unseen-article
+    gnus-summary-first-unread-article
+    gnus-summary-first-unread-subject
+    gnus-summary-first-unseen-subject
+    gnus-summary-first-unseen-or-unread-subject
+    gnus-summary-first-article
+    gnus-summary-last-subject
+    gnus-summary-next-thread
+    gnus-summary-down-thread
+    gnus-summary-top-thread)
+  "Native Gnus functions that implement entry navigation.")
+
+(defvar tessera-gnus-summary--navigation-wrappers
+  '(gnus-summary-prev-subject
+    gnus-summary-next-unread-subject
+    gnus-summary-prev-unread-subject
+    gnus-summary-prev-article
+    gnus-summary-next-unread-article
+    gnus-summary-prev-unread-article
+    gnus-summary-next-same-subject
+    gnus-summary-prev-same-subject
+    gnus-summary-next-unread-same-subject
+    gnus-summary-prev-unread-same-subject
+    gnus-summary-prev-unseen-article
+    gnus-summary-prev-thread
+    gnus-summary-up-thread)
+  "Gnus commands implemented through advised navigation functions.")
 
 (defvar-local tessera-gnus-summary--appearance nil
   "Appearance used for the last synchronized entry rendering.")
@@ -1140,13 +1186,206 @@ centering and the user's chosen target row to Gnus."
   (unless tessera-gnus-summary--active
     (apply function arguments)))
 
+(defun tessera-gnus-summary--summary-buffer ()
+  "Return the native summary buffer for the current Gnus context."
+  (if (derived-mode-p 'gnus-summary-mode)
+      (current-buffer)
+    (and (boundp 'gnus-summary-buffer)
+         gnus-summary-buffer
+         (get-buffer gnus-summary-buffer))))
+
+(defun tessera-gnus-summary--navigation-buffer ()
+  "Return the active summary buffer for native navigation."
+  (let ((buffer (tessera-gnus-summary--summary-buffer)))
+    (when (and (buffer-live-p buffer)
+               (buffer-local-value
+                'tessera-gnus-summary--active buffer))
+      buffer)))
+
+(defun tessera-gnus-summary--navigation-related-buffers ()
+  "Return live native buffers used by summary navigation."
+  (let (buffers)
+    (dolist (variable '(gnus-group-buffer gnus-article-buffer))
+      (when (boundp variable)
+        (when-let* ((value (symbol-value variable))
+                    (buffer (get-buffer value)))
+          (push buffer buffers))))
+    buffers))
+
+(defun tessera-gnus-summary--navigation-identity (buffer)
+  "Return the native group and article identity in BUFFER."
+  (with-current-buffer buffer
+    (when-let* ((article (gnus-summary-article-number)))
+      (cons gnus-newsgroup-name article))))
+
+(defun tessera-gnus-summary--navigation-changed-p
+    (buffer identity)
+  "Return non-nil when navigation left BUFFER's IDENTITY."
+  (or (not (buffer-live-p buffer))
+      (when-let* ((after-buffer
+                   (tessera-gnus-summary--summary-buffer))
+                  ((buffer-live-p after-buffer))
+                  (after
+                   (tessera-gnus-summary--navigation-identity
+                    after-buffer)))
+        (not (equal after identity)))))
+
+(defun tessera-gnus-summary--navigation-key-command-p ()
+  "Return non-nil when `n' or `p' invokes `this-command'."
+  (and (commandp this-command)
+       (or (eq (key-binding (kbd "n") t) this-command)
+           (eq (key-binding (kbd "p") t) this-command))))
+
+(defun tessera-gnus-summary--navigation-command-p ()
+  "Return non-nil for a top-level entry navigation command."
+  (or (called-interactively-p 'any)
+      (memq this-command
+            tessera-gnus-summary--navigation-functions)
+      (memq this-command
+            tessera-gnus-summary--navigation-wrappers)
+      (tessera-gnus-summary--navigation-key-command-p)))
+
+(defun tessera-gnus-summary--position-after-navigation (_result)
+  "Place point at the active Gnus summary's layout anchor."
+  (when-let* ((buffer
+               (tessera-gnus-summary--navigation-buffer)))
+    (with-current-buffer buffer
+      (gnus-summary-position-point))))
+
+(defun tessera-gnus-summary--group-point-marker ()
+  "Return a marker at point in the live Gnus group buffer."
+  (when-let* (((boundp 'gnus-group-buffer))
+              (buffer (get-buffer gnus-group-buffer)))
+    (with-current-buffer buffer
+      (copy-marker (point)))))
+
+(defun tessera-gnus-summary--first-article-number (unread)
+  "Return the first native article.
+Restrict the result to UNREAD articles when non-nil."
+  (when-let* ((data
+               (if unread
+                   (seq-find
+                    (lambda (item)
+                      (let ((number (gnus-data-number item)))
+                        (and
+                         (not (memq number
+                                    gnus-newsgroup-unfetched))
+                         (memq number gnus-newsgroup-unreads))))
+                    gnus-newsgroup-data)
+                 (car gnus-newsgroup-data))))
+    (gnus-data-number data)))
+
+(defun tessera-gnus-summary--navigate-first
+    (function arguments unread)
+  "Run first-article FUNCTION with ARGUMENTS.
+UNREAD non-nil restricts the target to unread articles.  Skip native
+display and thread expansion when the target is already selected."
+  (let ((buffer (tessera-gnus-summary--navigation-buffer)))
+    (if (and buffer
+             (tessera-gnus-summary--navigation-command-p)
+             (with-current-buffer buffer
+               (when-let*
+                   ((target
+                     (tessera-gnus-summary--first-article-number
+                      unread)))
+                 (eql (gnus-summary-article-number) target))))
+        nil
+      (apply #'tessera-gnus-summary--navigate
+             function arguments))))
+
+(defun tessera-gnus-summary--navigate-first-article
+    (function &rest arguments)
+  "Run first-article FUNCTION with ARGUMENTS atomically."
+  (tessera-gnus-summary--navigate-first
+   function arguments nil))
+
+(defun tessera-gnus-summary--navigate-first-unread-article
+    (function &rest arguments)
+  "Run first-unread-article FUNCTION with ARGUMENTS atomically."
+  (tessera-gnus-summary--navigate-first
+   function arguments t))
+
+(defun tessera-gnus-summary--navigate-next-article
+    (function &rest arguments)
+  "Run native next-article FUNCTION with ARGUMENTS atomically.
+Honor `tessera-gnus-summary-boundary-navigation'."
+  (let ((buffer (tessera-gnus-summary--navigation-buffer)))
+    (if (not buffer)
+        (apply function arguments)
+      (let ((group-point
+             (unless tessera-gnus-summary-boundary-navigation
+               (tessera-gnus-summary--group-point-marker))))
+        (unwind-protect
+            (let ((gnus-auto-extend-newsgroup
+                   (and
+                    tessera-gnus-summary-boundary-navigation
+                    gnus-auto-extend-newsgroup))
+                  (gnus-auto-select-next
+                   (and
+                    tessera-gnus-summary-boundary-navigation
+                    gnus-auto-select-next)))
+              (if (or tessera-gnus-summary--navigating
+                      (not
+                       (tessera-gnus-summary--navigation-command-p)))
+                  (apply function arguments)
+                (apply #'tessera-gnus-summary--navigate
+                       function arguments)))
+          (when group-point
+            (when (marker-buffer group-point)
+              (with-current-buffer (marker-buffer group-point)
+                (goto-char group-point)))
+            (set-marker group-point nil)))))))
+
+(defun tessera-gnus-summary--navigate
+    (function &rest arguments)
+  "Run native FUNCTION with ARGUMENTS as one navigation action."
+  (let ((buffer (tessera-gnus-summary--navigation-buffer)))
+    (if (or tessera-gnus-summary--navigating
+            (not (tessera-gnus-summary--navigation-command-p))
+            (not buffer))
+        (apply function arguments)
+      (let ((identity
+             (tessera-gnus-summary--navigation-identity buffer)))
+        (if (not identity)
+            (apply function arguments)
+          (let ((tessera-gnus-summary--navigating t))
+            (tessera--navigation-call
+             buffer function arguments
+             (lambda (_result)
+               (tessera-gnus-summary--navigation-changed-p
+                buffer identity))
+             #'tessera-gnus-summary--position-after-navigation
+             nil
+             (tessera-gnus-summary--navigation-related-buffers))))))))
+
+(defun tessera-gnus-summary--navigation-advice (function)
+  "Return the navigation advice for native FUNCTION."
+  (pcase function
+    ('gnus-summary-next-article
+     #'tessera-gnus-summary--navigate-next-article)
+    ('gnus-summary-first-article
+     #'tessera-gnus-summary--navigate-first-article)
+    ('gnus-summary-first-unread-article
+     #'tessera-gnus-summary--navigate-first-unread-article)
+    (_ #'tessera-gnus-summary--navigate)))
+
 (defun tessera-gnus-summary--navigation (enable)
   "Adapt native centering when ENABLE is non-nil, or restore it."
   (if enable
-      (advice-add 'gnus-horizontal-recenter :around
-                  #'tessera-gnus-summary--horizontal-recenter)
+      (progn
+        (advice-add 'gnus-horizontal-recenter :around
+                    #'tessera-gnus-summary--horizontal-recenter)
+        (dolist (function
+                 tessera-gnus-summary--navigation-functions)
+          (advice-add function :around
+                      (tessera-gnus-summary--navigation-advice
+                       function))))
     (advice-remove 'gnus-horizontal-recenter
-                   #'tessera-gnus-summary--horizontal-recenter)))
+                   #'tessera-gnus-summary--horizontal-recenter)
+    (dolist (function tessera-gnus-summary--navigation-functions)
+      (advice-remove function
+                     (tessera-gnus-summary--navigation-advice
+                      function)))))
 
 (defun tessera-gnus-summary--sync-buffer (&optional force)
   "Synchronize all entries, preserving point within its article.
@@ -1299,10 +1538,6 @@ THREAD-PATHS caches shared ancestor comparisons for that update."
         (tessera-gnus-summary--sync-buffer force)
         (setq tessera-gnus-summary--appearance appearance
               tessera-gnus-summary--dirty nil)))
-    ;; Already at the root, Gnus's top-thread command does not move.
-    (when (and gnus-show-threads
-               (eq this-command 'gnus-summary-top-thread))
-      (gnus-summary-position-point))
     (tessera-entry-highlight-current)))
 
 (defun tessera-gnus-summary--resize (_frame)

@@ -850,6 +850,22 @@ Counts inheriting @code{gnus-summary-normal-unread} and @code{bold}.
 its author in thread layouts.  Updates to marks or row contents preserve
 point's position within the article as far as the new text allows.
 
+@defopt tessera-gnus-summary-boundary-navigation
+This boolean option controls article navigation at the boundary of the
+current Summary buffer.  Its default value is @code{nil}.
+
+When the value is @code{nil}, Tessera temporarily disables both
+@code{gnus-auto-extend-newsgroup} and @code{gnus-auto-select-next} for
+the native article command.  Gnus therefore neither fetches an article
+outside the current summary nor continues to another group when no
+article in the requested direction is available.  Point remains on the
+current article.
+
+When the value is non-@code{nil}, the two native options retain their
+individual values and normal meanings.  Enabling this Tessera option
+does not itself enable either native option.
+@end defopt
+
   While Tessera is active, Gnus's automatic horizontal recentering is
 suppressed because a virtual heading and its message share a logical
 line.  Native vertical recentering retains

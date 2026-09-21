@@ -1858,6 +1858,106 @@ span using the face of the character under the pointer."
 
 ;;;; Entry navigation
 
+(defun tessera--navigation-frames
+    (buffer &optional related-buffers)
+  "Return frames navigation may affect for BUFFER.
+RELATED-BUFFERS names native view or control buffers used by the
+same navigation command."
+  (let ((frames (list (selected-frame))))
+    (dolist (current (cons buffer related-buffers))
+      (when (buffer-live-p current)
+        (dolist (window (get-buffer-window-list current nil t))
+          (push (window-frame window) frames))))
+    (delete-dups frames)))
+
+(defun tessera--navigation-save
+    (&optional buffer related-buffers)
+  "Save navigation state for BUFFER or the current buffer.
+The snapshot records buffer point and the complete window
+configuration of the selected frame and frames displaying BUFFER or
+RELATED-BUFFERS.  It also records the local mark state and mark ring.
+Release the snapshot with `tessera--navigation-release'."
+  (let ((buffer (or buffer (current-buffer))))
+    (list
+     buffer
+     (with-current-buffer buffer (copy-marker (point)))
+     (with-current-buffer buffer (copy-marker (mark-marker)))
+     (with-current-buffer buffer mark-active)
+     (with-current-buffer buffer deactivate-mark)
+     (with-current-buffer buffer
+       (mapcar #'copy-marker mark-ring))
+     (selected-frame)
+     (mapcar
+      (lambda (frame)
+        (cons frame (current-window-configuration frame)))
+      (tessera--navigation-frames buffer related-buffers)))))
+
+(defun tessera--navigation-restore (snapshot)
+  "Restore point and window configurations from SNAPSHOT."
+  (pcase-let ((`(,buffer ,point ,mark ,active ,deactivate ,ring
+                         ,selected-frame ,configurations)
+               snapshot))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (marker-position point)
+          (goto-char point))
+        (set-marker (mark-marker) (marker-position mark) buffer)
+        (setq mark-active active
+              deactivate-mark deactivate)
+        (dolist (marker mark-ring)
+          (when (markerp marker)
+            (set-marker marker nil)))
+        (setq mark-ring (mapcar #'copy-marker ring))))
+    (pcase-dolist (`(,frame . ,configuration) configurations)
+      (when (frame-live-p frame)
+        (set-window-configuration configuration t)))
+    (when (frame-live-p selected-frame)
+      (select-frame selected-frame 'norecord))))
+
+(defun tessera--navigation-release (snapshot)
+  "Release all markers held by navigation SNAPSHOT."
+  (set-marker (nth 1 snapshot) nil)
+  (set-marker (nth 2 snapshot) nil)
+  (dolist (marker (nth 5 snapshot))
+    (set-marker marker nil)))
+
+(defun tessera--navigation-call
+    (buffer function arguments target-p
+            &optional commit rollback related-buffers)
+  "Call navigation FUNCTION with ARGUMENTS for BUFFER.
+TARGET-P receives the native result and returns non-nil when a real
+target was selected.  On success, call COMMIT with that result when
+non-nil.  Otherwise call ROLLBACK with the result when non-nil, then
+restore point, mark, and the saved window configurations.  Also roll
+back on any nonlocal exit from FUNCTION, TARGET-P, or COMMIT, without
+replacing that exit if restoration fails.  RELATED-BUFFERS identifies
+other native buffers whose displayed frames need restoration."
+  (let ((snapshot
+         (tessera--navigation-save buffer related-buffers))
+        (restore-needed t)
+        rollback-done
+        result)
+    (unwind-protect
+        (progn
+          (setq result (apply function arguments))
+          (if (funcall target-p result)
+              (progn
+                (when commit (funcall commit result))
+                (setq restore-needed nil))
+            (when rollback
+              (setq rollback-done t)
+              (funcall rollback result))
+            (tessera--navigation-restore snapshot)
+            (setq restore-needed nil))
+          result)
+      (when restore-needed
+        (unless rollback-done
+          (when rollback
+            (ignore-errors (funcall rollback result))))
+        (ignore-errors
+          (tessera--navigation-restore snapshot)))
+      (tessera--navigation-release snapshot))))
+
 (defun tessera-entry-point (&optional string)
   "Return the preferred navigation position in STRING or this line.
 Return nil when no displayed segment specifies `:point t'."

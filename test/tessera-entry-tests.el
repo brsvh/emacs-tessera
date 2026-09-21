@@ -882,6 +882,235 @@
         (insert "\n")
         (tessera-entry-apply-layout start end)))))
 
+(ert-deftest tessera-navigation-restores-buffer-and-windows ()
+  (save-window-excursion
+    (delete-other-windows)
+    (let* ((buffer (generate-new-buffer " *tessera-navigation*"))
+           (replacement
+            (generate-new-buffer " *tessera-navigation-other*"))
+           (first (selected-window))
+           (second (split-window-right)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (dotimes (index 80)
+                (insert (format "row %d contents\n" index))))
+            (set-window-buffer first buffer)
+            (set-window-buffer second buffer)
+            (with-current-buffer buffer
+              (goto-char (point-min))
+              (forward-line 20)
+              (set-window-point first (point))
+              (set-window-start first (line-beginning-position) t)
+              (goto-char (point-min))
+              (forward-line 40)
+              (set-window-point second (point))
+              (set-window-start second (line-beginning-position) t))
+            (set-window-hscroll first 2)
+            (set-window-hscroll second 4)
+            (set-window-dedicated-p first t)
+            (select-window first)
+            (with-current-buffer buffer
+              (set-mark (point-min))
+              (setq mark-ring
+                    (list (copy-marker (line-end-position))))
+              (setq mark-active t
+                    deactivate-mark nil))
+            (let* ((point (window-point first))
+                   (first-start (window-start first))
+                   (second-point (window-point second))
+                   (second-start (window-start second))
+                   (ring
+                    (with-current-buffer buffer
+                      (mapcar #'marker-position mark-ring)))
+                   (snapshot (tessera--navigation-save buffer))
+                   (point-marker (nth 1 snapshot))
+                   (mark-marker (nth 2 snapshot)))
+              (select-window second)
+              (with-current-buffer buffer (goto-char (point-max)))
+              (set-window-dedicated-p first nil)
+              (set-window-buffer first replacement)
+              (set-window-hscroll first 0)
+              (set-window-point second (point-min))
+              (set-window-start second (point-min) t)
+              (set-window-hscroll second 0)
+              (with-current-buffer buffer
+                (push-mark (point-max) t)
+                (set-mark (point-max))
+                (setq mark-active nil
+                      deactivate-mark t))
+              (tessera--navigation-restore snapshot)
+              (should (eq (selected-window) first))
+              (should (eq (window-buffer first) buffer))
+              (should (window-dedicated-p first))
+              (should (= (with-current-buffer buffer (point)) point))
+              (should (= (window-point first) point))
+              (should (= (window-start first) first-start))
+              (should (= (window-hscroll first) 2))
+              (should (= (window-point second) second-point))
+              (should (= (window-start second) second-start))
+              (should (= (window-hscroll second) 4))
+              (with-current-buffer buffer
+                (should (= (mark) (point-min)))
+                (should mark-active)
+                (should-not deactivate-mark)
+                (should
+                 (equal ring
+                        (mapcar #'marker-position mark-ring))))
+              (tessera--navigation-release snapshot)
+              (should-not (marker-buffer point-marker))
+              (should-not (marker-buffer mark-marker))))
+        (kill-buffer buffer)
+        (kill-buffer replacement)))))
+
+(ert-deftest tessera-navigation-restores-window-topology ()
+  (save-window-excursion
+    (delete-other-windows)
+    (let ((buffer (current-buffer)))
+      (should-not
+       (tessera--navigation-call
+        buffer
+        (lambda ()
+          (split-window-right)
+          nil)
+        nil #'identity))
+      (should (= 1 (length (window-list)))))))
+
+(ert-deftest tessera-navigation-restores-after-nonlocal-exit ()
+  (dolist (phase '(function target commit))
+    (with-temp-buffer
+      (insert "first\nsecond\n")
+      (goto-char (point-min))
+      (let ((point (point))
+            (rollbacks 0))
+        (catch 'tessera-navigation-exit
+          (tessera--navigation-call
+           (current-buffer)
+           (lambda ()
+             (goto-char (point-max))
+             (when (eq phase 'function)
+               (throw 'tessera-navigation-exit nil))
+             t)
+           nil
+           (lambda (result)
+             (when (eq phase 'target)
+               (throw 'tessera-navigation-exit nil))
+             result)
+           (lambda (_result)
+             (when (eq phase 'commit)
+               (throw 'tessera-navigation-exit nil)))
+           (lambda (_result)
+             (setq rollbacks (1+ rollbacks)))))
+        (should (= (point) point))
+        (should (= rollbacks 1))))))
+
+(ert-deftest tessera-navigation-restores-deactivate-mark ()
+  (with-temp-buffer
+    (setq mark-active t
+          deactivate-mark nil)
+    (should-not
+     (tessera--navigation-call
+      (current-buffer)
+      (lambda ()
+        (setq deactivate-mark t)
+        nil)
+      nil #'identity))
+    (should mark-active)
+    (should-not deactivate-mark)))
+
+(ert-deftest tessera-navigation-includes-related-buffers ()
+  (let ((buffer (generate-new-buffer " *tessera-navigation-main*"))
+        (related
+         (generate-new-buffer " *tessera-navigation-related*"))
+        seen)
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window-list)
+                   (lambda (current &rest _)
+                     (push current seen)
+                     nil)))
+          (tessera--navigation-frames buffer (list related))
+          (should (memq buffer seen))
+          (should (memq related seen)))
+      (kill-buffer buffer)
+      (kill-buffer related))))
+
+(ert-deftest tessera-navigation-call-restores-after-errors ()
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (insert "first\nsecond\n")
+      (goto-char (point-min))
+      (let ((point (point))
+            (start (window-start)))
+        (should-error
+         (tessera--navigation-call
+          (current-buffer)
+          (lambda ()
+            (goto-char (point-max))
+            (set-window-start (selected-window) (point-max) t)
+            (error "Native navigation failed"))
+          nil #'identity))
+        (should (= (point) point))
+        (should (= (window-start) start))
+        (let ((error-data
+               (cl-letf
+                   (((symbol-function
+                      'tessera--navigation-restore)
+                     (lambda (_snapshot)
+                       (error "Restore failed"))))
+                 (should-error
+                  (tessera--navigation-call
+                   (current-buffer)
+                   (lambda ()
+                     (error "Native navigation failed"))
+                   nil #'identity)))))
+          (should (equal (error-message-string error-data)
+                         "Native navigation failed")))))))
+
+(ert-deftest tessera-navigation-restores-unrelated-window ()
+  (save-window-excursion
+    (delete-other-windows)
+    (let ((buffer (generate-new-buffer " *tessera-navigation-list*"))
+          (other (generate-new-buffer " *tessera-navigation-view*"))
+          (replacement
+           (generate-new-buffer " *tessera-navigation-replace*")))
+      (unwind-protect
+          (let ((list-window (selected-window))
+                (view-window (split-window-right)))
+            (with-current-buffer buffer
+              (insert "first\nsecond\n"))
+            (with-current-buffer other
+              (insert "view first\nview second\n")
+              (forward-line -1))
+            (set-window-buffer list-window buffer)
+            (set-window-buffer view-window other)
+            (set-window-point view-window
+                              (with-current-buffer other (point)))
+            (select-window view-window)
+            (let ((point (window-point view-window))
+                  (start (window-start view-window))
+                  (previous (window-prev-buffers view-window))
+                  (next (window-next-buffers view-window)))
+              (should-not
+               (tessera--navigation-call
+                buffer
+                (lambda ()
+                  (set-window-buffer view-window replacement)
+                  (select-window list-window)
+                  nil)
+                nil #'identity))
+              (should (eq (selected-window) view-window))
+              (should (eq (window-buffer view-window) other))
+              (should (= (window-point view-window) point))
+              (should (= (window-start view-window) start))
+              (should
+               (equal (window-prev-buffers view-window) previous))
+              (should
+               (equal (window-next-buffers view-window) next))))
+        (kill-buffer buffer)
+        (kill-buffer other)
+        (kill-buffer replacement)))))
+
 (ert-deftest tessera-entry-current-restores-native-properties ()
   (let ((tessera--entry-backends (make-hash-table :test #'eq))
         (tessera-entry-layout 'two-line)

@@ -28,6 +28,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'hl-line)
 (require 'subr-x)
 (require 'tessera-elfeed)
@@ -146,11 +147,13 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (declare-function elfeed-entry-date "elfeed-db")
 (declare-function elfeed-entry-enclosures "elfeed-db")
 (declare-function elfeed-entry-feed "elfeed-db")
+(declare-function elfeed-entry-id "elfeed-db")
 (declare-function elfeed-entry-link "elfeed-db")
 (declare-function elfeed-entry-tags "elfeed-db")
 (declare-function elfeed-meta--title "elfeed-db")
 (declare-function elfeed-search--faces "elfeed-search")
 (declare-function elfeed-search-format-date "elfeed-search")
+(declare-function elfeed-search-show-entry "elfeed-search")
 (declare-function elfeed-search-update "elfeed-search")
 
 (defvar elfeed-search-print-entry-function)
@@ -167,6 +170,28 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 
 (defvar-local tessera-elfeed-search--saved-hl-line nil
   "Whether native line highlighting was enabled before Tessera.")
+
+(defvar-local tessera-elfeed-search--emulation-map-alist nil
+  "Buffer-local emulation map alist for Elfeed navigation.")
+
+(defvar tessera-elfeed-search--navigation-origin nil
+  "Entry from which the current navigation command started.")
+
+(defvar tessera-elfeed-search--navigation-target nil
+  "Confirmed target of the current navigation command.")
+
+(defvar tessera-elfeed-search--navigation-probing nil
+  "Non-nil while probing a custom navigation command.")
+
+(defvar tessera-elfeed-search--navigation-users 0
+  "Number of active Elfeed search buffers using navigation.")
+
+(defvar tessera-elfeed-search--navigation-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "n") #'tessera-elfeed-search--next)
+    (define-key map (kbd "p") #'tessera-elfeed-search--previous)
+    map)
+  "Internal keymap that makes Elfeed navigation atomic.")
 
 (defun tessera-elfeed-search--entry (context)
   "Return the Elfeed entry stored in CONTEXT."
@@ -326,7 +351,7 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
   (make-tessera-entry-layout
    :main-glyph-slots '(status)
    :main-left-segments
-   '((title :grow t :min-width 4 :truncate tail))
+   '((title :grow t :min-width 4 :truncate tail :point t))
    :main-right-segments '(date)))
 
 (defun tessera-elfeed-search--two-line-layout ()
@@ -334,7 +359,7 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
   (make-tessera-entry-layout
    :main-glyph-slots '(status)
    :main-left-segments
-   '((title :grow t :min-width 4 :truncate tail))
+   '((title :grow t :min-width 4 :truncate tail :point t))
    :main-right-segments
    '((feed :grow t
            :min-width 4
@@ -409,6 +434,224 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
       (overlay-put overlay 'before-string original)
       (overlay-put overlay 'tessera-elfeed-search-separator nil))))
 
+;;;; Native navigation
+
+(defun tessera-elfeed-search--entry-at-point ()
+  "Return the native Elfeed entry on the current line."
+  (let ((position (line-beginning-position)))
+    (when (< position (point-max))
+      (get-text-property position 'elfeed-entry))))
+
+(defun tessera-elfeed-search--entry-id (entry)
+  "Return the stable native identity of Elfeed ENTRY."
+  (and entry (elfeed-entry-id entry)))
+
+(defun tessera-elfeed-search--different-entry (entry origin)
+  "Return ENTRY when its identity differs from ORIGIN."
+  (when (and entry
+             (not
+              (equal
+               (tessera-elfeed-search--entry-id entry)
+               (tessera-elfeed-search--entry-id origin))))
+    entry))
+
+(defun tessera-elfeed-search--entry-in-direction (direction)
+  "Return the next native entry in DIRECTION.
+DIRECTION is either `next' or `previous'."
+  (let ((step
+         (pcase direction
+           ('next 1)
+           ('previous -1)
+           (_ (error "Invalid Elfeed navigation direction: %S"
+                     direction))))
+        entry)
+    (save-excursion
+      (while (and (zerop (forward-line step))
+                  (not
+                   (setq entry
+                         (tessera-elfeed-search--entry-at-point)))))
+      entry)))
+
+(defun tessera-elfeed-search--show-entry
+    (function entry &rest arguments)
+  "Call show FUNCTION for navigation ENTRY.
+Pass ARGUMENTS through unchanged and preserve FUNCTION's return value.
+Record a target when point or ENTRY differs from the navigation
+origin."
+  (let ((target
+         (or tessera-elfeed-search--navigation-target
+             (tessera-elfeed-search--different-entry
+              (tessera-elfeed-search--entry-at-point)
+              tessera-elfeed-search--navigation-origin)
+             (tessera-elfeed-search--different-entry
+              entry tessera-elfeed-search--navigation-origin))))
+    (unless tessera-elfeed-search--navigation-target
+      (setq tessera-elfeed-search--navigation-target target))
+    (if tessera-elfeed-search--navigation-probing
+        t
+      (apply function entry arguments))))
+
+(defun tessera-elfeed-search--moved-p (buffer entry)
+  "Return non-nil when BUFFER moved away from ENTRY."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (when-let* ((after
+                      (tessera-elfeed-search--entry-at-point)))
+           (not (equal
+                 (tessera-elfeed-search--entry-id after)
+                 (tessera-elfeed-search--entry-id entry)))))))
+
+(defun tessera-elfeed-search--position-point (buffer)
+  "Place point at the selected entry's title anchor in BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when-let* ((position (tessera-entry-point)))
+        (goto-char position)
+        (dolist (window (get-buffer-window-list buffer nil t))
+          (set-window-point window position))))))
+
+(defun tessera-elfeed-search--command (key)
+  "Return the current command below Tessera's emulation map for KEY."
+  (let* ((maps
+          (delq tessera-elfeed-search--navigation-map
+                (current-active-maps t)))
+         (command
+          (catch 'command
+            (dolist (map maps)
+              (when-let* ((binding (lookup-key map key))
+                          ((not (integerp binding))))
+                (throw 'command binding))))))
+    (or (command-remapping command nil maps) command)))
+
+(defun tessera-elfeed-search--invoke-command
+    (command &optional command-identity)
+  "Invoke COMMAND while guarding its Elfeed entry displays.
+Use COMMAND-IDENTITY as `this-command' when non-nil."
+  (let ((show-function
+         (symbol-function 'elfeed-search-show-entry))
+        (this-command (or command-identity command)))
+    (cl-letf
+        (((symbol-function 'elfeed-search-show-entry)
+          (lambda (entry &rest arguments)
+            (apply #'tessera-elfeed-search--show-entry
+                   show-function entry arguments))))
+      (call-interactively command))))
+
+(defun tessera-elfeed-search--probe-command (command)
+  "Return a callable probe copy of COMMAND when possible.
+Copy non-symbol commands so probing cannot change their closed-over
+bindings."
+  (if (symbolp command)
+      command
+    (condition-case nil
+        (let* ((print-circle t)
+               (copy (read (prin1-to-string command))))
+          (if (commandp copy) copy command))
+      (error command))))
+
+(defun tessera-elfeed-search--probe-navigation
+    (buffer command entry)
+  "Return non-nil when COMMAND finds a target from ENTRY in BUFFER.
+Run COMMAND in an undisplayed indirect buffer.  Entry displays are
+observed as possible targets but do not run their native effects."
+  (let ((name (generate-new-buffer-name
+               " *tessera-elfeed-navigation*"))
+        (position (with-current-buffer buffer (point)))
+        probe)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq probe (clone-indirect-buffer name nil t)))
+          (with-current-buffer probe
+            (goto-char position)
+            (setq-local change-major-mode-hook nil
+                        kill-buffer-hook nil)
+            (let ((inhibit-message t)
+                  (message-log-max nil)
+                  (tessera-elfeed-search--navigation-origin entry)
+                  (tessera-elfeed-search--navigation-target nil)
+                  (tessera-elfeed-search--navigation-probing t)
+                  completed)
+              (condition-case nil
+                  (progn
+                    (tessera-elfeed-search--invoke-command
+                     (tessera-elfeed-search--probe-command command)
+                     command)
+                    (setq completed t))
+                ((beginning-of-buffer end-of-buffer)))
+              (and completed
+                   (or
+                    (tessera-elfeed-search--moved-p probe entry)
+                    tessera-elfeed-search--navigation-target)))))
+      (when (buffer-live-p probe)
+        (with-current-buffer probe
+          (let (kill-buffer-hook)
+            (kill-buffer probe)))))))
+
+(defun tessera-elfeed-search--default-single-line-command-p
+    (command direction)
+  "Return non-nil for Elfeed's one-line COMMAND in DIRECTION."
+  (and (= (prefix-numeric-value current-prefix-arg) 1)
+       (eq command
+           (pcase direction
+             ('next #'next-line)
+             ('previous #'previous-line)
+             (_ nil)))))
+
+(defun tessera-elfeed-search--call-navigation (command direction)
+  "Call Elfeed navigation COMMAND atomically in DIRECTION."
+  (unless (commandp command)
+    (user-error "No Elfeed navigation command is available"))
+  (let ((entry (tessera-elfeed-search--entry-at-point)))
+    (if (not entry)
+        (let ((this-command command))
+          (call-interactively command))
+      (let ((buffer (current-buffer)))
+        (when
+            (if
+                (tessera-elfeed-search--default-single-line-command-p
+                 command direction)
+                (tessera-elfeed-search--entry-in-direction
+                 direction)
+              (tessera-elfeed-search--probe-navigation
+               buffer command entry))
+          (let ((tessera-elfeed-search--navigation-origin entry)
+                (tessera-elfeed-search--navigation-target nil))
+            (tessera--navigation-call
+             buffer
+             #'tessera-elfeed-search--invoke-command
+             (list command)
+             (lambda (_result)
+               (or
+                (not (buffer-live-p buffer))
+                (tessera-elfeed-search--moved-p buffer entry)
+                tessera-elfeed-search--navigation-target))
+             (lambda (_result)
+               (tessera-elfeed-search--position-point buffer)))))))))
+
+(defun tessera-elfeed-search--next ()
+  "Run the Elfeed command currently below Tessera's `n' binding."
+  (interactive)
+  (let ((command (tessera-elfeed-search--command (kbd "n"))))
+    (setq this-command command)
+    (tessera-elfeed-search--call-navigation command 'next)))
+
+(defun tessera-elfeed-search--previous ()
+  "Run the Elfeed command currently below Tessera's `p' binding."
+  (interactive)
+  (let ((command (tessera-elfeed-search--command (kbd "p"))))
+    (setq this-command command)
+    (tessera-elfeed-search--call-navigation command 'previous)))
+
+(defun tessera-elfeed-search--navigation (enable)
+  "Install navigation integration when ENABLE is non-nil."
+  (if enable
+      (add-to-list 'emulation-mode-map-alists
+                   'tessera-elfeed-search--emulation-map-alist)
+    (setq emulation-mode-map-alists
+          (delq 'tessera-elfeed-search--emulation-map-alist
+                emulation-mode-map-alists))))
+
 (defun tessera-elfeed-search--apply-layout ()
   "Attach layouts after Elfeed has inserted entry terminators."
   (when tessera-elfeed-search--active
@@ -428,6 +671,28 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
       (when (and tessera-elfeed-search--active
                  (derived-mode-p 'elfeed-search-mode))
         (tessera-elfeed-search--refresh)))))
+
+(defun tessera-elfeed-search--acquire-navigation ()
+  "Register one buffer as a navigation integration user."
+  (when (zerop tessera-elfeed-search--navigation-users)
+    (tessera-elfeed-search--navigation t))
+  (setq tessera-elfeed-search--navigation-users
+        (1+ tessera-elfeed-search--navigation-users)))
+
+(defun tessera-elfeed-search--release-navigation ()
+  "Unregister one buffer from the navigation integration."
+  (when (> tessera-elfeed-search--navigation-users 0)
+    (setq tessera-elfeed-search--navigation-users
+          (1- tessera-elfeed-search--navigation-users)))
+  (when (zerop tessera-elfeed-search--navigation-users)
+    (tessera-elfeed-search--navigation nil)))
+
+(defun tessera-elfeed-search--kill-buffer ()
+  "Release navigation resources before killing this search buffer."
+  (when tessera-elfeed-search--active
+    (setq tessera-elfeed-search--active nil
+          tessera-elfeed-search--emulation-map-alist nil)
+    (tessera-elfeed-search--release-navigation)))
 
 (defun tessera-elfeed-search--enable ()
   "Enable Tessera rendering in the current Elfeed search buffer."
@@ -449,12 +714,21 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
               #'tessera-entry-highlight-current nil t)
     (add-hook 'change-major-mode-hook
               #'tessera-elfeed-search--disable nil t)
-    (setq tessera-elfeed-search--active t)
+    (add-hook 'kill-buffer-hook
+              #'tessera-elfeed-search--kill-buffer nil t)
+    (setq tessera-elfeed-search--active t
+          tessera-elfeed-search--emulation-map-alist
+          (list
+           (cons 'tessera-elfeed-search--active
+                 tessera-elfeed-search--navigation-map)))
+    (tessera-elfeed-search--acquire-navigation)
     (tessera-elfeed-search--refresh)))
 
 (defun tessera-elfeed-search--disable ()
   "Disable Tessera rendering in the current Elfeed search buffer."
   (when tessera-elfeed-search--active
+    (setq tessera-elfeed-search--active nil
+          tessera-elfeed-search--emulation-map-alist nil)
     (tessera--restore-settings tessera-elfeed-search--saved-settings)
     (remove-hook 'elfeed-search-update-hook
                  #'tessera-elfeed-search--apply-layout t)
@@ -462,11 +736,13 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
                  #'tessera-entry-highlight-current t)
     (remove-hook 'change-major-mode-hook
                  #'tessera-elfeed-search--disable t)
+    (remove-hook 'kill-buffer-hook
+                 #'tessera-elfeed-search--kill-buffer t)
     (tessera-entry-clear-current)
     (tessera-entry-clear-layout)
     (tessera-elfeed-search--restore-separators)
-    (setq tessera-elfeed-search--active nil
-          tessera-elfeed-search--saved-settings nil)
+    (setq tessera-elfeed-search--saved-settings nil)
+    (tessera-elfeed-search--release-navigation)
     (tessera-elfeed-search--refresh)
     (hl-line-mode (if tessera-elfeed-search--saved-hl-line 1 -1))
     (setq tessera-elfeed-search--saved-hl-line nil)))

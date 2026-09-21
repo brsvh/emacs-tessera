@@ -412,6 +412,264 @@
           (should (looking-at "Subject 1"))
           (should (= (point) (tessera-entry-point))))))))
 
+(ert-deftest tessera-gnus-navigation-keeps-native-partial-subject ()
+  (save-window-excursion
+    (with-temp-buffer
+      (let ((gnus-show-threads nil)
+            (gnus-summary-buffer (current-buffer))
+            (gnus-summary-check-current nil)
+            (gnus-auto-center-summary nil)
+            (tessera-glyph-style 'ascii)
+            (tessera-entry-layout 'two-line)
+            (tessera-gnus-summary--active t))
+        (setq major-mode 'gnus-summary-mode)
+        (set-window-buffer (selected-window) (current-buffer))
+        (tessera-tests--gnus-rows '(0 0 0))
+        (tessera-gnus-summary--sync-buffer)
+        (unwind-protect
+            (progn
+              (tessera-gnus-summary--navigation t)
+              (gnus-summary-goto-subject 1)
+              (let ((this-command 'gnus-summary-next-subject))
+                (should (= 3 (gnus-summary-next-subject 5))))
+              (should (= 3 (gnus-summary-article-number)))
+              (should (= (point) (tessera-entry-point)))
+              (gnus-summary-goto-subject 3)
+              (let ((point (point)))
+                (let ((this-command 'gnus-summary-next-subject))
+                  (should (= 1 (gnus-summary-next-subject 1))))
+                (should (= (point) point))
+                (should (= 3 (gnus-summary-article-number)))))
+          (tessera-gnus-summary--navigation nil))
+        (should-not
+         (advice-member-p
+          #'tessera-gnus-summary--navigate
+          'gnus-summary-next-subject))
+        (should-not
+         (advice-member-p
+          #'tessera-gnus-summary--navigate-next-article
+          'gnus-summary-next-article))))))
+
+(ert-deftest tessera-gnus-navigation-stays-before-first-article ()
+  (save-window-excursion
+    (with-temp-buffer
+      (let ((gnus-show-threads t)
+            (gnus-newsgroup-name "test.group")
+            (gnus-newsgroup-begin 1)
+            (gnus-newsgroup-unfetched nil)
+            (gnus-newsgroup-unreads '(1 3))
+            (gnus-group-buffer (current-buffer))
+            (gnus-summary-buffer (current-buffer))
+            (gnus-summary-check-current nil)
+            (gnus-auto-center-summary nil)
+            (gnus-auto-extend-newsgroup t)
+            (gnus-auto-select-next t)
+            (tessera-gnus-summary-boundary-navigation nil)
+            (tessera-gnus-summary--active t)
+            extended)
+        (setq major-mode 'gnus-summary-mode)
+        (set-window-buffer (selected-window) (current-buffer))
+        (tessera-tests--gnus-rows '(0 1 0))
+        (gnus-summary-goto-subject 1)
+        (let ((point (point)))
+          (cl-letf (((symbol-function 'gnus-summary-goto-article)
+                     (lambda (&rest _)
+                       (setq extended t)
+                       (gnus-summary-goto-subject 3)))
+                    ((symbol-function 'gnus-summary-jump-to-group)
+                     #'ignore)
+                    ((symbol-function 'gnus-summary-search-group)
+                     #'ignore)
+                    ((symbol-function 'gnus-ephemeral-group-p)
+                     (lambda (&rest _) t)))
+            (unwind-protect
+                (progn
+                  (tessera-gnus-summary--navigation t)
+                  (let ((this-command
+                         'gnus-summary-prev-article))
+                    (gnus-summary-prev-article))
+                  (should-not extended)
+                  (should (= 1 (gnus-summary-article-number)))
+                  (should (= point (point))))
+              (tessera-gnus-summary--navigation nil))))))))
+
+(ert-deftest tessera-gnus-navigation-keeps-fold-at-first-article ()
+  (with-temp-buffer
+    (let ((gnus-show-threads t)
+          (gnus-newsgroup-name "test.group")
+          (gnus-newsgroup-unfetched nil)
+          (gnus-newsgroup-unreads '(1 3 5))
+          (gnus-summary-buffer (current-buffer))
+          (gnus-auto-center-summary nil)
+          (tessera-gnus-summary--active t)
+          displayed)
+      (setq major-mode 'gnus-summary-mode)
+      (tessera-tests--gnus-rows)
+      (tessera-gnus-summary--prepare)
+      (gnus-summary-goto-subject 1)
+      (add-to-invisibility-spec 'gnus-sum)
+      (gnus-summary-hide-thread)
+      (cl-letf (((symbol-function 'gnus-summary-display-article)
+                 (lambda (&rest _)
+                   (setq displayed t))))
+        (unwind-protect
+            (progn
+              (tessera-gnus-summary--navigation t)
+              (dolist (command
+                       '(gnus-summary-first-unread-article
+                         gnus-summary-first-article))
+                (let ((this-command command))
+                  (should-not (funcall command)))
+                (should-not displayed)
+                (should (= 1 (gnus-summary-article-number)))
+                (should
+                 (invisible-p
+                  (gnus-data-pos (gnus-data-find 2))))))
+          (tessera-gnus-summary--navigation nil))))))
+
+(ert-deftest tessera-gnus-navigation-calls-first-in-empty-summary ()
+  (with-temp-buffer
+    (let ((gnus-newsgroup-data nil)
+          (gnus-newsgroup-name "test.group")
+          (gnus-summary-buffer (current-buffer))
+          (tessera-gnus-summary--active t)
+          (this-command 'gnus-summary-first-article)
+          called)
+      (setq major-mode 'gnus-summary-mode)
+      (tessera-gnus-summary--navigate-first-article
+       (lambda ()
+         (setq called t)))
+      (should called))))
+
+(ert-deftest tessera-gnus-navigation-gates-native-boundary-options ()
+  (save-window-excursion
+    (with-temp-buffer
+      (let ((gnus-newsgroup-name "test.group")
+            (gnus-newsgroup-unfetched nil)
+            (gnus-newsgroup-unreads '(1 3))
+            (gnus-summary-buffer (current-buffer))
+            (gnus-summary-check-current nil)
+            (tessera-gnus-summary--active t)
+            calls)
+        (setq major-mode 'gnus-summary-mode)
+        (set-window-buffer (selected-window) (current-buffer))
+        (tessera-tests--gnus-rows '(0 1 0))
+        (gnus-summary-goto-subject 1)
+        (let ((this-command 'gnus-summary-prev-article)
+              (native
+               (lambda (&rest _)
+                 (push (list gnus-auto-extend-newsgroup
+                             gnus-auto-select-next)
+                       calls))))
+          (let ((gnus-auto-extend-newsgroup t)
+                (gnus-auto-select-next 'quietly)
+                (tessera-gnus-summary-boundary-navigation nil))
+            (tessera-gnus-summary--navigate-next-article
+             native nil nil t)
+            (should (equal (pop calls) '(nil nil))))
+          (let ((this-command 'gnus-summary-next-page)
+                (gnus-auto-extend-newsgroup t)
+                (gnus-auto-select-next 'quietly)
+                (tessera-gnus-summary-boundary-navigation nil))
+            (tessera-gnus-summary--navigate-next-article native)
+            (should (equal (pop calls) '(nil nil))))
+          (let ((gnus-auto-extend-newsgroup nil)
+                (gnus-auto-select-next nil)
+                (tessera-gnus-summary-boundary-navigation t))
+            (tessera-gnus-summary--navigate-next-article
+             native nil nil t)
+            (should (equal (pop calls) '(nil nil))))
+          (let ((gnus-auto-extend-newsgroup t)
+                (gnus-auto-select-next nil)
+                (tessera-gnus-summary-boundary-navigation t))
+            (tessera-gnus-summary--navigate-next-article
+             native nil nil t)
+            (should (equal (pop calls) '(t nil))))
+          (let ((gnus-auto-extend-newsgroup nil)
+                (gnus-auto-select-next 'quietly)
+                (tessera-gnus-summary-boundary-navigation t))
+            (tessera-gnus-summary--navigate-next-article
+             native nil nil t)
+            (should (equal (pop calls) '(nil quietly)))))))))
+
+(ert-deftest tessera-gnus-navigation-skips-nonnavigation-callers ()
+  (with-temp-buffer
+    (let ((tessera-gnus-summary--active t)
+          (gnus-newsgroup-name "test.group")
+          (this-command 'gnus-summary-kill-thread))
+      (setq major-mode 'gnus-summary-mode)
+      (insert (propertize "first" 'gnus-number 1) "\n")
+      (goto-char (point-min))
+      (tessera-gnus-summary--navigate
+       (lambda ()
+         (forward-char 1)
+         nil))
+      (should (= (point) (1+ (point-min)))))))
+
+(ert-deftest tessera-gnus-navigation-wraps-custom-n-and-p-commands ()
+  (save-window-excursion
+    (with-temp-buffer
+      (let ((gnus-show-threads nil)
+            (gnus-summary-buffer (current-buffer))
+            (gnus-summary-check-current nil)
+            (gnus-auto-center-summary nil)
+            (tessera-glyph-style 'ascii)
+            (tessera-entry-layout 'two-line)
+            (tessera-gnus-summary--active t))
+        (setq major-mode 'gnus-summary-mode)
+        (use-local-map (copy-keymap gnus-summary-mode-map))
+        (set-window-buffer (selected-window) (current-buffer))
+        (tessera-tests--gnus-rows '(0 0 0))
+        (tessera-gnus-summary--sync-buffer)
+        (let ((next
+               (lambda ()
+                 (interactive)
+                 (gnus-summary-next-subject 1)))
+              (previous
+               (lambda ()
+                 (interactive)
+                 (gnus-summary-prev-subject 1))))
+          (local-set-key (kbd "n") next)
+          (local-set-key (kbd "p") previous)
+          (unwind-protect
+              (progn
+                (tessera-gnus-summary--navigation t)
+                (gnus-summary-goto-subject 3)
+                (forward-char 2)
+                (let ((point (point))
+                      (this-command next))
+                  (funcall next)
+                  (should (= (point) point))
+                  (should (= 3 (gnus-summary-article-number))))
+                (gnus-summary-goto-subject 1)
+                (forward-char 2)
+                (let ((point (point))
+                      (this-command previous))
+                  (funcall previous)
+                  (should (= (point) point))
+                  (should (= 1 (gnus-summary-article-number)))))
+            (tessera-gnus-summary--navigation nil)))))))
+
+(ert-deftest tessera-gnus-navigation-ignores-unrelated-buffer-switch
+    ()
+  (let ((summary (generate-new-buffer " *tessera-gnus-summary*"))
+        (other (generate-new-buffer " *tessera-gnus-other*")))
+    (unwind-protect
+        (with-current-buffer summary
+          (setq major-mode 'gnus-summary-mode
+                gnus-newsgroup-name "test.group")
+          (insert (propertize "first" 'gnus-number 1) "\n")
+          (goto-char (point-min))
+          (let ((identity
+                 (tessera-gnus-summary--navigation-identity summary)))
+            (with-current-buffer other
+              (let ((gnus-summary-buffer summary))
+                (should-not
+                 (tessera-gnus-summary--navigation-changed-p
+                  summary identity))))))
+      (kill-buffer summary)
+      (kill-buffer other))))
+
 (ert-deftest tessera-gnus-navigation-keeps-horizontal-position ()
   (save-window-excursion
     (with-temp-buffer

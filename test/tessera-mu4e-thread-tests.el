@@ -346,9 +346,60 @@
                  (line-beginning-position)))
       (call-interactively #'mu4e-thread-goto-root)
       (should (looking-at "Author 1"))
+      (forward-char 2)
+      (let ((point (point)))
+        (call-interactively #'mu4e-thread-goto-root)
+        (should (= (point) point))
+        (should (= 1 (mu4e~headers-docid-at-point))))
       (mu4e~headers-goto-docid 5)
-      (should-not (mu4e-headers-next))
-      (should-not (mu4e~headers-docid-at-point)))))
+      (tessera-mu4e-headers--position-point)
+      (let ((point (point)))
+        (should-not (call-interactively
+                     #'mu4e-headers-next-thread))
+        (should (= (point) point))
+        (should (= 5 (mu4e~headers-docid-at-point)))
+        (should-not (mu4e-headers-next))
+        (should (= (point) point))
+        (should (= 5 (mu4e~headers-docid-at-point)))
+        (should (looking-at "Author 5")))
+      (let ((point (point))
+            (states (copy-tree mu4e-thread--docids))
+            (folds
+             (seq-count
+              (lambda (overlay)
+                (overlay-get overlay 'mu4e-thread-folded))
+              (overlays-in (point-min) (point-max)))))
+        (should-not
+         (call-interactively
+          #'mu4e-thread-fold-toggle-goto-next))
+        (should (= (point) point))
+        (should (equal mu4e-thread--docids states))
+        (should
+         (= folds
+            (seq-count
+             (lambda (overlay)
+               (overlay-get overlay 'mu4e-thread-folded))
+             (overlays-in (point-min) (point-max))))))
+      (mu4e~headers-goto-docid 1)
+      (tessera-mu4e-headers--position-point)
+      (let ((point (point)))
+        (should-not (call-interactively
+                     #'mu4e-headers-prev-thread))
+        (should (= (point) point))
+        (should (= 1 (mu4e~headers-docid-at-point)))))))
+
+(ert-deftest tessera-mu4e-fold-navigation-reuses-next-thread ()
+  (tessera-mu4e-tests--with-thread
+    (let ((calls 0)
+          (native (symbol-function 'mu4e-thread-next)))
+      (cl-letf (((symbol-function 'mu4e-thread-next)
+                 (lambda ()
+                   (setq calls (1+ calls))
+                   (funcall native))))
+        (call-interactively
+         #'mu4e-thread-fold-toggle-goto-next))
+      (should (= calls 1))
+      (should (= 5 (mu4e~headers-docid-at-point))))))
 
 (ert-deftest tessera-mu4e-thread-redraw-preserves-contact-or-offset ()
   (tessera-mu4e-tests--with-thread
@@ -371,8 +422,21 @@
       (should (looking-at "Subject 2"))
       (tessera-mu4e-headers--disable)
       (should-not (advice-member-p
-                   #'tessera-mu4e-headers--moved
+                   #'tessera-mu4e-headers--move
                    'mu4e~headers-move))
+      (should-not (advice-member-p
+                   #'tessera-mu4e-headers--move-interactively
+                   'mu4e-headers-next-thread))
+      (should-not (advice-member-p
+                   #'tessera-mu4e-headers--move-to-identity
+                   'mu4e-thread-goto-root))
+      (should-not
+       (advice-member-p
+        #'tessera-mu4e-headers--fold-move-to-identity
+        'mu4e-thread-fold-toggle-goto-next))
+      (should-not (advice-member-p
+                   #'tessera-mu4e-headers--view-prev-or-next
+                   'mu4e--view-prev-or-next))
       (should-not (text-property-any
                    (point-min) (point-max) 'tessera-entry-point t)))))
 
@@ -400,6 +464,39 @@
           (let ((mu4e-headers-open-after-move t))
             (should (= 4 (mu4e-headers-next)))
             (should (equal viewed '(2)))))))))
+
+(ert-deftest tessera-mu4e-view-navigation-requires-a-target ()
+  (tessera-mu4e-tests--with-thread
+    (let (selected viewed)
+      (cl-letf (((symbol-function 'mu4e-select-other-view)
+                 (lambda () (push t selected)))
+                ((symbol-function 'mu4e-headers-view-message)
+                 (lambda ()
+                   (push t viewed)
+                   42)))
+        (should-not
+         (tessera-mu4e-headers--view-prev-or-next
+          (lambda (move backwards)
+            (funcall move backwards)
+            (mu4e-select-other-view)
+            (mu4e-headers-view-message))
+          (lambda (_backwards) nil) nil))
+        (should-not selected)
+        (should-not viewed)
+        (should
+         (= 42
+            (tessera-mu4e-headers--view-prev-or-next
+             (lambda (move backwards)
+               (funcall move backwards)
+               (mu4e-select-other-view)
+               (mu4e-headers-view-message))
+             (lambda (_backwards) 2) nil)))
+        (should (equal selected '(t)))
+        (should (equal viewed '(t))))
+      (should
+       (advice-member-p
+        #'tessera-mu4e-headers--view-prev-or-next
+        'mu4e--view-prev-or-next)))))
 
 (ert-deftest tessera-mu4e-thread-update-from-another-window ()
   (tessera-mu4e-tests--with-thread

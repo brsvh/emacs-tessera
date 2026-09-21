@@ -41,6 +41,8 @@
                   "tessera-elfeed-search")
 (declare-function tessera-elfeed-search--register
                   "tessera-elfeed-search")
+(declare-function tessera-elfeed-search--navigation
+                  "tessera-elfeed-search")
 
 ;;;; Adapter lifecycle
 
@@ -84,7 +86,8 @@
                  #'tessera-elfeed--enable-search)
     (when (featurep 'tessera-elfeed-search)
       (tessera-elfeed--map-search-buffers
-       #'tessera-elfeed-search--disable))))
+       #'tessera-elfeed-search--disable)
+      (tessera-elfeed-search--navigation nil))))
 
 (provide 'tessera-elfeed)
 ;;; tessera-elfeed.el ends here
