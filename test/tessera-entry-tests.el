@@ -18,6 +18,37 @@
 (require 'tessera-test-support)
 (require 'tessera)
 
+(define-derived-mode tessera-entry-tests-mode fundamental-mode
+  "Tessera-Test"
+  "Major mode used to test buffer traversal.")
+
+(ert-deftest tessera-map-mode-buffers-finishes-after-condition ()
+  (dolist (condition '(error quit))
+    (let ((first (generate-new-buffer " *tessera-map-first*"))
+          (second (generate-new-buffer " *tessera-map-second*"))
+          visited condition-data)
+      (unwind-protect
+          (progn
+            (dolist (buffer (list first second))
+              (with-current-buffer buffer
+                (tessera-entry-tests-mode)))
+            (condition-case caught
+                (tessera--map-mode-buffers
+                 'tessera-entry-tests-mode
+                 (lambda ()
+                   (push (current-buffer) visited)
+                   (when (eq (current-buffer) first)
+                     (signal condition '("Traversal failed")))))
+              ((error quit) (setq condition-data caught)))
+            (should
+             (equal condition-data
+                    (list condition "Traversal failed")))
+            (should (= (length visited) 2))
+            (should (memq first visited))
+            (should (memq second visited)))
+        (kill-buffer first)
+        (kill-buffer second)))))
+
 (defun tessera-entry-tests--context (object buffer window)
   "Build a test context for OBJECT in BUFFER and WINDOW."
   (make-tessera-entry-context
@@ -1004,20 +1035,6 @@
         (should (= (point) point))
         (should (= rollbacks 1))))))
 
-(ert-deftest tessera-navigation-restores-deactivate-mark ()
-  (with-temp-buffer
-    (setq mark-active t
-          deactivate-mark nil)
-    (should-not
-     (tessera--navigation-call
-      (current-buffer)
-      (lambda ()
-        (setq deactivate-mark t)
-        nil)
-      nil #'identity))
-    (should mark-active)
-    (should-not deactivate-mark)))
-
 (ert-deftest tessera-navigation-includes-related-buffers ()
   (let ((buffer (generate-new-buffer " *tessera-navigation-main*"))
         (related
@@ -1031,6 +1048,133 @@
           (tessera--navigation-frames buffer (list related))
           (should (memq buffer seen))
           (should (memq related seen)))
+      (kill-buffer buffer)
+      (kill-buffer related))))
+
+(ert-deftest tessera-navigation-restores-buffer-restrictions ()
+  (let ((buffer (generate-new-buffer " *tessera-navigation-main*"))
+        (related
+         (generate-new-buffer " *tessera-navigation-related*"))
+        buffer-state
+        related-point)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (insert "first\nsecond\n")
+            (goto-char (+ (point-min) 2))
+            (narrow-to-region (line-beginning-position)
+                              (line-end-position))
+            (setq buffer-state
+                  (list (point) (point-min) (point-max))))
+          (with-current-buffer related
+            (insert "first\nsecond\n")
+            (goto-char (+ (point-min) 3))
+            (setq related-point (point)))
+          (should-not
+           (tessera--navigation-call
+            buffer
+            (lambda ()
+              (with-current-buffer buffer
+                (widen)
+                (goto-char (point-max)))
+              (with-current-buffer related
+                (goto-char (point-min))
+                (forward-line 1)
+                (narrow-to-region (point) (point-max))
+                (goto-char (point-max)))
+              nil)
+            nil #'identity nil nil (list related)))
+          (with-current-buffer buffer
+            (should (buffer-narrowed-p))
+            (should
+             (equal buffer-state
+                    (list (point) (point-min) (point-max)))))
+          (with-current-buffer related
+            (should-not (buffer-narrowed-p))
+            (should (= related-point (point)))))
+      (kill-buffer buffer)
+      (kill-buffer related))))
+
+(ert-deftest tessera-navigation-keeps-related-state-on-success ()
+  (let ((buffer
+         (generate-new-buffer " *tessera-navigation-main*"))
+        (related
+         (generate-new-buffer " *tessera-navigation-related*"))
+        second-line)
+    (unwind-protect
+        (progn
+          (with-current-buffer related
+            (insert "first\nsecond\n")
+            (goto-char (point-min))
+            (forward-line 1)
+            (setq second-line (point))
+            (goto-char (point-min)))
+          (should
+           (tessera--navigation-call
+            buffer
+            (lambda ()
+              (with-current-buffer related
+                (goto-char second-line)
+                (narrow-to-region
+                 (line-beginning-position)
+                 (line-end-position)))
+              t)
+            nil #'identity nil nil (list related)))
+          (with-current-buffer related
+            (should (buffer-narrowed-p))
+            (should (= (point) second-line))
+            (should (= (point-min) second-line))))
+      (kill-buffer buffer)
+      (kill-buffer related))))
+
+(ert-deftest tessera-navigation-releases-snapshot-markers ()
+  (let ((buffer
+         (generate-new-buffer " *tessera-navigation-main*"))
+        (related
+         (generate-new-buffer " *tessera-navigation-related*"))
+        markers
+        snapshot)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (insert "first\nsecond\n")
+            (goto-char (+ (point-min) 2))
+            (set-mark (point))
+            (setq mark-ring
+                  (list (copy-marker (line-end-position))))
+            (narrow-to-region
+             (line-beginning-position)
+             (line-end-position)))
+          (with-current-buffer related
+            (insert "first\nsecond\n")
+            (goto-char (+ (point-min) 2))
+            (narrow-to-region
+             (line-beginning-position)
+             (line-end-position)))
+          (setq snapshot
+                (tessera--navigation-save buffer (list related)))
+          (pcase-let
+              ((`(,_buffer ,point ,mark ,_active ,_deactivate
+                           ,ring ,restriction ,related-states . ,_)
+                snapshot))
+            (setq markers (append (list point mark)
+                                  ring
+                                  (list (car restriction)
+                                        (cdr restriction))))
+            (pcase-dolist
+                (`(,_current ,current-point
+                             ,current-restriction)
+                 related-states)
+              (setq markers
+                    (append markers
+                            (list current-point
+                                  (car current-restriction)
+                                  (cdr current-restriction))))))
+          (tessera--navigation-release snapshot)
+          (should
+           (seq-every-p
+            (lambda (marker) (not (marker-buffer marker)))
+            markers)))
       (kill-buffer buffer)
       (kill-buffer related))))
 

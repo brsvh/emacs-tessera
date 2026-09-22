@@ -55,12 +55,12 @@
 (declare-function tessera-gnus-article--updated
                   "tessera-gnus-article")
 
+(defvar tessera-gnus--installed nil
+  "Whether the global Gnus integration is fully installed.")
+
 (defun tessera-gnus--map-summary-buffers (function)
   "Call FUNCTION in each live Gnus summary buffer."
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (derived-mode-p 'gnus-summary-mode)
-        (funcall function)))))
+  (tessera--map-mode-buffers 'gnus-summary-mode function))
 
 (defun tessera-gnus--enable-summary ()
   "Enable Tessera in the current Gnus summary buffer."
@@ -76,39 +76,58 @@
   (when (featurep 'tessera-gnus-summary)
     (tessera-gnus-summary--glyphs-changed option)))
 
+(defun tessera-gnus--deactivate ()
+  "Remove Gnus hooks and disable every loaded adapter."
+  (remove-hook 'tessera--glyph-change-functions
+               #'tessera-gnus--glyphs-changed)
+  (remove-hook 'gnus-summary-mode-hook
+               #'tessera-gnus--enable-summary)
+  (unwind-protect
+      (when (featurep 'tessera-gnus-article)
+        (tessera-gnus-article--track-content nil))
+    (when (featurep 'tessera-gnus-summary)
+      (unwind-protect
+          (tessera-gnus-summary--track-folds nil)
+        (unwind-protect
+            (tessera-gnus-summary--navigation nil)
+          (tessera-gnus--map-summary-buffers
+           #'tessera-gnus-summary--disable))))))
+
 ;;;###autoload
 (define-minor-mode tessera-gnus-mode
   "Toggle Tessera UI adapters for Gnus buffers."
   :global t
   :group 'tessera-gnus
   (if tessera-gnus-mode
-      (progn
-        (add-hook 'tessera--glyph-change-functions
-                  #'tessera-gnus--glyphs-changed)
-        (require 'tessera-gnus-article)
-        (require 'tessera-gnus-summary)
-        (tessera-gnus-summary--track-folds t)
-        (tessera-gnus-summary--navigation t)
-        (tessera-gnus-article--track-content t)
-        (add-hook 'gnus-summary-mode-hook
-                  #'tessera-gnus--enable-summary)
-        (tessera-gnus--map-summary-buffers
-         #'tessera-gnus--enable-summary)
-        (dolist (buffer (buffer-list))
-          (with-current-buffer buffer
-            (when (derived-mode-p 'gnus-article-mode)
-              (tessera-gnus-article--updated)))))
-    (remove-hook 'tessera--glyph-change-functions
-                 #'tessera-gnus--glyphs-changed)
-    (remove-hook 'gnus-summary-mode-hook
+      (unless tessera-gnus--installed
+        (let (completed)
+          (unwind-protect
+              (progn
+                (add-hook 'tessera--glyph-change-functions
+                          #'tessera-gnus--glyphs-changed)
+                (require 'tessera-gnus-article)
+                (require 'tessera-gnus-summary)
+                (tessera-gnus-summary--track-folds t)
+                (tessera-gnus-summary--navigation t)
+                (tessera-gnus-article--track-content t)
+                (add-hook 'gnus-summary-mode-hook
+                          #'tessera-gnus--enable-summary)
+                (tessera-gnus--map-summary-buffers
                  #'tessera-gnus--enable-summary)
-    (when (featurep 'tessera-gnus-article)
-      (tessera-gnus-article--track-content nil))
-    (when (featurep 'tessera-gnus-summary)
-      (tessera-gnus-summary--track-folds nil)
-      (tessera-gnus-summary--navigation nil)
-      (tessera-gnus--map-summary-buffers
-       #'tessera-gnus-summary--disable))))
+                (tessera--map-mode-buffers
+                 'gnus-article-mode
+                 #'tessera-gnus-article--updated)
+                (setq tessera-gnus--installed t
+                      completed t))
+            (unless completed
+              (setq tessera-gnus-mode nil
+                    tessera-gnus--installed nil)
+              (condition-case nil
+                  (tessera-gnus--deactivate)
+                ((error quit) nil))))))
+    (unwind-protect
+        (tessera-gnus--deactivate)
+      (setq tessera-gnus--installed nil))))
 
 (provide 'tessera-gnus)
 ;;; tessera-gnus.el ends here

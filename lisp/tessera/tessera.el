@@ -222,6 +222,22 @@ to every glyph."
           (set (make-local-variable variable) value)
         (kill-local-variable variable)))))
 
+(defun tessera--map-mode-buffers (mode function)
+  "Call FUNCTION in every live buffer derived from MODE.
+Continue after errors or quits, then signal the first condition."
+  (let (condition-data)
+    (dolist (buffer (buffer-list))
+      (when (buffer-live-p buffer)
+        (condition-case condition
+            (with-current-buffer buffer
+              (when (derived-mode-p mode)
+                (funcall function)))
+          ((error quit)
+           (unless condition-data
+             (setq condition-data condition))))))
+    (when condition-data
+      (signal (car condition-data) (cdr condition-data)))))
+
 ;;;; Data model
 
 (cl-defstruct tessera-entry-context
@@ -1870,13 +1886,33 @@ same navigation command."
           (push (window-frame window) frames))))
     (delete-dups frames)))
 
+(defun tessera--navigation-save-restriction ()
+  "Return markers for the current buffer restriction.
+Return nil when the current buffer is not narrowed."
+  (when (buffer-narrowed-p)
+    (cons (copy-marker (point-min))
+          (copy-marker (point-max)))))
+
+(defun tessera--navigation-restore-restriction (restriction)
+  "Restore the current buffer's saved RESTRICTION."
+  (widen)
+  (when restriction
+    (narrow-to-region (car restriction) (cdr restriction))))
+
+(defun tessera--navigation-release-restriction (restriction)
+  "Release markers held by navigation RESTRICTION."
+  (when restriction
+    (set-marker (car restriction) nil)
+    (set-marker (cdr restriction) nil)))
+
 (defun tessera--navigation-save
     (&optional buffer related-buffers)
   "Save navigation state for BUFFER or the current buffer.
-The snapshot records buffer point and the complete window
-configuration of the selected frame and frames displaying BUFFER or
-RELATED-BUFFERS.  It also records the local mark state and mark ring.
-Release the snapshot with `tessera--navigation-release'."
+The snapshot records point and narrowing in BUFFER and
+RELATED-BUFFERS, and the complete window configuration of the
+selected frame and frames displaying those buffers.  It also records
+BUFFER's local mark state and mark ring.  Release the snapshot with
+`tessera--navigation-release'."
   (let ((buffer (or buffer (current-buffer))))
     (list
      buffer
@@ -1886,6 +1922,19 @@ Release the snapshot with `tessera--navigation-release'."
      (with-current-buffer buffer deactivate-mark)
      (with-current-buffer buffer
        (mapcar #'copy-marker mark-ring))
+     (with-current-buffer buffer
+       (tessera--navigation-save-restriction))
+     (delq
+      nil
+      (mapcar
+       (lambda (current)
+         (when (and (buffer-live-p current)
+                    (not (eq current buffer)))
+           (with-current-buffer current
+             (list current
+                   (copy-marker (point))
+                   (tessera--navigation-save-restriction)))))
+       (delete-dups (copy-sequence related-buffers))))
      (selected-frame)
      (mapcar
       (lambda (frame)
@@ -1895,10 +1944,12 @@ Release the snapshot with `tessera--navigation-release'."
 (defun tessera--navigation-restore (snapshot)
   "Restore point and window configurations from SNAPSHOT."
   (pcase-let ((`(,buffer ,point ,mark ,active ,deactivate ,ring
-                         ,selected-frame ,configurations)
+                         ,restriction ,related-states ,selected-frame
+                         ,configurations)
                snapshot))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
+        (tessera--navigation-restore-restriction restriction)
         (when (marker-position point)
           (goto-char point))
         (set-marker (mark-marker) (marker-position mark) buffer)
@@ -1908,18 +1959,40 @@ Release the snapshot with `tessera--navigation-release'."
           (when (markerp marker)
             (set-marker marker nil)))
         (setq mark-ring (mapcar #'copy-marker ring))))
+    (pcase-dolist (`(,current ,_point ,current-restriction)
+                   related-states)
+      (when (buffer-live-p current)
+        (with-current-buffer current
+          (tessera--navigation-restore-restriction
+           current-restriction))))
     (pcase-dolist (`(,frame . ,configuration) configurations)
       (when (frame-live-p frame)
         (set-window-configuration configuration t)))
+    (pcase-dolist (`(,current ,marker ,_restriction)
+                   related-states)
+      (when (and (buffer-live-p current)
+                 (marker-position marker))
+        (with-current-buffer current
+          (goto-char marker))))
     (when (frame-live-p selected-frame)
       (select-frame selected-frame 'norecord))))
 
 (defun tessera--navigation-release (snapshot)
   "Release all markers held by navigation SNAPSHOT."
-  (set-marker (nth 1 snapshot) nil)
-  (set-marker (nth 2 snapshot) nil)
-  (dolist (marker (nth 5 snapshot))
-    (set-marker marker nil)))
+  (pcase-let ((`(,_buffer ,point ,mark ,_active ,_deactivate ,ring
+                          ,restriction ,related-states
+                          ,_selected-frame ,_configurations)
+               snapshot))
+    (set-marker point nil)
+    (set-marker mark nil)
+    (dolist (marker ring)
+      (set-marker marker nil))
+    (tessera--navigation-release-restriction restriction)
+    (pcase-dolist (`(,_current ,marker ,current-restriction)
+                   related-states)
+      (set-marker marker nil)
+      (tessera--navigation-release-restriction
+       current-restriction))))
 
 (defun tessera--navigation-call
     (buffer function arguments target-p
@@ -1928,10 +2001,11 @@ Release the snapshot with `tessera--navigation-release'."
 TARGET-P receives the native result and returns non-nil when a real
 target was selected.  On success, call COMMIT with that result when
 non-nil.  Otherwise call ROLLBACK with the result when non-nil, then
-restore point, mark, and the saved window configurations.  Also roll
-back on any nonlocal exit from FUNCTION, TARGET-P, or COMMIT, without
-replacing that exit if restoration fails.  RELATED-BUFFERS identifies
-other native buffers whose displayed frames need restoration."
+restore point, narrowing, mark, and the saved window configurations.
+Also roll back on any nonlocal exit from FUNCTION, TARGET-P, or
+COMMIT, without replacing that exit if restoration fails.
+RELATED-BUFFERS identifies other native buffers whose point,
+narrowing, and displayed frames need restoration."
   (let ((snapshot
          (tessera--navigation-save buffer related-buffers))
         (restore-needed t)

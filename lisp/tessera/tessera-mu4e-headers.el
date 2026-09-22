@@ -30,7 +30,6 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'hl-line)
 (require 'subr-x)
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-thread)
@@ -467,11 +466,12 @@ These flags follow `mu4e-headers-visible-flags'.")
   "Native column header to restore when disabling Tessera.")
 (defvar-local tessera-mu4e-headers--saved-settings nil
   "Snapshot of layout and logical navigation settings.")
-(defvar-local tessera-mu4e-headers--saved-hl-line nil
-  "Whether native line highlighting was enabled.")
 
 (defvar tessera-mu4e-headers--moving nil
   "Non-nil while an outer native header move is in progress.")
+
+(defvar tessera-mu4e-headers--bulk-deactivating nil
+  "Non-nil while the global mode disables all Headers buffers.")
 
 ;;;; Thread contexts from native result rows
 
@@ -1044,7 +1044,6 @@ FORCE also redraws unchanged messages after presentation changes."
         (setq tessera-mu4e-headers--native-header-line
               header-line-format))
       (setq header-line-format nil)
-      (when hl-line-mode (hl-line-mode -1))
       (if (tessera-mu4e-thread-fold-at (point))
           (tessera-entry-clear-current)
         (tessera-entry-highlight-current)))))
@@ -1254,59 +1253,85 @@ message only while it remains selected after the native update."
 
 ;;;; Adapter lifecycle
 
+(defun tessera-mu4e-headers--restore-native-state ()
+  "Restore native state in the current mu4e headers buffer."
+  (setq tessera-mu4e-headers--active nil)
+  (remove-hook 'after-change-functions
+               #'tessera-mu4e-headers--changed t)
+  (remove-hook 'tessera-mu4e-thread-change-hook
+               #'tessera-mu4e-headers--changed t)
+  (remove-hook 'post-command-hook
+               #'tessera-mu4e-headers--refresh t)
+  (remove-hook 'pre-redisplay-functions
+               #'tessera-mu4e-headers--refresh t)
+  (remove-hook 'change-major-mode-hook
+               #'tessera-mu4e-headers--disable t)
+  (let (error-data)
+    (unwind-protect
+        (condition-case error
+            (tessera-mu4e-headers--sync t)
+          (error (setq error-data error)))
+      (setq header-line-format
+            tessera-mu4e-headers--native-header-line)
+      (tessera--restore-settings
+       tessera-mu4e-headers--saved-settings)
+      (setq tessera-mu4e-headers--saved-settings nil
+            tessera-mu4e-headers--native-header-line nil
+            tessera-mu4e-headers--appearance nil
+            tessera-mu4e-headers--dirty t
+            tessera-mu4e-headers--threads nil
+            tessera-mu4e-headers--leading-width 0)
+      (unless (or tessera-mu4e-headers--bulk-deactivating
+                  (seq-some
+                   (lambda (buffer)
+                     (buffer-local-value
+                      'tessera-mu4e-headers--active buffer))
+                   (buffer-list)))
+        (tessera-mu4e-headers--navigation nil)))
+    (when error-data
+      (ignore-errors (tessera-mu4e-headers--sync t))
+      (signal (car error-data) (cdr error-data)))))
+
 (defun tessera-mu4e-headers--enable ()
   "Enable reversible layout synchronization in this headers buffer."
   (unless tessera-mu4e-headers--active
     (setq tessera-mu4e-headers--active t
           tessera-mu4e-headers--dirty t
           tessera-mu4e-headers--native-header-line header-line-format
-          tessera-mu4e-headers--saved-hl-line hl-line-mode
           tessera-mu4e-headers--saved-settings
           (tessera--save-settings
            '(tessera-entry-layout line-move-ignore-invisible)))
-    (setq-local tessera-entry-layout 'two-line)
-    ;; Mu4e skips folded messages itself.  Its logical line motion
-    ;; must not stop at the visual newlines in padding overlays.
-    (setq-local line-move-ignore-invisible nil)
-    (tessera-mu4e-thread-invalidate)
-    (add-hook 'after-change-functions
-              #'tessera-mu4e-headers--changed nil t)
-    (add-hook 'tessera-mu4e-thread-change-hook
-              #'tessera-mu4e-headers--changed nil t)
-    (add-hook 'post-command-hook
-              #'tessera-mu4e-headers--refresh t t)
-    (add-hook 'pre-redisplay-functions
-              #'tessera-mu4e-headers--refresh nil t)
-    (add-hook 'change-major-mode-hook
-              #'tessera-mu4e-headers--disable nil t)
-    (tessera-mu4e-headers--navigation t)
-    (tessera-mu4e-headers--refresh)
-    (tessera-mu4e-headers--position-point)))
+    (let (completed)
+      (unwind-protect
+          (progn
+            (setq-local tessera-entry-layout 'two-line)
+            ;; Mu4e skips folded messages itself.  Its logical line
+            ;; motion must not stop at visual padding newlines.
+            (setq-local line-move-ignore-invisible nil)
+            (tessera-mu4e-thread-invalidate)
+            (add-hook 'after-change-functions
+                      #'tessera-mu4e-headers--changed nil t)
+            (add-hook 'tessera-mu4e-thread-change-hook
+                      #'tessera-mu4e-headers--changed nil t)
+            (add-hook 'post-command-hook
+                      #'tessera-mu4e-headers--refresh t t)
+            (add-hook 'pre-redisplay-functions
+                      #'tessera-mu4e-headers--refresh nil t)
+            (add-hook 'change-major-mode-hook
+                      #'tessera-mu4e-headers--disable nil t)
+            (tessera-mu4e-headers--navigation t)
+            (tessera-mu4e-headers--refresh)
+            (tessera-mu4e-headers--position-point)
+            (setq completed t))
+        (unless completed
+          (condition-case nil
+              (tessera-mu4e-headers--restore-native-state)
+            (error nil)))))))
 
 (defun tessera-mu4e-headers--disable ()
-  "Restore native text, marks, highlight, and header line."
+  "Restore native text, marks, settings, and header line."
   (when tessera-mu4e-headers--active
-    (setq tessera-mu4e-headers--active nil)
-    (remove-hook 'after-change-functions
-                 #'tessera-mu4e-headers--changed t)
-    (remove-hook 'tessera-mu4e-thread-change-hook
-                 #'tessera-mu4e-headers--changed t)
-    (remove-hook 'post-command-hook
-                 #'tessera-mu4e-headers--refresh t)
-    (remove-hook 'pre-redisplay-functions
-                 #'tessera-mu4e-headers--refresh t)
-    (remove-hook 'change-major-mode-hook
-                 #'tessera-mu4e-headers--disable t)
-    (tessera-mu4e-headers--sync t)
-    (setq header-line-format tessera-mu4e-headers--native-header-line)
-    (hl-line-mode (if tessera-mu4e-headers--saved-hl-line 1 -1))
-    (tessera--restore-settings tessera-mu4e-headers--saved-settings)
-    (unless (seq-some
-             (lambda (buffer)
-               (buffer-local-value
-                'tessera-mu4e-headers--active buffer))
-             (buffer-list))
-      (tessera-mu4e-headers--navigation nil))))
+    (tessera-mu4e-headers--restore-native-state)))
 
 (defun tessera-mu4e-headers--glyphs-changed (option)
   "Refresh active mu4e views after glyph OPTION changes.

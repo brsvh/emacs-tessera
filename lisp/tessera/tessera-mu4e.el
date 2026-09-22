@@ -45,6 +45,15 @@
 (declare-function tessera-mu4e-headers--navigation
                   "tessera-mu4e-headers")
 
+(defvar tessera-mu4e-headers--bulk-deactivating)
+
+(defvar tessera-mu4e--installed nil
+  "Whether the global mu4e integration is fully installed.")
+
+(defun tessera-mu4e--map-headers-buffers (function)
+  "Call FUNCTION in every live mu4e headers buffer."
+  (tessera--map-mode-buffers 'mu4e-headers-mode function))
+
 (defun tessera-mu4e--enable-headers ()
   "Enable Tessera in the current mu4e headers buffer."
   (require 'mu4e-headers)
@@ -60,6 +69,19 @@
   (when (featurep 'tessera-mu4e-headers)
     (tessera-mu4e-headers--glyphs-changed option)))
 
+(defun tessera-mu4e--deactivate ()
+  "Remove mu4e hooks and disable every active headers adapter."
+  (remove-hook 'tessera--glyph-change-functions
+               #'tessera-mu4e--glyphs-changed)
+  (remove-hook 'mu4e-headers-mode-hook
+               #'tessera-mu4e--enable-headers)
+  (when (featurep 'tessera-mu4e-headers)
+    (let ((tessera-mu4e-headers--bulk-deactivating t))
+      (unwind-protect
+          (tessera-mu4e--map-headers-buffers
+           #'tessera-mu4e-headers--disable)
+        (tessera-mu4e-headers--navigation nil)))))
+
 ;;;###autoload
 (define-minor-mode tessera-mu4e-mode
   "Toggle Tessera layouts in mu4e headers.
@@ -68,25 +90,27 @@ automatically selects the shared thread layout."
   :global t
   :group 'tessera-mu4e
   (if tessera-mu4e-mode
-      (progn
-        (add-hook 'tessera--glyph-change-functions
-                  #'tessera-mu4e--glyphs-changed)
-        (add-hook 'mu4e-headers-mode-hook
-                  #'tessera-mu4e--enable-headers))
-    (remove-hook 'tessera--glyph-change-functions
-                 #'tessera-mu4e--glyphs-changed)
-    (remove-hook 'mu4e-headers-mode-hook
-                 #'tessera-mu4e--enable-headers))
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (derived-mode-p 'mu4e-headers-mode)
-        (if tessera-mu4e-mode
-            (tessera-mu4e--enable-headers)
-          (when (featurep 'tessera-mu4e-headers)
-            (tessera-mu4e-headers--disable))))))
-  (when (and (not tessera-mu4e-mode)
-             (featurep 'tessera-mu4e-headers))
-    (tessera-mu4e-headers--navigation nil)))
+      (unless tessera-mu4e--installed
+        (let (completed)
+          (unwind-protect
+              (progn
+                (add-hook 'tessera--glyph-change-functions
+                          #'tessera-mu4e--glyphs-changed)
+                (add-hook 'mu4e-headers-mode-hook
+                          #'tessera-mu4e--enable-headers)
+                (tessera-mu4e--map-headers-buffers
+                 #'tessera-mu4e--enable-headers)
+                (setq tessera-mu4e--installed t
+                      completed t))
+            (unless completed
+              (setq tessera-mu4e-mode nil
+                    tessera-mu4e--installed nil)
+              (condition-case nil
+                  (tessera-mu4e--deactivate)
+                ((error quit) nil))))))
+    (unwind-protect
+        (tessera-mu4e--deactivate)
+      (setq tessera-mu4e--installed nil))))
 
 (provide 'tessera-mu4e)
 ;;; tessera-mu4e.el ends here

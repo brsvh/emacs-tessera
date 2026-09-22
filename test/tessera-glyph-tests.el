@@ -225,24 +225,42 @@
 (ert-deftest tessera-glyph-callbacks-follow-mode-lifecycle ()
   (let ((tessera--glyph-change-functions nil)
         (tessera-gnus-mode nil)
+        (tessera-gnus--installed nil)
         (tessera-mu4e-mode nil)
+        (tessera-mu4e--installed nil)
         (tessera-elfeed-mode nil)
+        (tessera-elfeed--installed nil)
         (gnus-summary-mode-hook nil)
         (mu4e-headers-mode-hook nil)
         (elfeed-search-mode-hook nil))
-    (dolist (pair '((tessera-gnus-mode . tessera-gnus--glyphs-changed)
-                    (tessera-mu4e-mode . tessera-mu4e--glyphs-changed)
-                    (tessera-elfeed-mode
-                     . tessera-elfeed--glyphs-changed)))
+    (dolist (spec
+             '((tessera-gnus-mode
+                tessera-gnus--glyphs-changed
+                tessera-gnus--installed
+                tessera-gnus--map-summary-buffers)
+               (tessera-mu4e-mode
+                tessera-mu4e--glyphs-changed
+                tessera-mu4e--installed
+                tessera-mu4e--map-headers-buffers)
+               (tessera-elfeed-mode
+                tessera-elfeed--glyphs-changed
+                tessera-elfeed--installed
+                tessera-elfeed--map-search-buffers)))
       (unwind-protect
           (progn
-            (funcall (car pair) 1)
-            (funcall (car pair) 1)
-            (should (= (cl-count (cdr pair)
-                                 tessera--glyph-change-functions) 1)))
-        (funcall (car pair) -1))
+            (funcall (nth 0 spec) 1)
+            (cl-letf (((symbol-function (nth 3 spec))
+                       (lambda (&rest _arguments)
+                         (error "Repeated setup"))))
+              (funcall (nth 0 spec) 1))
+            (should (symbol-value (nth 0 spec)))
+            (should (symbol-value (nth 2 spec)))
+            (should (= (cl-count (nth 1 spec)
+                                 tessera--glyph-change-functions)
+                       1)))
+        (funcall (nth 0 spec) -1))
       (should-not
-       (memq (cdr pair) tessera--glyph-change-functions)))))
+       (memq (nth 1 spec) tessera--glyph-change-functions)))))
 
 (ert-deftest tessera-glyph-require-installs-no-runtime-behavior ()
   (with-temp-buffer

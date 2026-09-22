@@ -35,7 +35,6 @@
 (require 'tessera-gnus-article)
 (require 'gnus-sum)
 (require 'gnus-spec)
-(require 'hl-line)
 (require 'subr-x)
 (require 'seq)
 
@@ -434,9 +433,6 @@ not enable either native behavior by itself."
 
 (defvar-local tessera-gnus-summary--saved-settings nil
   "Original values and locality of settings replaced by Tessera.")
-
-(defvar-local tessera-gnus-summary--saved-hl-line nil
-  "Whether Hl-Line mode was enabled before Tessera took over.")
 
 (defvar-local tessera-gnus-summary--dirty nil
   "Whether native buffer changes need synchronization.")
@@ -1312,9 +1308,14 @@ Honor `tessera-gnus-summary-boundary-navigation'."
   (let ((buffer (tessera-gnus-summary--navigation-buffer)))
     (if (not buffer)
         (apply function arguments)
-      (let ((group-point
-             (unless tessera-gnus-summary-boundary-navigation
-               (tessera-gnus-summary--group-point-marker))))
+      (let* ((atomic
+              (and (not tessera-gnus-summary--navigating)
+                   (tessera-gnus-summary--navigation-command-p)))
+             (group-point
+              (unless
+                  (or tessera-gnus-summary-boundary-navigation
+                      tessera-gnus-summary--navigating atomic)
+                (tessera-gnus-summary--group-point-marker))))
         (unwind-protect
             (let ((gnus-auto-extend-newsgroup
                    (and
@@ -1324,12 +1325,10 @@ Honor `tessera-gnus-summary-boundary-navigation'."
                    (and
                     tessera-gnus-summary-boundary-navigation
                     gnus-auto-select-next)))
-              (if (or tessera-gnus-summary--navigating
-                      (not
-                       (tessera-gnus-summary--navigation-command-p)))
-                  (apply function arguments)
-                (apply #'tessera-gnus-summary--navigate
-                       function arguments)))
+              (if atomic
+                  (apply #'tessera-gnus-summary--navigate
+                         function arguments)
+                (apply function arguments)))
           (when group-point
             (when (marker-buffer group-point)
               (with-current-buffer (marker-buffer group-point)
@@ -1526,7 +1525,6 @@ THREAD-PATHS caches shared ancestor comparisons for that update."
 (defun tessera-gnus-summary--post-command ()
   "Synchronize native changes and highlight the current entry."
   (when tessera-gnus-summary--active
-    (when hl-line-mode (hl-line-mode -1))
     (let* ((appearance (tessera-gnus-summary--appearance))
            (force (or (not (equal appearance
                                   tessera-gnus-summary--appearance))
@@ -1554,60 +1552,73 @@ THREAD-PATHS caches shared ancestor comparisons for that update."
       (gnus-summary-prepare)
       (when article (gnus-summary-goto-subject article)))))
 
+(defun tessera-gnus-summary--restore-native-state ()
+  "Restore native state in the current Gnus summary buffer."
+  (setq tessera-gnus-summary--active nil)
+  (remove-hook 'gnus-summary-update-hook
+               #'tessera-gnus-summary--update-line t)
+  (remove-hook 'gnus-summary-prepare-hook
+               #'tessera-gnus-summary--prepare t)
+  (remove-hook 'after-change-functions
+               #'tessera-gnus-summary--changed t)
+  (remove-hook 'post-command-hook
+               #'tessera-gnus-summary--post-command t)
+  (remove-hook 'window-size-change-functions
+               #'tessera-gnus-summary--resize t)
+  (remove-hook 'change-major-mode-hook
+               #'tessera-gnus-summary--disable t)
+  (tessera-entry-clear-current)
+  (tessera-entry-clear-layout)
+  (tessera--restore-settings tessera-gnus-summary--saved-settings)
+  (setq tessera-gnus-summary--saved-settings nil
+        tessera-gnus-summary--appearance nil
+        tessera-gnus-summary--dirty nil
+        tessera-gnus-summary--content-cache nil
+        tessera-gnus-summary--threads nil
+        tessera-gnus-summary--thread-width 8))
+
 (defun tessera-gnus-summary--enable ()
   "Enable Tessera in the current Gnus summary buffer."
   (unless tessera-gnus-summary--active
-    (setq tessera-gnus-summary--saved-hl-line hl-line-mode
-          tessera-gnus-summary--saved-settings
+    (setq tessera-gnus-summary--saved-settings
           (tessera--save-settings
            '(gnus-summary-line-format tessera-entry-layout)))
-    ;; Native line overlays also cover virtual headings and padding.
-    (when hl-line-mode (hl-line-mode -1))
-    (setq-local gnus-summary-line-format "%u&tessera;\n")
-    (setq-local tessera-entry-layout 'two-line)
-    (setq tessera-gnus-summary--active t)
-    (add-hook 'gnus-summary-update-hook
-              #'tessera-gnus-summary--update-line t t)
-    (add-hook 'gnus-summary-prepare-hook
-              #'tessera-gnus-summary--prepare t t)
-    (add-hook 'after-change-functions
-              #'tessera-gnus-summary--changed nil t)
-    (add-hook 'post-command-hook
-              #'tessera-gnus-summary--post-command t t)
-    (add-hook 'window-size-change-functions
-              #'tessera-gnus-summary--resize nil t)
-    (add-hook 'change-major-mode-hook
-              #'tessera-gnus-summary--disable nil t)
-    (tessera-gnus-summary--refresh)))
+    (let (completed)
+      (unwind-protect
+          (progn
+            (setq-local gnus-summary-line-format "%u&tessera;\n")
+            (setq-local tessera-entry-layout 'two-line)
+            (setq tessera-gnus-summary--active t)
+            (add-hook 'gnus-summary-update-hook
+                      #'tessera-gnus-summary--update-line t t)
+            (add-hook 'gnus-summary-prepare-hook
+                      #'tessera-gnus-summary--prepare t t)
+            (add-hook 'after-change-functions
+                      #'tessera-gnus-summary--changed nil t)
+            (add-hook 'post-command-hook
+                      #'tessera-gnus-summary--post-command t t)
+            (add-hook 'window-size-change-functions
+                      #'tessera-gnus-summary--resize nil t)
+            (add-hook 'change-major-mode-hook
+                      #'tessera-gnus-summary--disable nil t)
+            (tessera-gnus-summary--refresh)
+            (setq completed t))
+        (unless completed
+          (condition-case nil
+              (progn
+                (tessera-gnus-summary--restore-native-state)
+                (tessera-gnus-summary--refresh))
+            (error nil)))))))
 
 (defun tessera-gnus-summary--disable ()
   "Restore the native summary presentation."
   (when tessera-gnus-summary--active
-    (setq tessera-gnus-summary--active nil)
-    (remove-hook 'gnus-summary-update-hook
-                 #'tessera-gnus-summary--update-line t)
-    (remove-hook 'gnus-summary-prepare-hook
-                 #'tessera-gnus-summary--prepare t)
-    (remove-hook 'after-change-functions
-                 #'tessera-gnus-summary--changed t)
-    (remove-hook 'post-command-hook
-                 #'tessera-gnus-summary--post-command t)
-    (remove-hook 'window-size-change-functions
-                 #'tessera-gnus-summary--resize t)
-    (remove-hook 'change-major-mode-hook
-                 #'tessera-gnus-summary--disable t)
-    (tessera-entry-clear-current)
-    (tessera-entry-clear-layout)
-    (tessera--restore-settings tessera-gnus-summary--saved-settings)
-    (setq tessera-gnus-summary--saved-settings nil
-          tessera-gnus-summary--appearance nil
-          tessera-gnus-summary--dirty nil
-          tessera-gnus-summary--content-cache nil
-          tessera-gnus-summary--threads nil
-          tessera-gnus-summary--thread-width 8)
-    (tessera-gnus-summary--refresh)
-    (hl-line-mode (if tessera-gnus-summary--saved-hl-line 1 -1))
-    (setq tessera-gnus-summary--saved-hl-line nil)))
+    (tessera-gnus-summary--restore-native-state)
+    (condition-case error-data
+        (tessera-gnus-summary--refresh)
+      (error
+       (ignore-errors (tessera-gnus-summary--refresh))
+       (signal (car error-data) (cdr error-data))))))
 
 (defun tessera-gnus-summary--glyphs-changed (option)
   "Refresh active gnus views after glyph OPTION changes.

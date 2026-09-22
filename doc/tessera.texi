@@ -189,10 +189,9 @@ removes the adapter's hooks and decorations, and restores the native
 presentation.  A previously local setting is restored as a local
 setting; an inherited setting returns to its default binding.
 
-  Tessera temporarily replaces whole-line highlighting with its own
-entry highlight in affected buffers.  The prior @code{hl-line-mode}
-state is restored when the adapter is disabled.  Message marks and read
-state are retained.
+  Tessera highlights the entry containing point with its own face.  The
+adapters do not enable or disable @code{hl-line-mode}.  Message marks
+and read state are retained.
 
 @node Customization Scope
 @section Customization Scope
@@ -666,10 +665,9 @@ does a positive number; a nonpositive number disables it.  The symbol
 @end deffn
 @vindex tessera-gnus-mode-hook
   The adapter saves @code{gnus-summary-line-format}, installs its native
-user-format entry, sets the local layout to @code{two-line}, and
-suspends local @code{hl-line-mode}.  Disabling restores the saved
-settings and native Summary rows.  Public faces and options remain
-available after disabling.
+user-format entry, and sets the local layout to @code{two-line}.
+Disabling restores the saved settings and native Summary rows.  Public
+faces and options remain available after disabling.
 
 @node Gnus Row Contents
 @section Gnus Row Contents
@@ -903,9 +901,9 @@ future Headers buffers.
 @end deffn
 @vindex tessera-mu4e-mode-hook
   The initial local layout is @code{two-line}.  While active, Tessera
-hides the native column header and replaces whole-line highlighting.
-Disabling restores native rows, pending-mark presentation, header line,
-highlighting state, and saved local settings.
+hides the native column header and highlights the entry containing
+point.  Disabling restores native rows, pending-mark presentation, the
+header line, and saved local settings.
 
 @node mu4e Row Contents
 @section mu4e Row Contents
@@ -1095,6 +1093,7 @@ render a row.
 @menu
 * Elfeed Mode::           Enabling the Elfeed adapter.
 * Elfeed Row Contents::   Titles, feeds, links, tags, and dates.
+* Elfeed Navigation::     Moving between Search entries.
 * Elfeed Glyph Options::  Customizing status and enclosure glyphs.
 * Elfeed Faces::          Styling read and unread entries.
 @end menu
@@ -1110,9 +1109,9 @@ future Search buffers.
 @end deffn
 @vindex tessera-elfeed-mode-hook
   Activation saves the native print function, layout, separator date
-format, and highlighting state.  It installs the Tessera print function,
-selects local @code{two-line} layout, and sets the separator date format
-to @code{nil}.  Disabling restores those settings and native rendering.
+format.  It installs the Tessera print function, selects local
+@code{two-line} layout, and sets the separator date format to
+@code{nil}.  Disabling restores those settings and native rendering.
 Existing native separator strings are kept in the default font rather
 than inheriting an adjacent icon font.
 
@@ -1137,6 +1136,20 @@ remain part of title styling.  Tag punctuation remains neutral.
 
   The enclosure indicator describes available enclosure media types on
 hover; it does not download enclosures.
+
+@node Elfeed Navigation
+@section Moving Between Elfeed Entries
+@cindex navigation, Elfeed
+@kindex n @r{(Elfeed Search)}
+@kindex p @r{(Elfeed Search)}
+  In an Elfeed Search buffer, @kbd{n} moves forward and @kbd{p} moves
+backward by one logical entry while the Tessera adapter is active.  A
+numeric prefix argument moves that many entries.  This skips the visual
+line break inside a two-line layout.
+
+  Successful movement places point at the beginning of the entry title.
+If the requested entry does not exist, point remains at its current
+position.  Other Elfeed commands retain their native behavior.
 
 @node Elfeed Glyph Options
 @section Elfeed Glyph Options

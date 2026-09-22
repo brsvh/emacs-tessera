@@ -41,17 +41,15 @@
                   "tessera-elfeed-search")
 (declare-function tessera-elfeed-search--register
                   "tessera-elfeed-search")
-(declare-function tessera-elfeed-search--navigation
-                  "tessera-elfeed-search")
+
+(defvar tessera-elfeed--installed nil
+  "Whether the global Elfeed integration is fully installed.")
 
 ;;;; Adapter lifecycle
 
 (defun tessera-elfeed--map-search-buffers (function)
   "Call FUNCTION in every live Elfeed search buffer."
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (derived-mode-p 'elfeed-search-mode)
-        (funcall function)))))
+  (tessera--map-mode-buffers 'elfeed-search-mode function))
 
 (defun tessera-elfeed--enable-search ()
   "Enable the Tessera adapter in the current Elfeed search buffer."
@@ -67,27 +65,43 @@
   (when (featurep 'tessera-elfeed-search)
     (tessera-elfeed-search--glyphs-changed option)))
 
+(defun tessera-elfeed--deactivate ()
+  "Remove Elfeed hooks and disable every active search adapter."
+  (remove-hook 'tessera--glyph-change-functions
+               #'tessera-elfeed--glyphs-changed)
+  (remove-hook 'elfeed-search-mode-hook
+               #'tessera-elfeed--enable-search)
+  (when (featurep 'tessera-elfeed-search)
+    (tessera-elfeed--map-search-buffers
+     #'tessera-elfeed-search--disable)))
+
 ;;;###autoload
 (define-minor-mode tessera-elfeed-mode
   "Toggle Tessera UI adapters for Elfeed buffers."
   :global t
   :group 'tessera-elfeed
   (if tessera-elfeed-mode
-      (progn
-        (add-hook 'tessera--glyph-change-functions
-                  #'tessera-elfeed--glyphs-changed)
-        (add-hook 'elfeed-search-mode-hook
-                  #'tessera-elfeed--enable-search)
-        (tessera-elfeed--map-search-buffers
-         #'tessera-elfeed--enable-search))
-    (remove-hook 'tessera--glyph-change-functions
-                 #'tessera-elfeed--glyphs-changed)
-    (remove-hook 'elfeed-search-mode-hook
+      (unless tessera-elfeed--installed
+        (let (completed)
+          (unwind-protect
+              (progn
+                (add-hook 'tessera--glyph-change-functions
+                          #'tessera-elfeed--glyphs-changed)
+                (add-hook 'elfeed-search-mode-hook
+                          #'tessera-elfeed--enable-search)
+                (tessera-elfeed--map-search-buffers
                  #'tessera-elfeed--enable-search)
-    (when (featurep 'tessera-elfeed-search)
-      (tessera-elfeed--map-search-buffers
-       #'tessera-elfeed-search--disable)
-      (tessera-elfeed-search--navigation nil))))
+                (setq tessera-elfeed--installed t
+                      completed t))
+            (unless completed
+              (setq tessera-elfeed-mode nil
+                    tessera-elfeed--installed nil)
+              (condition-case nil
+                  (tessera-elfeed--deactivate)
+                ((error quit) nil))))))
+    (unwind-protect
+        (tessera-elfeed--deactivate)
+      (setq tessera-elfeed--installed nil))))
 
 (provide 'tessera-elfeed)
 ;;; tessera-elfeed.el ends here

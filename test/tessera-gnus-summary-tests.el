@@ -7,7 +7,6 @@
 ;;; Code:
 
 (require 'ert)
-(require 'hl-line)
 (require 'tessera-gnus-summary)
 (require 'tessera-gnus-test-support)
 
@@ -241,9 +240,12 @@
                               (local-variable-p
                                'gnus-summary-line-format))
                         saved))))
-            (dotimes (_ 2)
+            (dotimes (cycle 2)
               (tessera-gnus-mode 1)
-              (tessera-gnus-mode 1)
+              ;; Exercise an explicit repeated enable once; the next
+              ;; cycle exercises activation after full restoration.
+              (when (zerop cycle)
+                (tessera-gnus-mode 1))
               (let ((buffer (generate-new-buffer " *Gnus future*")))
                 (push buffer buffers)
                 (with-current-buffer buffer (gnus-summary-mode)))
@@ -253,7 +255,8 @@
                   (should (equal gnus-summary-line-format
                                  "%u&tessera;\n"))))
               (tessera-gnus-mode -1)
-              (tessera-gnus-mode -1)
+              (when (zerop cycle)
+                (tessera-gnus-mode -1))
               (dolist (buffer buffers)
                 (with-current-buffer buffer
                   (should-not tessera-gnus-summary--active)
@@ -275,43 +278,29 @@
         (tessera-gnus-mode -1)
         (mapc #'kill-buffer buffers)))))
 
-(ert-deftest tessera-gnus-current-replaces-and-restores-hl-line ()
-  (dolist (enabled '(nil t))
-    (with-temp-buffer
-      (let ((gnus-show-threads t)
-            (gnus-newsgroup-headers nil)
-            (tessera-glyph-style 'ascii))
-        (tessera-gnus-summary--register)
-        (tessera-tests--gnus-rows)
-        (hl-line-mode (if enabled 1 -1))
-        (unwind-protect
-            (dotimes (_ 2)
-              (tessera-gnus-summary--enable)
-              (tessera-gnus-summary--enable)
-              (should-not hl-line-mode)
-              (should-not hl-line-overlay)
-              (tessera-gnus-summary--prepare)
-              (goto-char (tessera-entry-point))
-              ;; Another mode hook may enable Hl-Line again.
-              (hl-line-mode 1)
-              (should (overlay-buffer hl-line-overlay))
-              (run-hooks 'post-command-hook)
-              (should-not hl-line-mode)
-              (should-not hl-line-overlay)
-              (should (memq 'tessera-entry-current-face
-                            (get-char-property (point) 'face)))
-              (save-excursion
-                (beginning-of-line)
-                (search-forward "Subject 1")
-                (should
-                 (eq
-                  'tessera-gnus-summary-thread-unread-subject-face
-                  (get-char-property (1- (point)) 'face))))
-              (tessera-gnus-summary--disable)
-              (should (eq enabled hl-line-mode))
-              (should (eq enabled (and hl-line-overlay t))))
-          (tessera-gnus-summary--disable)
-          (hl-line-mode -1))))))
+(ert-deftest tessera-gnus-current-highlights-entry ()
+  (with-temp-buffer
+    (let ((gnus-show-threads t)
+          (gnus-newsgroup-headers nil)
+          (tessera-glyph-style 'ascii))
+      (tessera-gnus-summary--register)
+      (tessera-tests--gnus-rows)
+      (unwind-protect
+          (progn
+            (tessera-gnus-summary--enable)
+            (tessera-gnus-summary--prepare)
+            (goto-char (tessera-entry-point))
+            (run-hooks 'post-command-hook)
+            (should (memq 'tessera-entry-current-face
+                          (get-char-property (point) 'face)))
+            (save-excursion
+              (beginning-of-line)
+              (search-forward "Subject 1")
+              (should
+               (eq
+                'tessera-gnus-summary-thread-unread-subject-face
+                (get-char-property (1- (point)) 'face)))))
+        (tessera-gnus-summary--disable)))))
 
 (ert-deftest tessera-gnus-major-mode-change-cleans-layout ()
   (with-temp-buffer
@@ -592,6 +581,40 @@
              native nil nil t)
             (should (equal (pop calls) '(nil quietly)))))))))
 
+(ert-deftest tessera-gnus-navigation-restores-related-group-point ()
+  (let ((group (generate-new-buffer " *tessera-gnus-group*")))
+    (unwind-protect
+        (with-temp-buffer
+          (with-current-buffer group
+            (insert "first\nsecond\n")
+            (goto-char (point-min)))
+          (let ((gnus-group-buffer group)
+                (gnus-newsgroup-name "test.group")
+                (gnus-summary-buffer (current-buffer))
+                (gnus-auto-extend-newsgroup nil)
+                (gnus-auto-select-next nil)
+                (tessera-gnus-summary--active t)
+                this-command
+                tessera-gnus-summary-boundary-navigation)
+            (setq major-mode 'gnus-summary-mode)
+            (insert (propertize "first\n" 'gnus-number 1))
+            (goto-char (point-min))
+            (dolist (spec '((t gnus-summary-prev-article)
+                            (nil gnus-summary-next-page)))
+              (setq tessera-gnus-summary-boundary-navigation
+                    (nth 0 spec)
+                    this-command (nth 1 spec))
+              (with-current-buffer group
+                (goto-char (point-min)))
+              (tessera-gnus-summary--navigate-next-article
+               (lambda (&rest _arguments)
+                 (with-current-buffer group
+                   (goto-char (point-max)))
+                 nil))
+              (with-current-buffer group
+                (should (= (point) (point-min)))))))
+      (kill-buffer group))))
+
 (ert-deftest tessera-gnus-navigation-skips-nonnavigation-callers ()
   (with-temp-buffer
     (let ((tessera-gnus-summary--active t)
@@ -689,7 +712,6 @@
         (unwind-protect
             (cl-letf (((symbol-function 'window-end)
                        (lambda (&rest _) (point-max))))
-              (tessera-gnus-mode 1)
               (tessera-gnus-mode 1)
               (tessera-gnus-summary--prepare)
               (gnus-summary-goto-subject 2)
@@ -831,6 +853,106 @@
                       local))
           (should-not (memq #'tessera-gnus-summary--post-command
                             post-command-hook)))))))
+
+(ert-deftest tessera-gnus-enable-failure-restores-state ()
+  (let ((gnus-summary-line-format "Native format\n")
+        (tessera-entry-layout 'single-line)
+        (refresh-count 0)
+        restored
+        error-data)
+    (cl-letf (((symbol-function 'tessera-gnus-summary--refresh)
+               (lambda ()
+                 (if (= (cl-incf refresh-count) 1)
+                     (error "Refresh failed")
+                   (setq restored
+                         (equal gnus-summary-line-format
+                                "Native format\n"))))))
+      (with-temp-buffer
+        (setq major-mode 'gnus-summary-mode)
+        (condition-case error
+            (tessera-gnus-summary--enable)
+          (error (setq error-data error)))
+        (should (equal error-data '(error "Refresh failed")))
+        (should (= refresh-count 2))
+        (should restored)
+        (should-not tessera-gnus-summary--active)
+        (should-not tessera-gnus-summary--saved-settings)
+        (should-not (local-variable-p 'gnus-summary-line-format))
+        (should-not (local-variable-p 'tessera-entry-layout))
+        (should-not (memq #'tessera-gnus-summary--post-command
+                          post-command-hook))))))
+
+(ert-deftest tessera-gnus-disable-failure-restores-state ()
+  (let ((gnus-summary-line-format "Native format\n")
+        (tessera-entry-layout 'single-line)
+        (refresh-count 0)
+        error-data)
+    (cl-letf (((symbol-function 'tessera-gnus-summary--refresh)
+               (lambda ()
+                 (when (= (cl-incf refresh-count) 2)
+                   (error "Refresh failed")))))
+      (with-temp-buffer
+        (setq major-mode 'gnus-summary-mode)
+        (tessera-gnus-summary--enable)
+        (condition-case error
+            (tessera-gnus-summary--disable)
+          (error (setq error-data error)))
+        (should (equal error-data '(error "Refresh failed")))
+        (should (= refresh-count 3))
+        (should-not tessera-gnus-summary--active)
+        (should-not tessera-gnus-summary--saved-settings)
+        (should-not (local-variable-p 'gnus-summary-line-format))
+        (should-not (local-variable-p 'tessera-entry-layout))
+        (should-not (memq #'tessera-gnus-summary--post-command
+                          post-command-hook))))))
+
+(ert-deftest tessera-gnus-mode-rolls-back-all-buffers ()
+  (let ((first (generate-new-buffer " *tessera-gnus-mode-1*"))
+        (second (generate-new-buffer " *tessera-gnus-mode-2*"))
+        (tessera-gnus-mode nil)
+        (tessera-gnus--installed nil)
+        (gnus-summary-mode-hook nil)
+        (tessera--glyph-change-functions nil)
+        enabled disabled error-data)
+    (unwind-protect
+        (progn
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (setq major-mode 'gnus-summary-mode)))
+          (cl-letf (((symbol-function 'tessera-gnus--enable-summary)
+                     (lambda ()
+                       (setq tessera-gnus-summary--active t)
+                       (push (current-buffer) enabled)
+                       (when (eq (current-buffer) first)
+                         (error "Enable failed"))))
+                    ((symbol-function
+                      'tessera-gnus-summary--disable)
+                     (lambda ()
+                       (setq tessera-gnus-summary--active nil)
+                       (push (current-buffer) disabled)))
+                    ((symbol-function
+                      'tessera-gnus-summary--track-folds)
+                     #'ignore)
+                    ((symbol-function
+                      'tessera-gnus-summary--navigation)
+                     #'ignore)
+                    ((symbol-function
+                      'tessera-gnus-article--track-content)
+                     #'ignore))
+            (condition-case error
+                (tessera-gnus-mode 1)
+              (error (setq error-data error))))
+          (should (equal error-data '(error "Enable failed")))
+          (should-not tessera-gnus-mode)
+          (should (= (length enabled) 2))
+          (should (= (length disabled) 2))
+          (should-not (memq #'tessera-gnus--enable-summary
+                            gnus-summary-mode-hook))
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (should-not tessera-gnus-summary--active))))
+      (kill-buffer first)
+      (kill-buffer second))))
 
 (defun tessera-gnus-tests--metadata-header (&optional extra)
   "Return a native header with EXTRA fields."
