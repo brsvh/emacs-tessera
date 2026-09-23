@@ -1,0 +1,219 @@
+Tessera NEWS -- history of user-visible changes.
+
+Copyright (C) 2026 Bingshan Chang.
+See the end of the file for license conditions.
+
+This file describes the initial 0.1.0 release of Tessera and Tessera X.
+See the Tessera and Tessera X manuals for configuration and Lisp interfaces.
+
+* Changes in Tessera 0.1.0
+
+** Display adapters for Gnus, mu4e, and Elfeed.
+The global minor modes 'tessera-gnus-mode', 'tessera-mu4e-mode', and
+'tessera-elfeed-mode' provide layouts for Gnus Summary, mu4e Headers, and
+Elfeed Search buffers.  Native commands continue to handle reading, searching,
+marking, and navigation.
+
+Enabling an adapter configures existing and future matching buffers.
+Disabling it restores their native display settings.  Loading a Tessera
+library makes its settings available without enabling an adapter.
+
+Tessera requires Emacs 30.1 or later and Alert 1.2 or later.  The adapters use
+the Gnus included with Emacs, mu4e 1.14.3 or later, or Elfeed 4.0.1 or later.
+
+** Single-line and two-line entry layouts.
+Adapters initially display each entry on two visual lines.  Set the
+buffer-local value of 'tessera-entry-layout' to 'single-line' for a compact
+layout, or 'two-line' to restore the two-line layout.  Gnus and mu4e select
+their thread layouts instead while native threading is enabled.
+
+Subjects, contacts, feed titles, labels, dates, and state indicators have
+separate layout roles.  Flexible fields shrink and optional fields can be
+omitted in narrow windows.  Hover help provides details for abbreviated
+content.  Horizontal spacing and fractional vertical padding are customizable.
+
+** Current-entry and mouse highlighting.
+'tessera-entry-current-face' highlights the entry containing point while
+preserving native content faces.  Both content lines of an ordinary two-line
+entry are highlighted; a thread heading is excluded from its message's
+highlight.
+
+'tessera-entry-hover-face' highlights individual elements under the mouse.
+Decorative spacing and empty tree columns are not hover targets.
+
+** Configurable state glyphs and thread connectors.
+'tessera-glyph-style' selects ASCII, Unicode, or optional Nerd Icons glyphs.
+The default is Unicode.  Graphical frames fall back to available glyph forms;
+terminal frames use ASCII.  Thread connectors support Unicode and ASCII.
+
+'tessera-glyph-color' selects semantic colors, an inherited foreground, or a
+uniform color.  Backend glyph options allow individual indicators to be
+changed or hidden.  'tessera-thread-glyphs' configures thread connectors, and
+'tessera-entry-ellipsis' controls the truncation marker.
+
+Customize and 'setopt' refresh affected displays.  The command
+'tessera-refresh-glyphs' refreshes glyphs after direct assignments or changes
+to their faces.
+
+** Native thread layouts in Gnus and mu4e.
+The adapters follow 'gnus-show-threads' and 'mu4e-search-threads', retaining
+native thread ordering, reply relationships, and folding commands.  A thread
+heading shows its subject and unread/total counts, followed by individual
+message rows.  Counts include folded members of the current results; Tessera
+does not fetch additional messages to complete the display.
+
+Thread layouts have separate spacing around threads and between their
+members.  Deep threads retain their branch columns and clip overflowing
+content at the right edge.  When the usual position for point is clipped,
+navigation uses the ellipsis until the window is wide enough again.
+
+** Navigation follows native entry boundaries.
+Adapted navigation commands leave point on the current entry when no target
+is available.  Successful navigation places point at the subject in flat mail
+layouts, the author or contact in thread layouts, and the title in Elfeed.
+Elfeed's native 'n' and 'p' commands move by entries, including with numeric
+arguments, rather than stopping on a second visual line.
+
+Gnus retains the selection rules of the invoked command, such as visiting
+only unread articles.  The option 'tessera-gnus-summary-boundary-navigation'
+defaults to nil: native article navigation temporarily disables both
+'gnus-auto-extend-newsgroup' and 'gnus-auto-select-next'.  A non-nil value
+respects the individual values of those Gnus options; it does not enable them.
+
+** Gnus article state and content indicators.
+Summary rows show native article status, secondary marks, download
+availability, and score, together with subjects, authors, dates, and labels.
+Labels include registry marks, Gmail labels, and Keywords headers.
+
+Attachment, signature, and encryption indicators use available header and
+prepared-article MIME information.  Displaying these indicators does not fetch
+articles.  Tessera neither verifies signatures nor decrypts messages.
+Security indicators describe content presence, not verification success.
+
+** mu4e message flags and pending operations.
+Headers rows show subjects, senders, dates, labels, message flags, priorities,
+and pending operations, including operation targets.  Labels and tags are
+combined without duplicates.  Content indicators include attachments,
+signatures, encryption, and calendar invitations when known to mu4e.
+
+Native message-state faces remain part of the display.  Thread headings use
+aggregate unread state while individual messages retain their own state.
+Native fold summaries remain available with adjusted spacing.
+
+** Elfeed entry metadata and tag faces.
+Search rows show entry titles, feeds, dates, read state, and tags, with an
+optional enclosure indicator.  Native title overrides and tag faces are
+retained.  The unread tag is represented by its state indicator rather than
+repeated among the textual tags.  Enclosure indicators use stored metadata;
+they do not download enclosure files.
+
+** Lisp interfaces for layouts and native metadata.
+The shared renderer supports registered layouts, field width policies,
+glyphs, padding, thread contexts, and navigation anchors.  Public native
+metadata readers can be used without enabling display modes.
+
+* Changes in Tessera X 0.1.0
+
+** Experimental context snapshots.
+The separate 'tessera-x' package provides read-only plain-text snapshots of
+mail, news, and feed entries.  Snapshots contain source metadata and available
+body text, with notes for missing or omitted content.  Mail and news are
+grouped by message relationships, not merely equal subjects; feed entries are
+grouped by feed URL.
+
+Tessera X depends on Tessera but does not require enabling its display modes.
+Load 'tessera-x-gnus', 'tessera-x-mu4e', or 'tessera-x-elfeed' to make the
+corresponding options and commands available.  Native application libraries
+are loaded when commands need them.  No experimental minor mode or default
+key bindings are installed.
+
+** Snapshots of selected messages and entries.
+The commands 'tessera-x-gnus-prepare-context',
+'tessera-x-mu4e-prepare-context', and 'tessera-x-elfeed-prepare-context'
+collect the current selection from their native list buffers.
+
+Gnus uses the active region, then process marks, then the article at point.
+mu4e and Elfeed use native marks, then the active region, then the entry at
+point.  Existing marks, pending operations, and read state are preserved;
+downloading a Gnus body can update its native availability mark.
+
+** Snapshots of the current subthread.
+'tessera-x-gnus-prepare-subthread-context' and
+'tessera-x-mu4e-prepare-subthread-context' collect the current message and its
+descendants, including folded entries.  By default, selection stays within
+the current results.  A prefix argument extends the search through the local
+Gnus Agent overview or mu index.  Each backend's subthread-scope option can
+make this local-index scope the default.
+
+** Snapshots of today's local content.
+'tessera-x-gnus-prepare-today-context' uses the current Summary group or the
+group or topic at point in a Group buffer, including a topic's descendants.
+'tessera-x-mu4e-prepare-today-context' uses the current Headers query or a
+bookmark or maildir query at point in Main.  Its base query can be customized
+with 'tessera-x-mu4e-today-query-function'.
+
+'tessera-x-elfeed-prepare-today-context' uses the current Search filter or the
+filter at point in a Tree buffer supplied by an Elfeed extension.
+
+These commands select from local indexes or databases, not only visible
+rows.  They do not download messages, fetch linked pages, synchronize mail,
+or update feeds.  Missing local bodies remain identified in the result.
+
+** Backend-specific body retrieval.
+Gnus snapshots require Gnus Agent.  Selected-article and subthread snapshots
+download missing bodies into the Agent by default.  Set
+'tessera-x-gnus-body-policy' to 'local-only' to use cached bodies exclusively.
+Today's snapshots always use cached bodies only.
+
+mu4e snapshots read local message files.  Expanded subthread and today
+queries use the local mu index and can finish asynchronously; they do not
+initiate mail synchronization.
+
+Selected Elfeed snapshots fetch linked HTTP or HTTPS pages by default and
+fall back to stored feed content on failure.  The options
+'tessera-x-elfeed-fetch-linked-content' and
+'tessera-x-elfeed-fetch-minimum-characters' control whether to fetch a page.
+Timeout and concurrency options bound active requests.  Retrieval does not
+change the Elfeed database or download enclosure files.  Today's snapshots
+always use stored feed content.
+
+** Plain-text extraction and character budgets.
+Mail extraction prefers a plain-text MIME alternative and otherwise converts
+available HTML to text.  Attachment descriptions are retained as metadata;
+attachment contents are not included.  Snapshots do not verify signatures or
+decrypt encrypted bodies.
+
+'tessera-x-context-max-characters' limits the rendered text budget to 900000
+characters by default.  'tessera-x-context-body-max-characters' optionally
+limits each body and defaults to nil.  Metadata and omission notices are
+retained even if they exceed the total budget.  These are character budgets,
+not token limits or limits on downloaded data.
+
+** Snapshot management and result hooks.
+Each source buffer owns its pending request and latest successful snapshot.
+Starting another request cancels pending work without discarding the previous
+successful result.  Killing the source buffer or changing its major mode
+cancels pending work.
+
+'tessera-x-show-context' displays the latest successful snapshot.
+'tessera-x-cancel-context' cancels pending work, and
+'tessera-x-discard-context' kills the latest snapshot buffer.
+
+'tessera-x-context-ready-hook' receives the completed context for display or
+other consumers.  User configuration can connect this hook to tools such as
+gptel; Tessera itself does not send requests to language models.  Lisp
+interfaces also support additional snapshot producers and asynchronous
+completion.
+
+----------------------------------------------------------------------
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3 or
+any later version published by the Free Software Foundation; with no
+Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.  A copy
+of the license is included in the file doc/fdl.texi.
+
+Local variables:
+coding: utf-8
+mode: outline
+fill-column: 80
+end:

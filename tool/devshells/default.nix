@@ -76,6 +76,11 @@ in
           max_line_length = 72;
         };
 
+        "NEWS" = {
+          indent_style = "space";
+          max_line_length = 80;
+        };
+
         "{Makefile,**.mk}" = {
           indent_size = 4;
           indent_style = "tab";
