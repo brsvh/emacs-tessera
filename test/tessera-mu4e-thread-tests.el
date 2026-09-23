@@ -230,7 +230,15 @@
 
 (ert-deftest tessera-mu4e-thread-current-excludes-virtual-subject ()
   (tessera-mu4e-tests--with-thread
+    (tessera-mu4e-headers--disable)
     (mu4e~headers-goto-docid 1)
+    (hl-line-highlight)
+    (should (overlay-buffer hl-line-overlay))
+    (tessera-mu4e--enable-headers)
+    ;; Native commands can request highlighting directly as well.
+    (hl-line-highlight)
+    (should-not (and hl-line-overlay
+                     (overlay-buffer hl-line-overlay)))
     (goto-char (tessera-entry-point))
     (tessera-entry-highlight-current)
     (should (memq 'tessera-entry-current-face
@@ -242,6 +250,9 @@
                        (get-text-property (1- (point)) 'face))))
     (should (get-text-property (point) 'tessera--thread-heading))
     (mu4e~headers-goto-docid 2)
+    (hl-line-highlight)
+    (should-not (and hl-line-overlay
+                     (overlay-buffer hl-line-overlay)))
     (goto-char (tessera-entry-point))
     (tessera-entry-highlight-current)
     (should (memq 'tessera-entry-current-face

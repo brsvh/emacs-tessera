@@ -30,6 +30,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'hl-line)
 (require 'subr-x)
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-thread)
@@ -466,6 +467,8 @@ These flags follow `mu4e-headers-visible-flags'.")
   "Native column header to restore when disabling Tessera.")
 (defvar-local tessera-mu4e-headers--saved-settings nil
   "Snapshot of layout and logical navigation settings.")
+(defvar-local tessera-mu4e-headers--saved-hl-line nil
+  "Whether native line highlighting was enabled before activation.")
 
 (defvar tessera-mu4e-headers--moving nil
   "Non-nil while an outer native header move is in progress.")
@@ -1266,7 +1269,8 @@ message only while it remains selected after the native update."
                #'tessera-mu4e-headers--refresh t)
   (remove-hook 'change-major-mode-hook
                #'tessera-mu4e-headers--disable t)
-  (let (error-data)
+  (let ((native-hl-line tessera-mu4e-headers--saved-hl-line)
+        error-data)
     (unwind-protect
         (condition-case error
             (tessera-mu4e-headers--sync t)
@@ -1276,6 +1280,7 @@ message only while it remains selected after the native update."
       (tessera--restore-settings
        tessera-mu4e-headers--saved-settings)
       (setq tessera-mu4e-headers--saved-settings nil
+            tessera-mu4e-headers--saved-hl-line nil
             tessera-mu4e-headers--native-header-line nil
             tessera-mu4e-headers--appearance nil
             tessera-mu4e-headers--dirty t
@@ -1287,7 +1292,8 @@ message only while it remains selected after the native update."
                      (buffer-local-value
                       'tessera-mu4e-headers--active buffer))
                    (buffer-list)))
-        (tessera-mu4e-headers--navigation nil)))
+        (tessera-mu4e-headers--navigation nil))
+      (hl-line-mode (if native-hl-line 1 -1)))
     (when error-data
       (ignore-errors (tessera-mu4e-headers--sync t))
       (signal (car error-data) (cdr error-data)))))
@@ -1298,12 +1304,15 @@ message only while it remains selected after the native update."
     (setq tessera-mu4e-headers--saved-settings
           (tessera--save-settings
            '(tessera-entry-layout line-move-ignore-invisible))
+          tessera-mu4e-headers--saved-hl-line hl-line-mode
           tessera-mu4e-headers--active t
           tessera-mu4e-headers--dirty t
           tessera-mu4e-headers--native-header-line header-line-format)
     (let (completed)
       (unwind-protect
           (progn
+            ;; Native line highlighting also covers virtual headings.
+            (hl-line-mode -1)
             (setq-local tessera-entry-layout 'two-line)
             ;; Mu4e skips folded messages itself.  Its logical line
             ;; motion must not stop at visual padding newlines.

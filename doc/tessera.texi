@@ -190,8 +190,11 @@ presentation.  A previously local setting is restored as a local
 setting; an inherited setting returns to its default binding.
 
   Tessera highlights the entry containing point with its own face.  The
-adapters do not enable or disable @code{hl-line-mode}.  Message marks
-and read state are retained.
+mu4e adapter temporarily disables @code{hl-line-mode} in Headers buffers
+so that native line highlighting does not cover virtual thread headings.
+Disabling the adapter restores the mode's previous state.  Other adapters
+leave @code{hl-line-mode} unchanged.  Message marks and read state are
+retained.
 
 @node Customization Scope
 @section Customization Scope

@@ -16,7 +16,7 @@ PACKAGES := $(sort $(notdir $(PACKAGE_DIRS)))
 PACKAGE_DEPS_tessera-x := tessera
 PACKAGE ?=
 
-.PHONY: all archive autoloads clean compile package
+.PHONY: all archive autoloads clean compile package test
 
 ifeq ($(strip $(PACKAGE)),)
 
@@ -199,3 +199,8 @@ clean:
 	$(RM) $(ARCHIVE_STAMP) $(DIST_DIR)/$(PACKAGE)-[0-9]*.tar
 
 endif
+
+test:
+	$(EMACS_BATCH) \
+		$(addprefix -L ,$(EMACS_LOAD_PATH)) \
+		-l test/run-tests.el

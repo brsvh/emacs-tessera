@@ -444,12 +444,17 @@ available even when you normally use only one backend.
 
 *** Source Tests
 
-From the checkout root, replace the library paths and run:
+From the checkout root, run the full suite for both packages:
 
 #+begin_src sh
-emacs -Q --batch \
-  -L /path/to/elfeed -L /path/to/mu4e \
-  -l test/run-tests.el
+make test
+#+end_src
+
+The target uses ~EMACS~ (default: ~emacs~) with ~-Q --batch~.  If external
+libraries are not already available, provide their directories explicitly:
+
+#+begin_src sh
+make test EMACS_LOAD_PATH="/path/to/elfeed /path/to/mu4e"
 #+end_src
 
 The runner adds the checkout's package directories to ~load-path~.  It exits with

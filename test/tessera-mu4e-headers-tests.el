@@ -11,6 +11,22 @@
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-headers)
 
+(ert-deftest tessera-mu4e-restores-native-line-highlighting ()
+  (dolist (enabled '(nil t))
+    (let ((mu4e-headers-mode-hook nil))
+      (with-temp-buffer
+        (mu4e-headers-mode)
+        (hl-line-mode (if enabled 1 -1))
+        (tessera-mu4e--enable-headers)
+        (should-not hl-line-mode)
+        ;; Repeated activation must not replace the saved state.
+        (tessera-mu4e--enable-headers)
+        (should-not hl-line-mode)
+        (tessera-mu4e-headers--disable)
+        (should (eq hl-line-mode enabled))
+        (tessera-mu4e-headers--disable)
+        (should (eq hl-line-mode enabled))))))
+
 (ert-deftest tessera-mu4e-enable-failure-restores-state ()
   (dolist (function '(tessera--save-settings
                       tessera-mu4e-headers--refresh))
@@ -36,6 +52,7 @@
                       (eq function 'tessera-mu4e-headers--refresh)))
           (should-not tessera-mu4e-headers--active)
           (should-not tessera-mu4e-headers--saved-settings)
+          (should hl-line-mode)
           (should-not (local-variable-p 'tessera-entry-layout))
           (should-not
            (local-variable-p 'line-move-ignore-invisible))
@@ -63,6 +80,7 @@
         (should (= sync-count 3))
         (should-not tessera-mu4e-headers--active)
         (should-not tessera-mu4e-headers--saved-settings)
+        (should hl-line-mode)
         (should-not (local-variable-p 'tessera-entry-layout))
         (should-not
          (local-variable-p 'line-move-ignore-invisible))
@@ -85,6 +103,7 @@
                     :stopped))
         (should-not tessera-mu4e-headers--active)
         (should-not tessera-mu4e-headers--saved-settings)
+        (should hl-line-mode)
         (should-not (local-variable-p 'tessera-entry-layout))
         (should-not
          (local-variable-p 'line-move-ignore-invisible))
