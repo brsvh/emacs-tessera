@@ -480,11 +480,11 @@ Return nil when the requested logical Elfeed entry does not exist."
 
 (defun tessera-elfeed-search--refresh-active-buffers ()
   "Refresh live Elfeed search buffers using Tessera."
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (and tessera-elfeed-search--active
-                 (derived-mode-p 'elfeed-search-mode))
-        (tessera-elfeed-search--refresh)))))
+  (tessera--map-mode-buffers
+   'elfeed-search-mode
+   (lambda ()
+     (when tessera-elfeed-search--active
+       (tessera-elfeed-search--refresh)))))
 
 (defun tessera-elfeed-search--acquire-navigation ()
   "Register one buffer as a navigation integration user."

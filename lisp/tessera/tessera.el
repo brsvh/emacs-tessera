@@ -462,6 +462,22 @@ returning one, shared by both lines."
   "Functions called with a changed glyph option, or nil for all.
 Modes install these callbacks only while enabled.")
 
+(defun tessera--run-glyph-change-functions (option)
+  "Notify every glyph callback about OPTION.
+Continue after errors or quits, then signal the first condition."
+  (let (condition-data)
+    (run-hook-wrapped
+     'tessera--glyph-change-functions
+     (lambda (function)
+       (condition-case condition
+           (funcall function option)
+         ((error quit)
+          (unless condition-data
+            (setq condition-data condition))))
+       nil))
+    (when condition-data
+      (signal (car condition-data) (cdr condition-data)))))
+
 (defun tessera--glyph-string-p (value)
   "Return non-nil for nonempty, single-line display text VALUE."
   (and (stringp value) (> (string-width value) 0)
@@ -563,7 +579,7 @@ WIDTH is a maximum column count or an alist of counts by glyph ID."
 Validate before changing the option or notifying active adapters."
   (tessera--validate-glyph-overrides defaults value (or width 2))
   (set-default symbol value)
-  (run-hook-with-args 'tessera--glyph-change-functions symbol))
+  (tessera--run-glyph-change-functions symbol))
 
 (defun tessera--validate-glyph-appearance (symbol value)
   "Validate appearance option SYMBOL with proposed VALUE."
@@ -581,7 +597,7 @@ Validate before changing the option or notifying active adapters."
   "Validate appearance option SYMBOL, set VALUE, and redraw glyphs."
   (tessera--validate-glyph-appearance symbol value)
   (set-default symbol value)
-  (run-hook-with-args 'tessera--glyph-change-functions symbol))
+  (tessera--run-glyph-change-functions symbol))
 
 (defvar tessera--thread-glyph-defaults
   '((branch :ascii "+-" :unicode "├─" :face tessera-glyph-muted-face)
@@ -611,7 +627,7 @@ Validate before changing the option or notifying active adapters."
   "Set thread glyph option SYMBOL to validated VALUE."
   (tessera--validate-thread-glyphs value)
   (set-default symbol value)
-  (run-hook-with-args 'tessera--glyph-change-functions symbol))
+  (tessera--run-glyph-change-functions symbol))
 
 (defcustom tessera-thread-glyphs nil
   "Overrides for thread connectors, as an alist of glyph plists.
@@ -642,7 +658,7 @@ refresh affected views automatically.  Disabled adapters stay off."
   (dolist (option '(tessera-glyph-style tessera-glyph-color
                                         tessera-entry-ellipsis))
     (tessera--validate-glyph-appearance option (symbol-value option)))
-  (run-hook-with-args 'tessera--glyph-change-functions nil))
+  (tessera--run-glyph-change-functions nil))
 
 (defun tessera--validate-glyph-variant (variant slot-name)
   "Validate VARIANT belonging to SLOT-NAME and return its glyph."

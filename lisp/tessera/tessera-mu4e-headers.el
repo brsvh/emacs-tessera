@@ -1295,12 +1295,12 @@ message only while it remains selected after the native update."
 (defun tessera-mu4e-headers--enable ()
   "Enable reversible layout synchronization in this headers buffer."
   (unless tessera-mu4e-headers--active
-    (setq tessera-mu4e-headers--active t
-          tessera-mu4e-headers--dirty t
-          tessera-mu4e-headers--native-header-line header-line-format
-          tessera-mu4e-headers--saved-settings
+    (setq tessera-mu4e-headers--saved-settings
           (tessera--save-settings
-           '(tessera-entry-layout line-move-ignore-invisible)))
+           '(tessera-entry-layout line-move-ignore-invisible))
+          tessera-mu4e-headers--active t
+          tessera-mu4e-headers--dirty t
+          tessera-mu4e-headers--native-header-line header-line-format)
     (let (completed)
       (unwind-protect
           (progn
@@ -1344,12 +1344,13 @@ Nil means explicitly refresh all glyphs and their hover faces."
     (when (gethash 'mu4e-headers tessera--entry-backends)
       (tessera-mu4e-headers--register))
     (save-window-excursion
-      (dolist (buffer (buffer-list))
-        (with-current-buffer buffer
-          (when tessera-mu4e-headers--active
-            (tessera-entry-clear-current)
-            (setq tessera-mu4e-headers--appearance nil)
-            (tessera-mu4e-headers--refresh)))))))
+      (tessera--map-mode-buffers
+       'mu4e-headers-mode
+       (lambda ()
+         (when tessera-mu4e-headers--active
+           (tessera-entry-clear-current)
+           (setq tessera-mu4e-headers--appearance nil)
+           (tessera-mu4e-headers--refresh)))))))
 
 (provide 'tessera-mu4e-headers)
 ;;; tessera-mu4e-headers.el ends here

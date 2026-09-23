@@ -182,10 +182,11 @@ successful verification.  Never infer trust from a result string."
                  #'tessera-gnus-article--updated)
     (remove-hook 'gnus-part-display-hook
                  #'tessera-gnus-article--queue-update)
-    (dolist (buffer (buffer-list))
-      (with-current-buffer buffer
-        (remove-hook 'post-command-hook
-                     #'tessera-gnus-article--updated t))))
+    (tessera--map-mode-buffers
+     'gnus-article-mode
+     (lambda ()
+       (remove-hook 'post-command-hook
+                    #'tessera-gnus-article--updated t))))
   ;; Security processing can mutate existing handle properties.
   ;; Observe it explicitly, including calls outside article commands.
   (if enable

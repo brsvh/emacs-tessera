@@ -1631,12 +1631,13 @@ Nil means explicitly refresh all glyphs and their hover faces."
     (when (gethash 'gnus-summary tessera--entry-backends)
       (tessera-gnus-summary--register))
     (save-window-excursion
-      (dolist (buffer (buffer-list))
-        (with-current-buffer buffer
-          (when tessera-gnus-summary--active
-            (tessera-entry-clear-current)
-            (tessera-gnus-summary--sync-buffer t)
-            (tessera-entry-highlight-current)))))))
+      (tessera--map-mode-buffers
+       'gnus-summary-mode
+       (lambda ()
+         (when tessera-gnus-summary--active
+           (tessera-entry-clear-current)
+           (tessera-gnus-summary--sync-buffer t)
+           (tessera-entry-highlight-current)))))))
 
 (provide 'tessera-gnus-summary)
 ;;; tessera-gnus-summary.el ends here

@@ -172,7 +172,9 @@ Inspect the full result buffer, preserving its narrowing and point."
        (when (tessera-x-context-pending-p context)
          (with-current-buffer (tessera-x-context-source context)
            (tessera-x-cancel-context)))
-       (signal (car err) (cdr err))))))
+       (signal (car err) (cdr err)))
+      (error (tessera-x-context-fail
+              context (error-message-string err))))))
 
 (defun tessera-x-mu4e--cancel-query (process output errors)
   "Stop PROCESS and release OUTPUT and ERRORS buffers."

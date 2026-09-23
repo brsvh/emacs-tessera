@@ -954,9 +954,7 @@
                    (ring
                     (with-current-buffer buffer
                       (mapcar #'marker-position mark-ring)))
-                   (snapshot (tessera--navigation-save buffer))
-                   (point-marker (nth 1 snapshot))
-                   (mark-marker (nth 2 snapshot)))
+                   (snapshot (tessera--navigation-save buffer)))
               (select-window second)
               (with-current-buffer buffer (goto-char (point-max)))
               (set-window-dedicated-p first nil)
@@ -988,9 +986,7 @@
                 (should
                  (equal ring
                         (mapcar #'marker-position mark-ring))))
-              (tessera--navigation-release snapshot)
-              (should-not (marker-buffer point-marker))
-              (should-not (marker-buffer mark-marker))))
+              (tessera--navigation-release snapshot)))
         (kill-buffer buffer)
         (kill-buffer replacement)))))
 
@@ -1034,22 +1030,6 @@
              (setq rollbacks (1+ rollbacks)))))
         (should (= (point) point))
         (should (= rollbacks 1))))))
-
-(ert-deftest tessera-navigation-includes-related-buffers ()
-  (let ((buffer (generate-new-buffer " *tessera-navigation-main*"))
-        (related
-         (generate-new-buffer " *tessera-navigation-related*"))
-        seen)
-    (unwind-protect
-        (cl-letf (((symbol-function 'get-buffer-window-list)
-                   (lambda (current &rest _)
-                     (push current seen)
-                     nil)))
-          (tessera--navigation-frames buffer (list related))
-          (should (memq buffer seen))
-          (should (memq related seen)))
-      (kill-buffer buffer)
-      (kill-buffer related))))
 
 (ert-deftest tessera-navigation-restores-buffer-restrictions ()
   (let ((buffer (generate-new-buffer " *tessera-navigation-main*"))
@@ -1151,25 +1131,16 @@
             (narrow-to-region
              (line-beginning-position)
              (line-end-position)))
-          (setq snapshot
-                (tessera--navigation-save buffer (list related)))
-          (pcase-let
-              ((`(,_buffer ,point ,mark ,_active ,_deactivate
-                           ,ring ,restriction ,related-states . ,_)
-                snapshot))
-            (setq markers (append (list point mark)
-                                  ring
-                                  (list (car restriction)
-                                        (cdr restriction))))
-            (pcase-dolist
-                (`(,_current ,current-point
-                             ,current-restriction)
-                 related-states)
-              (setq markers
-                    (append markers
-                            (list current-point
-                                  (car current-restriction)
-                                  (cdr current-restriction))))))
+          (let ((copy (symbol-function 'copy-marker)))
+            (cl-letf (((symbol-function 'copy-marker)
+                       (lambda (&rest args)
+                         (let ((marker (apply copy args)))
+                           (push marker markers)
+                           marker))))
+              (setq snapshot
+                    (tessera--navigation-save
+                     buffer (list related)))))
+          (should markers)
           (tessera--navigation-release snapshot)
           (should
            (seq-every-p

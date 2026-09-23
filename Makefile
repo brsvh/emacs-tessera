@@ -13,6 +13,7 @@ DIST_DIR := dist
 PACKAGE_DIRS := $(foreach dir,$(patsubst %/,%,$(wildcard lisp/*/)),\
 	$(if $(wildcard $(dir)/$(notdir $(dir)).el),$(dir)))
 PACKAGES := $(sort $(notdir $(PACKAGE_DIRS)))
+PACKAGE_DEPS_tessera-x := tessera
 PACKAGE ?=
 
 .PHONY: all archive autoloads clean compile package
@@ -40,7 +41,8 @@ ARCHIVE_STAMP := $(DIST_DIR)/.$(PACKAGE)-archive
 SOURCE_LIST := $(DIST_DIR)/.$(PACKAGE)-sources
 LISP_FILES := $(filter-out $(PKG) $(AUTOLOADS),$(wildcard $(LISP_DIR)/*.el))
 COMPILE_DEPS := $(filter-out %-pkg.el %-autoloads.el,\
-	$(wildcard $(addsuffix /*.el,$(PACKAGE_DIRS))))
+	$(wildcard $(LISP_DIR)/*.el \
+	$(addsuffix /*.el,$(addprefix lisp/,$(PACKAGE_DEPS_$(PACKAGE))))))
 ELC_FILES := $(LISP_FILES:.el=.elc)
 GENERATED_FILES := $(PKG) $(AUTOLOADS) $(ELC_FILES)
 

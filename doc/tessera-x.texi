@@ -900,9 +900,9 @@ object and snapshot buffer have been installed.
 @end defopt
 
   The hook also runs for an empty successful snapshot.  Tessera does not
-select a window when publishing, and it saves source point around the
-hook.  Hook functions remain responsible for their own window changes or
-other side effects.
+select a window when publishing, and it preserves source point, mark, and
+region activation around the hook.  Hook functions remain responsible
+for their own window changes or other side effects.
 
   If a hook function signals an error, Tessera reports it without
 invalidating the snapshot.  As with ordinary hook iteration, the error

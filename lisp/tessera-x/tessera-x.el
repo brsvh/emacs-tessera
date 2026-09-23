@@ -235,7 +235,8 @@ successful snapshot.  Return the new `tessera-x-context'."
 
 (defun tessera-x-context-finish (context)
   "Publish CONTEXT if current, calling the ready hook once.
-Return CONTEXT.  No window, point or region is changed."
+Return CONTEXT.  Preserve source point, mark and region activation.
+Hook functions remain responsible for their own window changes."
   (when (tessera-x-context-pending-p context)
     (let ((buffer (generate-new-buffer
                    (format " *Tessera %s Context*"
@@ -263,7 +264,7 @@ Return CONTEXT.  No window, point or region is changed."
       (with-current-buffer (tessera-x-context-source context)
         (setq tessera-x--pending-context nil
               tessera-x-current-context context)
-        (save-excursion
+        (save-mark-and-excursion
           (condition-case err
               (run-hook-with-args
                'tessera-x-context-ready-hook context)

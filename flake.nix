@@ -154,7 +154,6 @@
 
         perSystem =
           {
-            pkgs,
             system,
             ...
           }:

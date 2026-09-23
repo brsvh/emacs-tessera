@@ -114,9 +114,6 @@
           (calls nil) old first cancelled last)
       (unwind-protect
           (with-temp-buffer
-            (insert "source text")
-            (goto-char 4)
-            (push-mark 8 t t)
             (let ((source (current-buffer))
                   (tessera-x-context-ready-hook
                    (list (lambda (context)
@@ -133,9 +130,6 @@
               (tessera-x-context-finish first)
               (should (= (length calls) 1))
               (should (eq (caar calls) source))
-              (should (= (point) 4))
-              (should (= (mark) 8))
-              (should mark-active)
               (with-current-buffer other
                 (setq last (tessera-x-context-start
                             'test "other" nil))
@@ -150,6 +144,38 @@
                 (should (buffer-live-p
                          (tessera-x-context-buffer first))))))
         (kill-buffer other)))))
+
+(ert-deftest tessera-x-ready-hook-preserves-source-region ()
+  (tessera-x-tests--with-snapshots
+    (dolist (condition '(nil error quit))
+      (save-window-excursion
+        (with-temp-buffer
+          (insert "source text")
+          (goto-char 4)
+          (push-mark 8 t t)
+          (let* ((context (tessera-x-context-start 'test "hook" nil))
+                 (window (selected-window))
+                 (tessera-x-context-ready-hook
+                  (list
+                   (lambda (ready)
+                     (goto-char (point-max))
+                     (set-mark (point-min))
+                     (setq mark-active nil)
+                     (set-window-buffer
+                      window (tessera-x-context-buffer ready))
+                     (when condition
+                       (signal condition '("Consumer failed"))))))
+                 caught)
+            (condition-case err
+                (tessera-x-context-finish context)
+              (quit (setq caught (car err))))
+            (should (eq caught (and (eq condition 'quit) 'quit)))
+            (should (eq (tessera-x-context-state context) 'ready))
+            (should (= (point) 4))
+            (should (= (mark) 8))
+            (should mark-active)
+            (should (eq (window-buffer window)
+                        (tessera-x-context-buffer context)))))))))
 
 (ert-deftest tessera-x-interrupted-rendering-releases-resources ()
   (tessera-x-tests--with-snapshots
@@ -180,54 +206,60 @@
             (should (eq tessera-x-current-context ready))))
         (should (= cleanup-count 2))))))
 
-(ert-deftest tessera-x-backend-interruptions-cancel-requests ()
+(ert-deftest tessera-x-backend-failures-release-requests ()
   (tessera-x-tests--with-snapshots
-    (pcase-dolist (`(,backend ,function)
-                   '((gnus tessera-x-gnus--download)
-                     (gnus tessera-x-gnus--read-body)
-                     (gnus tessera-x-group-threads)
-                     (mu4e tessera-x-mu4e--read-body)
-                     (mu4e tessera-x-group-threads)))
-      (with-temp-buffer
-        (let ((previous (tessera-x-context-start backend "Old" nil))
-              (items (list (tessera-x-tests--item "one")))
-              (gnus-agent t)
-              (tessera-x-gnus-body-policy 'download)
-              (cleanup-count 0)
-              interrupted)
-          (tessera-x-context-finish previous)
-          (cl-letf (((symbol-function 'tessera-x-gnus--download)
-                     #'ignore)
-                    ((symbol-function 'tessera-x-gnus--read-body)
-                     #'ignore)
-                    ((symbol-function 'tessera-x-mu4e--read-body)
-                     #'ignore))
-            (cl-letf (((symbol-function function)
-                       (lambda (&rest _)
-                         (setq interrupted tessera-x--pending-context)
-                         (push
-                          (lambda () (cl-incf cleanup-count))
-                          (tessera-x-context-cleanup interrupted))
-                         (signal 'quit nil))))
-              (should
-               (eq (condition-case err
-                       (if (eq backend 'gnus)
-                           (tessera-x-gnus--build-context
-                            items "Interrupted" nil)
-                         (tessera-x-mu4e--finish-context
-                          (tessera-x-context-start
-                           backend "New" items)
-                          items))
-                     (quit (car err)))
-                   'quit))))
-          (should
-           (eq (tessera-x-context-state interrupted) 'cancelled))
-          (should-not tessera-x--pending-context)
-          (should-not (tessera-x-context-cleanup interrupted))
-          (should (= cleanup-count 1))
-          (should (eq tessera-x-current-context previous))
-          (should (buffer-live-p
-                   (tessera-x-context-buffer previous))))))))
+    (dolist (condition '(quit error))
+      (pcase-dolist (`(,backend ,function)
+                     '((gnus tessera-x-gnus--download)
+                       (gnus tessera-x-gnus--read-body)
+                       (gnus tessera-x-group-threads)
+                       (mu4e tessera-x-mu4e--read-body)
+                       (mu4e tessera-x-group-threads)))
+        (with-temp-buffer
+          (let ((previous (tessera-x-context-start backend "Old" nil))
+                (items (list (tessera-x-tests--item "one")))
+                (gnus-agent t)
+                (tessera-x-gnus-body-policy 'download)
+                (cleanup-count 0)
+                interrupted)
+            (tessera-x-context-finish previous)
+            (cl-letf (((symbol-function 'tessera-x-gnus--download)
+                       #'ignore)
+                      ((symbol-function 'tessera-x-gnus--read-body)
+                       #'ignore)
+                      ((symbol-function 'tessera-x-mu4e--read-body)
+                       #'ignore))
+              (cl-letf (((symbol-function function)
+                         (lambda (&rest _)
+                           (setq interrupted
+                                 tessera-x--pending-context)
+                           (push
+                            (lambda () (cl-incf cleanup-count))
+                            (tessera-x-context-cleanup interrupted))
+                           (signal condition
+                                   '("Preparation failed")))))
+                (should
+                 (eq (condition-case err
+                         (progn
+                           (if (eq backend 'gnus)
+                               (tessera-x-gnus--build-context
+                                items "Interrupted" nil)
+                             (tessera-x-mu4e--finish-context
+                              (tessera-x-context-start
+                               backend "New" items)
+                              items))
+                           nil)
+                       (quit (car err)))
+                     (if (eq condition 'quit) 'quit nil)))))
+            (should
+             (eq (tessera-x-context-state interrupted)
+                 (if (eq condition 'quit) 'cancelled 'failed)))
+            (should-not tessera-x--pending-context)
+            (should-not (tessera-x-context-cleanup interrupted))
+            (should (= cleanup-count 1))
+            (should (eq tessera-x-current-context previous))
+            (should (buffer-live-p
+                     (tessera-x-context-buffer previous)))))))))
 
 (ert-deftest tessera-x-discard-respects-refused-buffer-deletion ()
   (tessera-x-tests--with-snapshots

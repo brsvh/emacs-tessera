@@ -12,32 +12,35 @@
 (require 'tessera-mu4e-headers)
 
 (ert-deftest tessera-mu4e-enable-failure-restores-state ()
-  (let ((mu4e-headers-mode-hook nil)
-        (tessera-entry-layout 'single-line)
-        (line-move-ignore-invisible t)
-        native-sync
-        error-data)
-    (cl-letf (((symbol-function 'tessera-mu4e-headers--refresh)
-               (lambda (&optional _window)
-                 (error "Refresh failed")))
-              ((symbol-function 'tessera-mu4e-headers--sync)
-               (lambda (native &optional _force)
-                 (when native
-                   (setq native-sync t)))))
-      (with-temp-buffer
-        (mu4e-headers-mode)
-        (condition-case error
-            (tessera-mu4e-headers--enable)
-          (error (setq error-data error)))
-        (should (equal error-data '(error "Refresh failed")))
-        (should native-sync)
-        (should-not tessera-mu4e-headers--active)
-        (should-not tessera-mu4e-headers--saved-settings)
-        (should-not (local-variable-p 'tessera-entry-layout))
-        (should-not
-         (local-variable-p 'line-move-ignore-invisible))
-        (should-not (memq #'tessera-mu4e-headers--refresh
-                          post-command-hook))))))
+  (dolist (function '(tessera--save-settings
+                      tessera-mu4e-headers--refresh))
+    (let ((mu4e-headers-mode-hook nil)
+          (tessera-entry-layout 'single-line)
+          (line-move-ignore-invisible t)
+          native-sync
+          error-data)
+      (cl-letf (((symbol-function function)
+                 (lambda (&rest _)
+                   (error "Enable failed")))
+                ((symbol-function 'tessera-mu4e-headers--sync)
+                 (lambda (native &optional _force)
+                   (when native
+                     (setq native-sync t)))))
+        (with-temp-buffer
+          (mu4e-headers-mode)
+          (condition-case error
+              (tessera-mu4e-headers--enable)
+            (error (setq error-data error)))
+          (should (equal error-data '(error "Enable failed")))
+          (should (eq native-sync
+                      (eq function 'tessera-mu4e-headers--refresh)))
+          (should-not tessera-mu4e-headers--active)
+          (should-not tessera-mu4e-headers--saved-settings)
+          (should-not (local-variable-p 'tessera-entry-layout))
+          (should-not
+           (local-variable-p 'line-move-ignore-invisible))
+          (should-not (memq #'tessera-mu4e-headers--refresh
+                            post-command-hook)))))))
 
 (ert-deftest tessera-mu4e-disable-failure-restores-state ()
   (let ((mu4e-headers-mode-hook nil)

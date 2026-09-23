@@ -257,37 +257,41 @@
            entry (current-buffer) nil)))
     (should-not (tessera-elfeed-search--enclosure context))))
 
-(ert-deftest tessera-elfeed-search-restores-local-printer ()
-  (let ((updates 0))
-    (cl-letf (((symbol-function 'elfeed-search-update)
-               (lambda (&rest _)
-                 (setq updates (1+ updates)))))
-      (with-temp-buffer
-        (setq major-mode 'elfeed-search-mode)
-        (setq-local elfeed-search-print-entry-function #'ignore)
-        (setq-local tessera-entry-layout 'single-line)
-        (tessera-elfeed-search--enable)
-        (should (eq elfeed-search-print-entry-function
-                    #'tessera-elfeed-search-print-entry))
-        (should (eq tessera-entry-layout 'two-line))
-        (should (memq
-                 #'tessera-elfeed-search--apply-layout
+(ert-deftest tessera-elfeed-search-restores-setting-locality ()
+  (dolist (local '(nil t))
+    (let ((updates 0)
+          (elfeed-search-print-entry-function #'ignore)
+          (tessera-entry-layout 'single-line))
+      (cl-letf (((symbol-function 'elfeed-search-update)
+                 (lambda (&rest _)
+                   (setq updates (1+ updates)))))
+        (with-temp-buffer
+          (setq major-mode 'elfeed-search-mode)
+          (when local
+            (setq-local elfeed-search-print-entry-function #'ignore)
+            (setq-local tessera-entry-layout 'single-line))
+          (tessera-elfeed-search--enable)
+          (should (eq elfeed-search-print-entry-function
+                      #'tessera-elfeed-search-print-entry))
+          (should (eq tessera-entry-layout 'two-line))
+          (should (memq
+                   #'tessera-elfeed-search--apply-layout
+                   elfeed-search-update-hook))
+          (should (memq #'tessera-entry-highlight-current
+                        post-command-hook))
+          (tessera-elfeed-search--disable)
+          (should-not (memq #'tessera-entry-highlight-current
+                            post-command-hook))
+          (should-not tessera--current-entry)
+          (should (eq (local-variable-p
+                       'elfeed-search-print-entry-function) local))
+          (should (eq elfeed-search-print-entry-function #'ignore))
+          (should (eq (local-variable-p 'tessera-entry-layout) local))
+          (should (eq tessera-entry-layout 'single-line))
+          (should-not
+           (memq #'tessera-elfeed-search--apply-layout
                  elfeed-search-update-hook))
-        (should (memq #'tessera-entry-highlight-current
-                      post-command-hook))
-        (tessera-elfeed-search--disable)
-        (should-not (memq #'tessera-entry-highlight-current
-                          post-command-hook))
-        (should-not tessera--current-entry)
-        (should (local-variable-p
-                 'elfeed-search-print-entry-function))
-        (should (eq elfeed-search-print-entry-function #'ignore))
-        (should (local-variable-p 'tessera-entry-layout))
-        (should (eq tessera-entry-layout 'single-line))
-        (should-not
-         (memq #'tessera-elfeed-search--apply-layout
-               elfeed-search-update-hook))
-        (should (= updates 2))))))
+          (should (= updates 2)))))))
 
 (ert-deftest tessera-elfeed-search-lifecycle-is-idempotent ()
   (let ((elfeed-search-mode-hook nil)
@@ -367,21 +371,6 @@
           (fundamental-mode)
           (should-not (seq-some #'overlay-buffer overlays))
           (should-not (seq-some #'marker-buffer markers)))))))
-
-(ert-deftest tessera-elfeed-search-restores-global-settings ()
-  (let ((elfeed-search-print-entry-function #'ignore)
-        (tessera-entry-layout 'single-line))
-    (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
-      (with-temp-buffer
-        (setq major-mode 'elfeed-search-mode)
-        (tessera-elfeed-search--enable)
-        (should (eq tessera-entry-layout 'two-line))
-        (tessera-elfeed-search--disable)
-        (should-not (local-variable-p
-                     'elfeed-search-print-entry-function))
-        (should (eq elfeed-search-print-entry-function #'ignore))
-        (should-not (local-variable-p 'tessera-entry-layout))
-        (should (eq tessera-entry-layout 'single-line))))))
 
 (ert-deftest tessera-elfeed-search-enable-failure-restores-state ()
   (let ((elfeed-search-print-entry-function #'ignore)

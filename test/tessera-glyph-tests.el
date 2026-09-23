@@ -262,6 +262,24 @@
       (should-not
        (memq (nth 1 spec) tessera--glyph-change-functions)))))
 
+(ert-deftest tessera-glyph-callbacks-finish-after-condition ()
+  (dolist (condition '(error quit))
+    (let* ((visited nil)
+           (tessera--glyph-change-functions
+            (list
+             (lambda (_option)
+               (push 'first visited)
+               (signal condition '("Glyph refresh failed")))
+             (lambda (_option)
+               (push 'second visited))))
+           condition-data)
+      (condition-case caught
+          (tessera--run-glyph-change-functions nil)
+        ((error quit) (setq condition-data caught)))
+      (should (equal condition-data
+                     (list condition "Glyph refresh failed")))
+      (should (equal visited '(second first))))))
+
 (ert-deftest tessera-glyph-require-installs-no-runtime-behavior ()
   (with-temp-buffer
     (let* ((libraries
