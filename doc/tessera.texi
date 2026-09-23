@@ -1248,6 +1248,11 @@ Use after @code{setq} or face customization.  Preserve point's message,
 window positions, and native folding and marks.  Disabled adapters stay
 disabled; no mail or feeds are fetched.  Invalid settings signal an
 error.  The command does not save options to the customization file.
+
+The command also clears the cached availability of the optional Nerd
+Icons library, so the next glyph that needs it retries loading it.  Use
+this command after installing the library or correcting @code{load-path}
+if glyphs still use fallback characters.
 @end deffn
 
 @node Writing an Entry Backend

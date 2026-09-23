@@ -36,8 +36,7 @@
         (error "Expected library %s, loaded %s" expected file)))))
 
 (let* ((directory (file-name-directory load-file-name))
-       (package-path (or (getenv "TESSERA_TEST_PACKAGE_DIRS")
-                         (getenv "TESSERA_TEST_PACKAGE_DIR")))
+       (package-path (getenv "TESSERA_TEST_PACKAGE_DIRS"))
        (library-directories
         (if package-path
             (mapcar #'file-truename

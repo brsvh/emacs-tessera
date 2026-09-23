@@ -51,8 +51,7 @@
           (tessera-hover-tests--elements text '("*" "TITLE" "DATE"))
           (when (eq tessera-entry-layout 'two-line)
             (tessera-hover-tests--elements
-             text '("TITLE" "FEED" "https://entry.invalid"
-                    "@" "foo" "bar" "DATE"))
+             text '("FEED" "https://entry.invalid" "@" "foo" "bar"))
             (dolist (delimiter '("(" "," ")"))
               (let ((p (string-match (regexp-quote delimiter) text)))
                 (should (eq (get-text-property p 'mouse-face text)
@@ -107,10 +106,9 @@
             (tessera-hover-tests--elements
              (substring text start (+ start 3)) '("a" "S" "E")))
           (unless (eq kind 'child)
-            (tessera-hover-tests--elements
-             text '("SUBJECT" "AUTHOR")))
+            (tessera-hover-tests--elements text '("SUBJECT")))
           (when (eq kind 'head)
-            (tessera-hover-tests--elements text '("1/2" "SUBJECT")))
+            (tessera-hover-tests--elements text '("1/2")))
           (let ((p (string-match "," text)))
             (should (eq (get-text-property p 'mouse-face text)
                         'default))))))))

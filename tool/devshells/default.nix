@@ -29,6 +29,12 @@ let
       ;
   };
 
+  mbakeConfig = (toml { }).generate "mbake.toml" {
+    formatter = {
+      ensure_final_newline = true;
+    };
+  };
+
   formatters = with pkgs; [
     elfmt
     mbake
@@ -237,6 +243,8 @@ in
 
             options = [
               "format"
+              "--config"
+              "${mbakeConfig}"
             ];
           };
 

@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; Batch tests for optional glyph references and empty inline groups.
+;; Batch tests for glyph references, alignment, and inline groups.
 
 ;;; Code:
 
@@ -146,6 +146,52 @@
    (tessera--validate-layout
     (make-tessera-entry-layout :glyph-slots-align 'middle)
     nil nil "Test")))
+
+(ert-deftest tessera-inline-slots-reserve-empty-and-visible-width ()
+  (let* ((tessera-glyph-style 'ascii)
+         (slot (make-tessera-glyph-slot
+                :name 'status
+                :selector #'tessera-entry-context-object
+                :width 3
+                :align 'center
+                :glyphs
+                (list (list 'unread :glyph
+                            (make-tessera-glyph :ascii "*")))))
+         (definition
+          (tessera--make-entry-backend :glyph-slots (list slot)))
+         (context (make-tessera-entry-context :object nil))
+         (reference '(:slots status (status :reserve t))))
+    (cl-letf (((symbol-function 'display-graphic-p)
+               (lambda (&optional _frame) nil)))
+      (let ((empty
+             (tessera--render-segment reference definition context)))
+        (should (= (tessera--rendered-segment-width empty) 6)))
+      (setf (tessera-entry-context-object context) 'unread)
+      (let ((filled
+             (tessera--render-segment reference definition context)))
+        (should (= (tessera--rendered-segment-width filled) 6))
+        (should-not (tessera--rendered-segment-truncate filled))
+        (should (= 1 (cl-count ?* (tessera--rendered-segment-string
+                                   filled))))))))
+
+(ert-deftest tessera-inline-slots-validate-all-regions ()
+  (dolist (region '(:main-left-segments
+                    :main-right-segments
+                    :extra-left-segments
+                    :extra-right-segments))
+    (tessera--validate-layout
+     (apply #'make-tessera-entry-layout
+            (list region '((:slots status))))
+     nil '(status) "Test")))
+
+(ert-deftest tessera-inline-slots-reject-invalid-groups ()
+  (dolist (reference '((:slots) (:slots missing)
+                       (:slots (status :grow t))))
+    (should-error
+     (tessera--validate-layout
+      (make-tessera-entry-layout
+       :main-left-segments (list reference))
+      nil '(status) "Test"))))
 
 (provide 'tessera-slot-tests)
 ;;; tessera-slot-tests.el ends here

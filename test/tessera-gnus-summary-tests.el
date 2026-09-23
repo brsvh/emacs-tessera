@@ -90,8 +90,11 @@
   (let* ((tessera-glyph-style 'ascii)
          (tessera-entry-layout 'two-line)
          (metadata (tessera-gnus-tests--metadata t))
+         (marks (copy-sequence (plist-get metadata :marks)))
          (result (tessera-gnus-summary--render
                   (tessera-gnus-tests--header) metadata)))
+    (should (equal-including-properties
+             (plist-get metadata :marks) marks))
     (should (equal (substring-no-properties result 0 4)
                    (plist-get metadata :marks)))
     (should (equal (get-text-property 0 'display result)
@@ -107,14 +110,6 @@
                    0 'tessera--entry-layout result)))
       (should (or (= (car placement) 0)
                   (>= (car placement) 4))))))
-
-(ert-deftest tessera-native-prefix-does-not-mutate-input ()
-  (let* ((prefix (propertize "ABCD" 'display ""))
-         (tessera-entry-top-padding 0.5)
-         (rendered (tessera--entry-content "Title" prefix)))
-    (should-not (get-text-property 0 'tessera--entry-layout prefix))
-    (should (= (caaar (get-text-property
-                       0 'tessera--entry-layout rendered)) 0))))
 
 (ert-deftest tessera-gnus-native-state-channels ()
   (let ((context (make-tessera-entry-context
@@ -282,6 +277,7 @@
   (with-temp-buffer
     (let ((gnus-show-threads t)
           (gnus-newsgroup-headers nil)
+          (tessera-entry-layout 'two-line)
           (tessera-glyph-style 'ascii))
       (tessera-gnus-summary--register)
       (tessera-tests--gnus-rows)
@@ -299,7 +295,14 @@
               (should
                (eq
                 'tessera-gnus-summary-thread-unread-subject-face
-                (get-char-property (1- (point)) 'face)))))
+                (get-char-property (1- (point)) 'face)))
+              (should (get-text-property
+                       (point) 'tessera--thread-heading)))
+            (forward-line 1)
+            (goto-char (tessera-entry-point))
+            (run-hooks 'post-command-hook)
+            (should (memq 'tessera-entry-current-face
+                          (get-char-property (point) 'face))))
         (tessera-gnus-summary--disable)))))
 
 (ert-deftest tessera-gnus-major-mode-change-cleans-layout ()
@@ -481,6 +484,30 @@
                   (should (= 1 (gnus-summary-article-number)))
                   (should (= point (point))))
               (tessera-gnus-summary--navigation nil))))))))
+
+(ert-deftest tessera-gnus-first-article-follows-native-unread-state ()
+  (let ((gnus-newsgroup-data
+         (mapcar (lambda (number)
+                   (gnus-data-make number gnus-read-mark 1 nil 0))
+                 '(9 3 7))))
+    (dolist (spec '((nil nil nil)
+                    ((99) nil nil)
+                    ((3 7 9) nil 9)
+                    ((3 7 9) (9 99) 3)
+                    ((3 7 9) (9 3 7) nil)
+                    ((7) nil 7)))
+      (let* ((gnus-newsgroup-unreads (copy-sequence (car spec)))
+             (gnus-newsgroup-unfetched (copy-sequence (cadr spec)))
+             (before (copy-tree (list gnus-newsgroup-data
+                                      gnus-newsgroup-unreads
+                                      gnus-newsgroup-unfetched))))
+        (should (eql (tessera-gnus-summary--first-article-number t)
+                     (nth 2 spec)))
+        (should (= (tessera-gnus-summary--first-article-number nil)
+                   9))
+        (should (equal before (list gnus-newsgroup-data
+                                    gnus-newsgroup-unreads
+                                    gnus-newsgroup-unfetched)))))))
 
 (ert-deftest tessera-gnus-navigation-keeps-fold-at-first-article ()
   (with-temp-buffer
@@ -794,6 +821,31 @@
       (tessera-gnus-summary--sync-buffer t)
       (should (= (- (point) (line-beginning-position)) 10))
       (should (= (get-text-property (point) 'gnus-number) 43)))))
+
+(ert-deftest tessera-gnus-glyph-refresh-finishes-synchronization ()
+  (with-temp-buffer
+    (let ((gnus-show-threads nil)
+          (tessera-glyph-style 'ascii)
+          (tessera-glyph-color t)
+          (tessera-gnus-summary--active t)
+          (tessera--entry-backends (make-hash-table :test #'eq))
+          (this-command nil)
+          (sync (symbol-function 'tessera-gnus-summary--sync-buffer))
+          calls)
+      (setq major-mode 'gnus-summary-mode)
+      (tessera-gnus-summary--register)
+      (tessera-tests--gnus-rows '(0 0 0))
+      (tessera-gnus-summary--prepare)
+      (setq tessera-glyph-color nil
+            tessera-gnus-summary--dirty t)
+      (cl-letf (((symbol-function 'tessera-gnus-summary--sync-buffer)
+                 (lambda (&optional force)
+                   (push force calls)
+                   (funcall sync force))))
+        (tessera-gnus-summary--glyphs-changed 'tessera-glyph-color)
+        (should (equal calls '(t)))
+        (tessera-gnus-summary--post-command)
+        (should (equal calls '(t)))))))
 
 (ert-deftest tessera-gnus-folding-removes-hidden-layout ()
   (with-temp-buffer

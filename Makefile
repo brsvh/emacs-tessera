@@ -2,6 +2,7 @@
 .ONESHELL:
 
 SHELL := /bin/sh
+export MAKE
 
 EMACS ?= emacs
 EMACS_BATCH := $(EMACS) -Q --batch
@@ -44,7 +45,7 @@ COMPILE_DEPS := $(filter-out %-pkg.el %-autoloads.el,\
 	$(wildcard $(LISP_DIR)/*.el \
 	$(addsuffix /*.el,$(addprefix lisp/,$(PACKAGE_DEPS_$(PACKAGE))))))
 ELC_FILES := $(LISP_FILES:.el=.elc)
-GENERATED_FILES := $(PKG) $(AUTOLOADS) $(ELC_FILES)
+GENERATED_FILES := $(PKG) $(AUTOLOADS) $(LISP_DIR)/*.elc
 
 # File removal and backdated additions also invalidate generated output.
 ifneq ($(strip $(file <$(SOURCE_LIST))),$(LISP_FILES))

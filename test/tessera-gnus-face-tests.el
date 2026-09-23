@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; Verify native rules, role composition, and glyph color preferences.
+;; Verify native rules and role composition.
 
 ;;; Code:
 
@@ -127,6 +127,13 @@
       (should (eq (face-attribute face :weight nil t) 'bold)))))
 
 (ert-deftest tessera-gnus-faces-special-states-and-unread-authors ()
+  (dolist (spec '((status-spam . tessera-glyph-negative-face)
+                  (status-expirable . tessera-glyph-warning-face)))
+    (should
+     (eq (tessera-glyph-face
+          (tessera-glyph-resolve
+           (car spec) tessera-gnus-summary--glyph-defaults nil "?"))
+         (cdr spec))))
   (let* ((header (make-full-mail-header 1 "Subject" "Author"))
          (marks (string gnus-read-mark ?\s ?\s ?\s))
          (context (make-tessera-entry-context
@@ -172,17 +179,17 @@
                           '(bold gnus-summary-normal-unread)))))))
           (when special
             (if node (should (memq special face))
-              (should-not (memq special face)))
-            (should
-             (eq (tessera-glyph-face
-                  (tessera-glyph-resolve
-                   (intern (format "status-%s" (car spec)))
-                   tessera-gnus-summary--glyph-defaults nil "?"))
-                 (if (eq (car spec) 'spam)
-                     'tessera-glyph-negative-face
-                   'tessera-glyph-warning-face)))))))))
+              (should-not (memq special face)))))))))
 
 (ert-deftest tessera-gnus-faces-dates-follow-article-unread-state ()
+  (dolist (read '(t nil))
+    (let ((face (if read 'tessera-gnus-summary-date-face
+                  'tessera-gnus-summary-unread-date-face)))
+      (should (equal (face-attribute face :inherit)
+                     (if read 'gnus-summary-normal-read
+                       '(bold gnus-summary-normal-unread))))
+      (should (eq (face-attribute face :weight nil t)
+                  (if read 'normal 'bold)))))
   (let* ((header (make-full-mail-header
                   1 "Subject" "Author" "17 Feb 2025 00:00:00 +0000"))
          (marks (string gnus-read-mark ?\s ?\s ?\s))
@@ -204,30 +211,7 @@
                       0 'face (tessera-gnus-summary--date context))))
           (should (eq face
                       (if read 'tessera-gnus-summary-date-face
-                        'tessera-gnus-summary-unread-date-face)))
-          (should (equal (face-attribute face :inherit)
-                         (if read 'gnus-summary-normal-read
-                           '(bold gnus-summary-normal-unread))))
-          (should (eq (face-attribute face :weight nil t)
-                      (if read 'normal 'bold))))))))
-
-(ert-deftest tessera-glyph-role-face-respects-color-preferences ()
-  (let ((glyph (make-tessera-glyph
-                :ascii "!"
-                :unicode "!"
-                :face 'warning
-                :nerd-icons '(:function ignore :name "test")))
-        (context (make-tessera-entry-context))
-        (tessera-glyph-style 'ascii))
-    (dolist (tessera-glyph-color '(t nil "blue"))
-      (let* ((text (tessera-glyph-render glyph context))
-             (face (get-text-property 0 'face text)))
-        (pcase tessera-glyph-color
-          ('t (should (memq 'warning (ensure-list face))))
-          ('nil (should-not face))
-          (_ (should (equal face '(:foreground "blue")))))))
-    (setf (tessera-glyph-face glyph) 'missing-face)
-    (should-error (tessera-glyph-render glyph context))))
+                        'tessera-gnus-summary-unread-date-face))))))))
 
 (ert-deftest tessera-gnus-faces-score-changes-refresh-without-marks ()
   (with-temp-buffer

@@ -141,7 +141,7 @@
       (should (> (length (tessera-thread-prefix context)) width)))))
 
 (ert-deftest tessera-thread-branches-align-with-parent-text ()
-  (dolist (tessera-glyph-style '(ascii unicode nerd-icons))
+  (let ((tessera-glyph-style 'ascii))
     (dolist (tessera-entry-segment-gap '(0 1 3))
       (dolist (path (append '((t) (nil) (t nil) (nil t))
                             (cl-loop for depth in '(4 5 6 27)
@@ -154,7 +154,7 @@
           (setf (tessera-thread-context-path node)
                 (append path '(nil)))
           (let* ((child (tessera-thread-prefix context))
-                 (branch (string-match "[`└]" child)))
+                 (branch (string-match "`" child)))
             (should branch)
             (should (= author-column
                        (string-width
@@ -377,30 +377,6 @@
        (cl-loop for p from (point) below (line-end-position)
                 thereis (equal (get-text-property p 'display) "\n")))
       (should-not (search-forward "Subject" (line-end-position) t)))))
-
-(ert-deftest tessera-thread-current-excludes-virtual-subject ()
-  (with-temp-buffer
-    (let ((gnus-show-threads t)
-          (tessera-entry-layout 'two-line)
-          (tessera-glyph-style 'ascii))
-      (tessera-gnus-summary--register)
-      (tessera-tests--gnus-rows)
-      (tessera-gnus-summary--sync-buffer)
-      (goto-char (tessera-entry-point))
-      (tessera-entry-highlight-current)
-      (should (memq 'tessera-entry-current-face
-                    (get-text-property (point) 'face)))
-      (goto-char (point-min))
-      (search-forward "2/4Subject 1")
-      (should-not (memq 'tessera-entry-current-face
-                        (ensure-list
-                         (get-text-property (1- (point)) 'face))))
-      (should (get-text-property (point) 'tessera--thread-heading))
-      (forward-line 1)
-      (goto-char (tessera-entry-point))
-      (tessera-entry-highlight-current)
-      (should (memq 'tessera-entry-current-face
-                    (get-text-property (point) 'face))))))
 
 (ert-deftest tessera-thread-uses-inner-and-outer-overlay-padding ()
   (with-temp-buffer

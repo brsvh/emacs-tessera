@@ -17,6 +17,7 @@
 (require 'gnus-topic)
 (require 'elfeed-search)
 (require 'mu4e-headers)
+(require 'tessera-mu4e-headers)
 
 (defvar gnus-registry-db)
 

@@ -207,14 +207,14 @@
       (insert (propertize "Message" 'msg message))
       (dolist (spec
                '((status ?T tessera-glyph-negative-face
-                         ("Trashed" "Draft" "New" "Unread") negative)
+                         ("Trashed" "Draft" "New" "Unread"))
                  (priority ?H tessera-glyph-warning-face
-                           ("High priority" "Flagged") warning)
+                           ("High priority" "Flagged"))
                  (secondary ?R tessera-glyph-positive-face
                             ("Replied" "Forwarded" "Personal"
-                             "Mailing list") positive)
+                             "Mailing list"))
                  (operation ?m tessera-glyph-attention-face
-                            ("Move: /archive") attention)))
+                            ("Move: /archive"))))
         (let* ((slot (tessera-mu4e-headers--slot (car spec)))
                (text (tessera--render-glyph-slot slot context t))
                (position (text-property-not-all

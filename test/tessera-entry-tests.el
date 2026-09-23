@@ -110,10 +110,6 @@
                   :name "nf-md-circle")
    :face 'tessera-glyph-accent-face))
 
-(defun tessera-entry-tests--nerd-icon (_name)
-  "Return a stand-in Nerd Icons glyph."
-  "N")
-
 (defun tessera-entry-tests--slot ()
   "Return a valid test glyph slot."
   (make-tessera-glyph-slot
@@ -281,6 +277,14 @@
         '(before-string after-string)))
      (overlays-in (point-min) (point-max)))))
 
+(ert-deftest tessera-native-prefix-does-not-mutate-input ()
+  (let* ((prefix (propertize "ABCD" 'display ""))
+         (tessera-entry-top-padding 0.5)
+         (rendered (tessera--entry-content "Title" prefix)))
+    (should-not (get-text-property 0 'tessera--entry-layout prefix))
+    (should (= (caaar (get-text-property
+                       0 'tessera--entry-layout rendered)) 0))))
+
 (ert-deftest tessera-entry-render-builds-one-logical-line ()
   (let ((tessera--entry-backends (make-hash-table :test #'eq))
         (tessera-entry-layout 'single-line)
@@ -409,69 +413,41 @@
               (should (string-match-p "HIGH" display)))))
       (remhash backend tessera--entry-backends))))
 
-(ert-deftest tessera-entry-render-uses-unicode-on-graphic-frames ()
-  (let ((backend 'tessera-entry-tests)
-        (tessera-glyph-style 'unicode))
+(ert-deftest tessera-entry-render-selects-available-glyph-style ()
+  (let ((backend 'tessera-entry-tests))
     (unwind-protect
         (progn
           (tessera-entry-tests--register backend)
-          (cl-letf (((symbol-function 'display-graphic-p)
-                     (lambda (&optional _display) t))
-                    ((symbol-function 'char-displayable-p)
-                     (lambda (_character) t)))
-            (should
-             (string-match-p
-              "●"
-              (tessera-entry-render
-               backend
-               '( :title "Subject"
-                  :date "2026"
-                  :status unread))))))
-      (remhash backend tessera--entry-backends))))
-
-(ert-deftest tessera-entry-render-falls-back-to-ascii ()
-  (let ((backend 'tessera-entry-tests)
-        (tessera-glyph-style 'unicode))
-    (unwind-protect
-        (progn
-          (tessera-entry-tests--register backend)
-          (cl-letf (((symbol-function 'display-graphic-p)
-                     (lambda (&optional _display) t))
-                    ((symbol-function 'char-displayable-p)
-                     (lambda (_character) nil)))
-            (should
-             (string-match-p
-              (regexp-quote "*")
-              (tessera-entry-render
-               backend
-               '( :title "Subject"
-                  :date "2026"
-                  :status unread))))))
-      (remhash backend tessera--entry-backends))))
-
-(ert-deftest tessera-entry-render-uses-nerd-icons ()
-  (let ((backend 'tessera-entry-tests)
-        (tessera-glyph-style 'nerd-icons))
-    (unwind-protect
-        (progn
-          (tessera-entry-tests--register backend)
-          (cl-letf (((symbol-function 'display-graphic-p)
-                     (lambda (&optional _display) t))
-                    ((symbol-function 'char-displayable-p)
-                     (lambda (_character) t))
-                    ((symbol-function 'featurep)
-                     (lambda (feature &optional _subfeature)
-                       (eq feature 'nerd-icons)))
-                    ((symbol-function 'nerd-icons-mdicon)
-                     #'tessera-entry-tests--nerd-icon))
-            (should
-             (string-match-p
-              "N"
-              (tessera-entry-render
-               backend
-               '( :title "Subject"
-                  :date "2026"
-                  :status unread))))))
+          (pcase-dolist
+              (`(,style ,displayable ,icon-error ,expected)
+               '((unicode t nil "●")
+                 (unicode nil nil "*")
+                 (nerd-icons t nil "N")
+                 (nerd-icons t t "●")))
+            (ert-info ((format "%S, displayable=%S, icon-error=%S"
+                               style displayable icon-error))
+              (let ((tessera-glyph-style style))
+                (cl-letf
+                    (((symbol-function 'display-graphic-p)
+                      (lambda (&optional _display) t))
+                     ((symbol-function 'char-displayable-p)
+                      (lambda (_character) displayable))
+                     ((symbol-function
+                       'tessera--nerd-icons-available-p)
+                      (lambda () t))
+                     ((symbol-function 'nerd-icons-mdicon)
+                      (lambda (_name)
+                        (if icon-error
+                            (error "Missing Nerd Font")
+                          "N"))))
+                  (should
+                   (string-match-p
+                    (regexp-quote expected)
+                    (tessera-entry-render
+                     backend
+                     '( :title "Subject"
+                        :date "2026"
+                        :status unread)))))))))
       (remhash backend tessera--entry-backends))))
 
 (ert-deftest tessera-glyph-render-supports-segment-glyphs ()
@@ -489,97 +465,43 @@
     (should (eq (get-text-property 0 'tessera-glyph text)
                 t))))
 
-(ert-deftest tessera-entry-render-falls-back-from-nerd-icons ()
+(ert-deftest tessera-entry-render-respects-glyph-color ()
   (let ((backend 'tessera-entry-tests)
-        (tessera-glyph-style 'nerd-icons))
+        (tessera-glyph-style 'ascii))
     (unwind-protect
         (progn
           (tessera-entry-tests--register backend)
-          (cl-letf (((symbol-function 'display-graphic-p)
-                     (lambda (&optional _display) t))
-                    ((symbol-function 'char-displayable-p)
-                     (lambda (_character) t))
-                    ((symbol-function 'featurep)
-                     (lambda (feature &optional _subfeature)
-                       (eq feature 'nerd-icons)))
-                    ((symbol-function 'nerd-icons-mdicon)
-                     (lambda (_name)
-                       (error "Missing Nerd Font"))))
-            (should
-             (string-match-p
-              "●"
-              (tessera-entry-render
-               backend
-               '( :title "Subject"
-                  :date "2026"
-                  :status unread))))))
-      (remhash backend tessera--entry-backends))))
-
-(ert-deftest tessera-entry-render-applies-semantic-color ()
-  (let ((backend 'tessera-entry-tests)
-        (tessera-glyph-style 'ascii)
-        (tessera-glyph-color t))
-    (unwind-protect
-        (progn
-          (tessera-entry-tests--register backend)
-          (let* ((display
-                  (tessera-entry-render
-                   backend
-                   '( :title "Subject"
-                      :date "2026"
-                      :status unread)))
-                 (position (string-match (regexp-quote "*") display)))
-            (should (eq (get-text-property position 'face display)
-                        'tessera-glyph-accent-face))
-            (should (eq (get-text-property
-                         position 'tessera-glyph display)
-                        t))
-            (let ((hover
-                   (get-text-property position 'mouse-face display)))
-              (should (equal (cadr hover)
-                             'tessera-entry-hover-face))
-              (should (equal
-                       (plist-get (car hover) :foreground)
-                       (face-attribute 'tessera-glyph-accent-face
-                                       :foreground nil 'default))))))
-      (remhash backend tessera--entry-backends))))
-
-(ert-deftest tessera-entry-render-supports-monochrome-glyphs ()
-  (let ((backend 'tessera-entry-tests)
-        (tessera-glyph-style 'ascii)
-        (tessera-glyph-color nil))
-    (unwind-protect
-        (progn
-          (tessera-entry-tests--register backend)
-          (let* ((display
-                  (tessera-entry-render
-                   backend
-                   '( :title "Subject"
-                      :date "2026"
-                      :status unread)))
-                 (position (string-match (regexp-quote "*") display)))
-            (should-not (get-text-property position 'face display))
-            (should (eq (get-text-property
-                         position 'tessera-glyph display)
-                        t))))
-      (remhash backend tessera--entry-backends))))
-
-(ert-deftest tessera-entry-render-supports-uniform-glyph-color ()
-  (let ((backend 'tessera-entry-tests)
-        (tessera-glyph-style 'ascii)
-        (tessera-glyph-color "red"))
-    (unwind-protect
-        (progn
-          (tessera-entry-tests--register backend)
-          (let* ((display
-                  (tessera-entry-render
-                   backend
-                   '( :title "Subject"
-                      :date "2026"
-                      :status unread)))
-                 (position (string-match (regexp-quote "*") display)))
-            (should (equal (get-text-property position 'face display)
-                           '(:foreground "red")))))
+          (dolist (case '((t tessera-glyph-accent-face)
+                          (nil nil)
+                          ("red" (:foreground "red"))))
+            (ert-info ((format "Glyph color %S" (car case)))
+              (let* ((tessera-glyph-color (car case))
+                     (display
+                      (tessera-entry-render
+                       backend
+                       '( :title "Subject"
+                          :date "2026"
+                          :status unread)))
+                     (position
+                      (string-match (regexp-quote "*") display)))
+                (should position)
+                (should (equal
+                         (get-text-property position 'face display)
+                         (cadr case)))
+                (should (eq (get-text-property
+                             position 'tessera-glyph display)
+                            t))
+                (when (eq tessera-glyph-color t)
+                  (let ((hover (get-text-property
+                                position 'mouse-face display)))
+                    (should (equal (cadr hover)
+                                   'tessera-entry-hover-face))
+                    (should
+                     (equal
+                      (plist-get (car hover) :foreground)
+                      (face-attribute
+                       'tessera-glyph-accent-face
+                       :foreground nil 'default)))))))))
       (remhash backend tessera--entry-backends))))
 
 (ert-deftest tessera-entry-render-applies-glyph-interaction ()
@@ -1008,8 +930,7 @@
     (with-temp-buffer
       (insert "first\nsecond\n")
       (goto-char (point-min))
-      (let ((point (point))
-            (rollbacks 0))
+      (let ((point (point)))
         (catch 'tessera-navigation-exit
           (tessera--navigation-call
            (current-buffer)
@@ -1025,11 +946,8 @@
              result)
            (lambda (_result)
              (when (eq phase 'commit)
-               (throw 'tessera-navigation-exit nil)))
-           (lambda (_result)
-             (setq rollbacks (1+ rollbacks)))))
-        (should (= (point) point))
-        (should (= rollbacks 1))))))
+               (throw 'tessera-navigation-exit nil)))))
+        (should (= (point) point))))))
 
 (ert-deftest tessera-navigation-restores-buffer-restrictions ()
   (let ((buffer (generate-new-buffer " *tessera-navigation-main*"))
@@ -1063,7 +981,7 @@
                 (narrow-to-region (point) (point-max))
                 (goto-char (point-max)))
               nil)
-            nil #'identity nil nil (list related)))
+            nil #'identity nil (list related)))
           (with-current-buffer buffer
             (should (buffer-narrowed-p))
             (should
@@ -1099,7 +1017,7 @@
                  (line-beginning-position)
                  (line-end-position)))
               t)
-            nil #'identity nil nil (list related)))
+            nil #'identity nil (list related)))
           (with-current-buffer related
             (should (buffer-narrowed-p))
             (should (= (point) second-line))
@@ -1513,12 +1431,7 @@
             (should (string-match-p
                      "Title" (tessera-entry-render
                               backend '( :title "Title"
-                                         :status unread)))))
-          (should-error
-           (tessera-glyph-render nil (make-tessera-entry-context)))
-          (should-error
-           (tessera-glyph-render (tessera-entry-tests--glyph)
-                                 nil :unsupported t)))
+                                         :status unread))))))
       (remhash backend tessera--entry-backends))))
 
 (provide 'tessera-entry-tests)

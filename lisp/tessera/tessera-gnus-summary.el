@@ -26,7 +26,7 @@
 ;; Follow `gnus-sum' for labels, cached article properties, native
 ;; thread contexts, options, faces, and summary rendering.  Parsed
 ;; MIME observations come from the article adapter.  Four native marks
-;; remain at fixed offsets and share the first status glyph.
+;; remain at fixed offsets in a zero-width prefix before the glyphs.
 ;; The visible entry is refreshed from those marks after changes.
 
 ;;; Code:
@@ -1068,13 +1068,11 @@ Use NATIVE-FACE when supplied, including an explicitly nil face."
                               (tessera-gnus-summary--content-data
                                header)))
          (tessera-gnus-summary--metadata metadata)
-         (prefix (propertize (copy-sequence
-                              (plist-get metadata :marks))
-                             'display ""))
          (result
           (tessera-entry-render
            'gnus-summary header
-           (get-buffer-window (current-buffer)) prefix)))
+           (get-buffer-window (current-buffer))
+           (plist-get metadata :marks))))
     (when-let* ((position (tessera-entry-point result)))
       (put-text-property position (1+ position)
                          'gnus-position t result))
@@ -1107,9 +1105,9 @@ sent by the user."
 
 (defun tessera-gnus-summary-format-entry (header)
   "Return a Tessera Gnus summary representation of HEADER.
-The first four characters retain Gnus's native status marks.
-Their first character displays the first composed glyph, preserving
-mark discovery, in-place updates, and visual-line navigation."
+The first four characters retain Gnus's native status marks as a
+zero-width prefix.  Visible glyphs follow that prefix, preserving
+native mark discovery and in-place updates."
   (tessera-gnus-summary--render
    header
    (list :marks (string gnus-tmp-unread gnus-tmp-replied
@@ -1260,14 +1258,16 @@ centering and the user's chosen target row to Gnus."
 Restrict the result to UNREAD articles when non-nil."
   (when-let* ((data
                (if unread
-                   (seq-find
-                    (lambda (item)
-                      (let ((number (gnus-data-number item)))
-                        (and
-                         (not (memq number
-                                    gnus-newsgroup-unfetched))
-                         (memq number gnus-newsgroup-unreads))))
-                    gnus-newsgroup-data)
+                   (let ((available (make-hash-table :test #'eq)))
+                     ;; Index current native state for this scan.
+                     (dolist (number gnus-newsgroup-unreads)
+                       (puthash number t available))
+                     (dolist (number gnus-newsgroup-unfetched)
+                       (remhash number available))
+                     (seq-find
+                      (lambda (item)
+                        (gethash (gnus-data-number item) available))
+                      gnus-newsgroup-data))
                  (car gnus-newsgroup-data))))
     (gnus-data-number data)))
 
@@ -1354,7 +1354,6 @@ Honor `tessera-gnus-summary-boundary-navigation'."
                (tessera-gnus-summary--navigation-changed-p
                 buffer identity))
              #'tessera-gnus-summary--position-after-navigation
-             nil
              (tessera-gnus-summary--navigation-related-buffers))))))))
 
 (defun tessera-gnus-summary--navigation-advice (function)
@@ -1637,6 +1636,9 @@ Nil means explicitly refresh all glyphs and their hover faces."
          (when tessera-gnus-summary--active
            (tessera-entry-clear-current)
            (tessera-gnus-summary--sync-buffer t)
+           (setq tessera-gnus-summary--dirty nil
+                 tessera-gnus-summary--appearance
+                 (tessera-gnus-summary--appearance))
            (tessera-entry-highlight-current)))))))
 
 (provide 'tessera-gnus-summary)

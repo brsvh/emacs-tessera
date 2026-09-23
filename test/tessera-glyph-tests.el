@@ -105,6 +105,40 @@
     (should-not
      (widget-apply widget :match '((missing :ascii "?"))))))
 
+(ert-deftest tessera-glyph-render-validates-arguments ()
+  (let ((glyph (make-tessera-glyph :ascii "x"))
+        (context (make-tessera-entry-context)))
+    (should
+     (equal (should-error (tessera-glyph-render nil context))
+            '(error "Glyph must contain a Tessera glyph")))
+    (should
+     (equal (should-error (tessera-glyph-render glyph nil))
+            '(error "Glyph context must be a Tessera entry context")))
+    (should
+     (equal (should-error
+             (tessera-glyph-render glyph context '(:unsupported t)))
+            (list 'error
+                  (concat "Glyph interaction properties "
+                          "contains invalid properties"))))))
+
+(ert-deftest tessera-glyph-role-face-respects-color-preferences ()
+  (let ((glyph (make-tessera-glyph
+                :ascii "!"
+                :unicode "!"
+                :face 'warning
+                :nerd-icons '(:function ignore :name "test")))
+        (context (make-tessera-entry-context))
+        (tessera-glyph-style 'ascii))
+    (dolist (tessera-glyph-color '(t nil "blue"))
+      (let* ((text (tessera-glyph-render glyph context))
+             (face (get-text-property 0 'face text)))
+        (pcase tessera-glyph-color
+          ('t (should (memq 'warning (ensure-list face))))
+          ('nil (should-not face))
+          (_ (should (equal face '(:foreground "blue")))))))
+    (setf (tessera-glyph-face glyph) 'missing-face)
+    (should-error (tessera-glyph-render glyph context))))
+
 (ert-deftest tessera-glyph-optional-forms-fall-back-to-ascii ()
   (let ((glyph (make-tessera-glyph :ascii "x"))
         (context (make-tessera-entry-context)))
@@ -114,6 +148,35 @@
                (lambda () (ert-fail "Unneeded Nerd Icons lookup"))))
       (dolist (tessera-glyph-style '(ascii unicode nerd-icons))
         (should (equal (tessera-glyph-render glyph context) "x"))))))
+
+(ert-deftest tessera-glyph-refresh-retries-optional-library ()
+  (let* ((tessera--nerd-icons-availability nil)
+         (original (symbol-function 'require))
+         (installed nil)
+         (attempts 0)
+         (refreshed nil)
+         (tessera--glyph-change-functions
+          (list (lambda (_option)
+                  (setq refreshed
+                        (tessera--nerd-icons-available-p))))))
+    (cl-letf (((symbol-value 'features) (remq 'nerd-icons features))
+              ((symbol-function 'require)
+               (lambda (feature &rest args)
+                 (if (eq feature 'nerd-icons)
+                     (progn
+                       (cl-incf attempts)
+                       (when installed
+                         (push feature features)
+                         feature))
+                   (apply original feature args)))))
+      (should-not (tessera--nerd-icons-available-p))
+      (setq installed t)
+      (should-not (tessera--nerd-icons-available-p))
+      (should (= attempts 1))
+      (tessera-refresh-glyphs)
+      (should refreshed)
+      (should (tessera--nerd-icons-available-p))
+      (should (= attempts 2)))))
 
 (ert-deftest tessera-glyph-hidden-slots-respect-space-policy ()
   (let* ((glyph (make-tessera-glyph :ascii "x" :hidden t))
@@ -290,7 +353,8 @@
                (setq load-path ',load-path load-prefer-newer t)
                (require 'cl-lib)
                (require 'tessera)
-               (let ((original (symbol-function 'add-hook)))
+               (let ((original-hook (symbol-function 'add-hook))
+                     (original-advice (symbol-function 'advice-add)))
                  (cl-letf
                      (((symbol-function 'add-hook)
                        (lambda (hook function &rest args)
@@ -302,7 +366,16 @@
                                        "tessera-"
                                        (symbol-name function))))
                            (error "Hook installed while loading"))
-                         (apply original hook function args))))
+                         (apply original-hook hook function args)))
+                      ((symbol-function 'advice-add)
+                       (lambda (symbol where function &rest args)
+                         (when (and (symbolp function)
+                                    (string-prefix-p
+                                     "tessera-"
+                                     (symbol-name function)))
+                           (error "Advice installed while loading"))
+                         (apply original-advice
+                                symbol where function args))))
                    (mapc #'require
                          '(tessera-gnus tessera-mu4e tessera-elfeed))
                    (dolist (option

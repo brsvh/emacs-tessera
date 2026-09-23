@@ -296,14 +296,16 @@
 (ert-deftest tessera-elfeed-search-lifecycle-is-idempotent ()
   (let ((elfeed-search-mode-hook nil)
         (tessera-elfeed-search--navigation-users 0)
+        (tessera--entry-backends (make-hash-table :test #'eq))
         (emulation-mode-map-alists
          (copy-sequence emulation-mode-map-alists)))
     (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
       (with-temp-buffer
         (elfeed-search-mode)
-        (tessera-elfeed-search--enable)
-        (tessera-elfeed-search--enable)
+        (tessera-elfeed--enable-search)
+        (tessera-elfeed--enable-search)
         (should tessera-elfeed-search--active)
+        (should (gethash 'elfeed-search tessera--entry-backends))
         (should (= tessera-elfeed-search--navigation-users 1))
         (tessera-elfeed-search--disable)
         (tessera-elfeed-search--disable)
@@ -589,17 +591,6 @@
       (when (buffer-live-p first) (kill-buffer first))
       (when (buffer-live-p second) (kill-buffer second)))))
 
-(ert-deftest tessera-elfeed-registers-only-when-enabled ()
-  (let ((tessera--entry-backends (make-hash-table :test #'eq)))
-    (load-file (symbol-file 'tessera-elfeed-search--register 'defun))
-    (should-not (gethash 'elfeed-search tessera--entry-backends))
-    (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
-      (with-temp-buffer
-        (setq major-mode 'elfeed-search-mode)
-        (tessera-elfeed--enable-search)
-        (should (gethash 'elfeed-search tessera--entry-backends))
-        (tessera-elfeed-search--disable)))))
-
 (ert-deftest tessera-elfeed-rebuilds-layout-on-single-update ()
   (let ((elfeed-search-print-entry-function
          #'tessera-elfeed-search-print-entry)
@@ -647,20 +638,20 @@
 (ert-deftest tessera-elfeed-search-restores-date-separators ()
   (let ((elfeed-search-separator-date-format "%b %Y"))
     (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
-      (dolist (local '(nil t))
-        (dolist (format '(nil "%Y-%m"))
-          (with-temp-buffer
-            (setq major-mode 'elfeed-search-mode)
-            (when local
-              (setq-local elfeed-search-separator-date-format format))
-            (tessera-elfeed-search--enable)
-            (should-not elfeed-search-separator-date-format)
-            (tessera-elfeed-search--disable)
-            (should (eq local
-                        (local-variable-p
-                         'elfeed-search-separator-date-format)))
-            (should (equal elfeed-search-separator-date-format
-                           (if local format "%b %Y")))))))))
+      (pcase-dolist (`(,local ,format)
+                     '((nil "%b %Y") (t nil) (t "%Y-%m")))
+        (with-temp-buffer
+          (setq major-mode 'elfeed-search-mode)
+          (when local
+            (setq-local elfeed-search-separator-date-format format))
+          (tessera-elfeed-search--enable)
+          (should-not elfeed-search-separator-date-format)
+          (tessera-elfeed-search--disable)
+          (should (eq local
+                      (local-variable-p
+                       'elfeed-search-separator-date-format)))
+          (should (equal elfeed-search-separator-date-format
+                         format)))))))
 
 (provide 'tessera-elfeed-search-tests)
 ;;; tessera-elfeed-search-tests.el ends here

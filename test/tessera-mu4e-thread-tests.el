@@ -9,6 +9,7 @@
 (require 'ert)
 (require 'mu4e-headers)
 (require 'mu4e-thread)
+(require 'mu4e-view)
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-headers)
 
@@ -486,28 +487,39 @@
                    (push t viewed)
                    42)))
         (should-not
-         (tessera-mu4e-headers--view-prev-or-next
-          (lambda (move backwards)
-            (funcall move backwards)
-            (mu4e-select-other-view)
-            (mu4e-headers-view-message))
-          (lambda (_backwards) nil) nil))
+         (call-interactively #'mu4e-view-headers-prev-unread))
         (should-not selected)
         (should-not viewed)
+        (should (= 1 (mu4e~headers-docid-at-point)))
         (should
          (= 42
-            (tessera-mu4e-headers--view-prev-or-next
-             (lambda (move backwards)
-               (funcall move backwards)
-               (mu4e-select-other-view)
-               (mu4e-headers-view-message))
-             (lambda (_backwards) 2) nil)))
+            (call-interactively #'mu4e-view-headers-next-unread)))
+        (should (= 3 (mu4e~headers-docid-at-point)))
+        (should (= (point) (tessera-entry-point)))
         (should (equal selected '(t)))
-        (should (equal viewed '(t))))
+        (should (equal viewed '(t)))))))
+
+(ert-deftest tessera-mu4e-view-navigation-keeps-inactive-headers ()
+  (tessera-mu4e-tests--with-thread
+    ;; The outer buffer keeps the shared advice installed.
+    (tessera-mu4e-tests--with-thread
+      (tessera-mu4e-headers--disable)
       (should
        (advice-member-p
         #'tessera-mu4e-headers--view-prev-or-next
-        'mu4e--view-prev-or-next)))))
+        'mu4e--view-prev-or-next))
+      (mu4e~headers-goto-docid 1)
+      (let (selected viewed)
+        (cl-letf (((symbol-function 'mu4e-select-other-view)
+                   (lambda () (push t selected)))
+                  ((symbol-function 'mu4e-headers-view-message)
+                   (lambda () (push t viewed) 42)))
+          (should
+           (= 42
+              (call-interactively #'mu4e-view-headers-prev-unread)))
+          (should (= 1 (mu4e~headers-docid-at-point)))
+          (should (equal selected '(t)))
+          (should (equal viewed '(t))))))))
 
 (ert-deftest tessera-mu4e-thread-update-from-another-window ()
   (tessera-mu4e-tests--with-thread

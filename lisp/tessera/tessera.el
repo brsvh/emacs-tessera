@@ -648,16 +648,22 @@ Use nonempty single-line text.  Narrow areas may clip this marker."
   :set #'tessera--set-glyph-appearance
   :group 'tessera)
 
+(defvar tessera--nerd-icons-availability nil
+  "Cached availability of the optional Nerd Icons library.")
+
 ;;;###autoload
 (defun tessera-refresh-glyphs ()
   "Validate glyph settings and redraw all active Tessera views.
 Use after `setq' or face customization.  Customize and `setopt'
-refresh affected views automatically.  Disabled adapters stay off."
+refresh affected views automatically.  Disabled adapters stay off.
+Also retry loading Nerd Icons when next needed, for example after
+installing the library or changing `load-path'."
   (interactive)
   (tessera--validate-thread-glyphs tessera-thread-glyphs)
   (dolist (option '(tessera-glyph-style tessera-glyph-color
                                         tessera-entry-ellipsis))
     (tessera--validate-glyph-appearance option (symbol-value option)))
+  (setq tessera--nerd-icons-availability nil)
   (tessera--run-glyph-change-functions nil))
 
 (defun tessera--validate-glyph-variant (variant slot-name)
@@ -1360,9 +1366,6 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
     (:follow-link . follow-link))
   "Map glyph variant keys to text properties.")
 
-(defvar tessera--nerd-icons-availability nil
-  "Cached availability of the optional Nerd Icons library.")
-
 (defun tessera--glyph-frame (context)
   "Return the frame used to render glyphs for CONTEXT."
   (let ((window (tessera-entry-context-window context)))
@@ -2012,12 +2015,12 @@ BUFFER's local mark state and mark ring.  Release the snapshot with
 
 (defun tessera--navigation-call
     (buffer function arguments target-p
-            &optional commit rollback related-buffers)
+            &optional commit related-buffers)
   "Call navigation FUNCTION with ARGUMENTS for BUFFER.
 TARGET-P receives the native result and returns non-nil when a real
 target was selected.  On success, call COMMIT with that result when
-non-nil.  Otherwise call ROLLBACK with the result when non-nil, then
-restore point, narrowing, mark, and the saved window configurations.
+non-nil.  Otherwise restore point, narrowing, mark, and the saved
+window configurations.
 Also roll back on any nonlocal exit from FUNCTION, TARGET-P, or
 COMMIT, without replacing that exit if restoration fails.
 RELATED-BUFFERS identifies other native buffers whose point,
@@ -2025,7 +2028,6 @@ narrowing, and displayed frames need restoration."
   (let ((snapshot
          (tessera--navigation-save buffer related-buffers))
         (restore-needed t)
-        rollback-done
         result)
     (unwind-protect
         (progn
@@ -2034,16 +2036,10 @@ narrowing, and displayed frames need restoration."
               (progn
                 (when commit (funcall commit result))
                 (setq restore-needed nil))
-            (when rollback
-              (setq rollback-done t)
-              (funcall rollback result))
             (tessera--navigation-restore snapshot)
             (setq restore-needed nil))
           result)
       (when restore-needed
-        (unless rollback-done
-          (when rollback
-            (ignore-errors (funcall rollback result))))
         (ignore-errors
           (tessera--navigation-restore snapshot)))
       (tessera--navigation-release snapshot))))

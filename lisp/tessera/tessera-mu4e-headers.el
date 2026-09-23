@@ -1158,25 +1158,32 @@ Do so only when the current thread has a following target."
     (function move backwards)
   "Call native view FUNCTION using MOVE and BACKWARDS.
 Select the other view and display the new message after MOVE returns
-a native docid.  Suppress those view side effects at a boundary."
-  (let ((select-function
-         (symbol-function 'mu4e-select-other-view))
-        (view-function
-         (symbol-function 'mu4e-headers-view-message))
-        move-result
-        result)
-    (cl-letf (((symbol-function 'mu4e-select-other-view) #'ignore)
-              ((symbol-function 'mu4e-headers-view-message) #'ignore))
-      (setq result
-            (funcall
-             function
-             (lambda (&rest arguments)
-               (setq move-result (apply move arguments)))
-             backwards)))
-    (if (not (numberp move-result))
-        result
-      (funcall select-function)
-      (funcall view-function))))
+a native docid.  Suppress those view side effects at a boundary
+only when the associated headers buffer has an active adapter."
+  (let ((buffer (mu4e-get-headers-buffer)))
+    (if (or (not (buffer-live-p buffer))
+            (not (buffer-local-value
+                  'tessera-mu4e-headers--active buffer)))
+        (funcall function move backwards)
+      (let ((select-function
+             (symbol-function 'mu4e-select-other-view))
+            (view-function
+             (symbol-function 'mu4e-headers-view-message))
+            move-result
+            result)
+        (cl-letf (((symbol-function 'mu4e-select-other-view) #'ignore)
+                  ((symbol-function 'mu4e-headers-view-message)
+                   #'ignore))
+          (setq result
+                (funcall
+                 function
+                 (lambda (&rest arguments)
+                   (setq move-result (apply move arguments)))
+                 backwards)))
+        (if (not (numberp move-result))
+            result
+          (funcall select-function)
+          (funcall view-function))))))
 
 (defun tessera-mu4e-headers--update (function &rest arguments)
   "Preserve a layout anchor across native FUNCTION with ARGUMENTS.
