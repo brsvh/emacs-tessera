@@ -63,16 +63,25 @@
 
 (declare-function tessera-mu4e-headers--glyphs-changed
                   "tessera-mu4e-headers")
+(declare-function tessera-mu4e-headers--months-changed
+                  "tessera-mu4e-headers")
 
 (defun tessera-mu4e--glyphs-changed (option)
   "Forward changed glyph OPTION to an already loaded adapter."
   (when (featurep 'tessera-mu4e-headers)
     (tessera-mu4e-headers--glyphs-changed option)))
 
+(defun tessera-mu4e--months-changed (option)
+  "Forward changed month OPTION to an already loaded adapter."
+  (when (featurep 'tessera-mu4e-headers)
+    (tessera-mu4e-headers--months-changed option)))
+
 (defun tessera-mu4e--deactivate ()
   "Remove mu4e hooks and disable every active headers adapter."
   (remove-hook 'tessera--glyph-change-functions
                #'tessera-mu4e--glyphs-changed)
+  (remove-hook 'tessera--month-change-functions
+               #'tessera-mu4e--months-changed)
   (remove-hook 'mu4e-headers-mode-hook
                #'tessera-mu4e--enable-headers)
   (when (featurep 'tessera-mu4e-headers)
@@ -96,6 +105,8 @@ automatically selects the shared thread layout."
               (progn
                 (add-hook 'tessera--glyph-change-functions
                           #'tessera-mu4e--glyphs-changed)
+                (add-hook 'tessera--month-change-functions
+                          #'tessera-mu4e--months-changed)
                 (add-hook 'mu4e-headers-mode-hook
                           #'tessera-mu4e--enable-headers)
                 (tessera-mu4e--map-headers-buffers

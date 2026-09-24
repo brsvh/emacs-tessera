@@ -64,11 +64,14 @@
           (tessera-glyph-style 'ascii))
       (tessera-tests--gnus-rows (number-sequence 0 39))
       (tessera-gnus-summary--sync-buffer t)
-      (dotimes (index 10)
+      (dotimes (index 40)
         (goto-char (point-min))
-        (forward-line (1+ index))
+        (forward-line index)
         (subst-char-in-region
-         (point) (1+ (point)) (char-after) gnus-unread-mark)
+         (point) (1+ (point)) (char-after)
+         (if (eq (char-after) gnus-unread-mark)
+             gnus-read-mark
+           gnus-unread-mark))
         (tessera-gnus-summary--sync-buffer))
       (let ((cells (make-hash-table :test #'eq)))
         (goto-char (point-min))
@@ -76,7 +79,13 @@
           (let* ((entry (get-text-property
                          (point) 'tessera-gnus-summary-entry))
                  (node (plist-get (cdr entry) :thread))
+                 (context (get-text-property
+                           (point) 'tessera-entry-context))
                  (path (tessera-thread-context-reverse-path node)))
+            (should (eq node (tessera-entry-context-thread context)))
+            (should (eq node (plist-get
+                              (tessera-entry-context-metadata context)
+                              :thread)))
             (should (eq node
                         (tessera-gnus-summary--thread-context
                          (car entry))))

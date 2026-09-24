@@ -40,6 +40,28 @@
   :group 'tessera-mu4e
   :prefix "tessera-mu4e-headers-")
 
+(defcustom tessera-mu4e-headers-month-grouping 'inherit
+  "Whether mu4e headers buffers use month grouping.
+The value `inherit' follows `tessera-month-grouping'."
+  :type '(choice
+          (const :tag "Inherit global setting" inherit)
+          (const :tag "Enabled" t)
+          (const :tag "Disabled" nil))
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera-mu4e-headers)
+
+(defcustom tessera-mu4e-headers-month-thread-date 'latest
+  "Date policy used to place mu4e threads in a month.
+Mu4e always uses the latest thread message.  The value `inherit'
+therefore maps a global `root' policy back to `latest'."
+  :type '(choice
+          (const :tag "Inherit global setting" inherit)
+          (const :tag "Latest thread message" latest))
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera-mu4e-headers)
+
 ;;;; Glyph options
 
 (defvar tessera-mu4e-headers--glyph-defaults
@@ -344,11 +366,13 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (defvar mu4e-headers-show-target)
 (defvar mu4e-headers-date-format)
 (defvar mu4e-headers-time-format)
+(defvar mu4e-headers-open-after-move)
 (defvar mu4e--mark-map)
 (defvar mu4e--mark-fringe-len)
 (defvar mu4e~headers-docid-pre)
 (defvar mu4e~headers-docid-post)
 (defvar mu4e~end-of-results)
+(defvar mu4e~headers-view-win)
 
 (declare-function mu4e~headers-human-date "mu4e-headers")
 (declare-function mu4e-mark-at-point "mu4e-mark")
@@ -359,7 +383,12 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (declare-function mu4e-headers-view-message "mu4e-headers")
 (declare-function mu4e-thread-next "mu4e-thread")
 (declare-function mu4e~headers-docid-at-point "mu4e-headers")
+(declare-function mu4e~headers-goto-docid "mu4e-headers")
 (declare-function mu4e~headers-field-for-docid "mu4e-headers")
+(declare-function mu4e-headers-find-if "mu4e-headers")
+(declare-function mu4e-headers-find-if-next "mu4e-headers")
+(declare-function mu4e-headers-view-message "mu4e-view")
+(declare-function mu4e-thread-message-folded-p "mu4e-thread")
 
 ;;;; Message state and face composition
 
@@ -538,6 +567,57 @@ fresh list without changing MESSAGE.  No Tessera mode is needed."
    :buffer buffer
    :window window
    :thread (tessera-mu4e-headers--thread-context object)))
+
+(defun tessera-mu4e-headers--month-enabled-p ()
+  "Return the effective mu4e month grouping setting."
+  (if (eq tessera-mu4e-headers-month-grouping 'inherit)
+      tessera-month-grouping
+    tessera-mu4e-headers-month-grouping))
+
+(defun tessera-mu4e-headers--month-thread-date ()
+  "Return the effective mu4e thread date policy."
+  (pcase tessera-mu4e-headers-month-thread-date
+    ('latest 'latest)
+    ('inherit
+     (if (memq tessera-month-thread-date '(latest root))
+         'latest
+       (error "Unsupported global month thread date: %S"
+              tessera-month-thread-date)))
+    (value
+     (error "Unsupported mu4e month thread date: %S" value))))
+
+(defun tessera-mu4e-headers--month-date (context)
+  "Return CONTEXT's native date, excluding mu4e's no-date marker."
+  (let ((date
+         (plist-get (tessera-entry-context-object context) :date)))
+    (unless (equal date '(0 0 0)) date)))
+
+(defun tessera-mu4e-headers--month-unread-p (context)
+  "Return non-nil when CONTEXT contains an unread message."
+  (tessera-mu4e-headers--unread-p
+   (tessera-entry-context-object context)))
+
+(defun tessera-mu4e-headers--month-glyph (state _context)
+  "Return the configured mu4e status glyph for STATE."
+  (tessera-glyph-resolve
+   (if (eq state 'unread) 'status-unread 'status-seen)
+   tessera-mu4e-headers--glyph-defaults
+   tessera-mu4e-headers-glyphs))
+
+(defun tessera-mu4e-headers--month-warning-segment (context)
+  "Return the segment that carries CONTEXT's date warning."
+  (if (tessera-entry-context-thread context) 'contact 'subject))
+
+(defun tessera-mu4e-headers--month-goto (context)
+  "Use native mu4e positioning to select CONTEXT."
+  (let ((docid
+         (plist-get (tessera-entry-context-object context) :docid)))
+    (when (mu4e~headers-goto-docid docid)
+      (tessera-mu4e-headers--position-point)
+      (when (and mu4e-headers-open-after-move
+                 (window-live-p mu4e~headers-view-win))
+        (mu4e-headers-view-message))
+      t)))
 
 (defun tessera-mu4e-headers--mark (message)
   "Return the native pending mark and target for MESSAGE."
@@ -731,7 +811,11 @@ visibility settings.  Pending operations also show their target."
                                      (string-empty-p subject))
                                  "(no subject)" subject)))
                  ('contact (tessera-mu4e-headers--contact message))
-                 ('date (mu4e~headers-human-date message))))
+                 ('date
+                  (if (tessera--valid-time
+                       (tessera-mu4e-headers--month-date context))
+                      (mu4e~headers-human-date message)
+                    "None"))))
               (help (if (eq role 'contact)
                         (format "From: %S\nTo: %S"
                                 (plist-get message :from)
@@ -779,6 +863,12 @@ visibility settings.  Pending operations also show their target."
                           :optional t)))
     (tessera-entry-register
      'mu4e-headers :context #'tessera-mu4e-headers--context
+     :month-date #'tessera-mu4e-headers--month-date
+     :month-unread-p #'tessera-mu4e-headers--month-unread-p
+     :month-glyph #'tessera-mu4e-headers--month-glyph
+     :month-warning-segment
+     #'tessera-mu4e-headers--month-warning-segment
+     :month-goto #'tessera-mu4e-headers--month-goto
      :segments
      (mapcar (lambda (role)
                (cons role (apply-partially
@@ -894,11 +984,11 @@ THREAD-PATHS caches shared ancestor comparisons for this update."
            (saved (get-text-property body 'tessera-mu4e-native))
            (previous (get-text-property body 'tessera-mu4e-state))
            (original (or saved (buffer-substring body end)))
+           (thread (unless native
+                     (tessera-mu4e-headers--thread-context message)))
            (state (unless native
                     (list message (tessera-mu4e-headers--mark message)
-                          (tessera-thread-context-key
-                           (tessera-mu4e-headers--thread-context
-                            message))))))
+                          (tessera-thread-context-key thread)))))
       (when (if native saved
               (or force (not saved)
                   ;; Reapplying a mark replaces its hidden text too.
@@ -949,6 +1039,9 @@ THREAD-PATHS caches shared ancestor comparisons for this update."
         (when-let* ((snapshot
                      (get-text-property body 'tessera-mu4e-state)))
           (setf (nth 2 snapshot) (nth 2 state)))
+        (when-let* ((context
+                     (get-text-property body 'tessera-entry-context)))
+          (setf (tessera-entry-context-thread context) thread))
         (if (and mu4e-search-threads
                  (tessera-mu4e-thread-fold-at start))
             (when (tessera-entry-layout-applied-p body)
@@ -976,6 +1069,7 @@ THREAD-PATHS caches shared ancestor comparisons for this update."
 FORCE also redraws unchanged messages after presentation changes."
   (save-restriction
     (widen)
+    (tessera--month-clear-display)
     (let ((tessera-mu4e-headers--updating t)
           (thread-paths (make-hash-table :test #'eq))
           (inhibit-read-only t)
@@ -1004,7 +1098,9 @@ FORCE also redraws unchanged messages after presentation changes."
                 (remove-overlays nil nil
                                  'tessera-mu4e-fold-padding t))
               (tessera-mu4e-headers--hide-footer)))
-        (tessera-entry-restore-point saved-point)))))
+        (tessera-entry-restore-point saved-point))
+      (when (and tessera-mu4e-headers--active (not native))
+        (tessera-month-sync)))))
 
 (defun tessera-mu4e-headers--appearance ()
   "Return native and shared options affecting the presentation."
@@ -1020,10 +1116,13 @@ FORCE also redraws unchanged messages after presentation changes."
         mu4e-headers-date-format mu4e-headers-time-format
         custom-enabled-themes tessera-entry-layout
         tessera-glyph-style tessera-glyph-color
-        tessera-entry-safe-gap tessera-entry-left-padding
+        tessera-safe-gap tessera-entry-left-padding
         tessera-entry-right-padding tessera-entry-top-padding
         tessera-entry-bottom-padding tessera-entry-segment-gap
-        tessera-entry-flex-gap-min-width))
+        tessera-flex-gap-min-width
+        (tessera-mu4e-headers--month-enabled-p)
+        (tessera-mu4e-headers--month-thread-date)
+        tessera-month-glyphs))
 
 (defun tessera-mu4e-headers--changed (&rest _arguments)
   "Record native buffer changes without reacting to our own edits."
@@ -1035,6 +1134,10 @@ FORCE also redraws unchanged messages after presentation changes."
   "Synchronize changed messages before display or after a command."
   (when (and tessera-mu4e-headers--active
              (not tessera-mu4e-headers--updating))
+    (setq-local tessera--month-enabled
+                (tessera-mu4e-headers--month-enabled-p))
+    (setq-local tessera--month-thread-date
+                (tessera-mu4e-headers--month-thread-date))
     (let* ((tessera-mu4e-headers--updating t)
            (appearance (tessera-mu4e-headers--appearance))
            (force (not (equal appearance
@@ -1047,6 +1150,7 @@ FORCE also redraws unchanged messages after presentation changes."
         (setq tessera-mu4e-headers--native-header-line
               header-line-format))
       (setq header-line-format nil)
+      (tessera-month-reveal-point)
       (if (tessera-mu4e-thread-fold-at (point))
           (tessera-entry-clear-current)
         (tessera-entry-highlight-current)))))
@@ -1062,6 +1166,7 @@ or a native search hook.  Preserve folded rows and native selection."
     (with-current-buffer buffer
       (when tessera-mu4e-headers--active
         (tessera-mu4e-headers--refresh)
+        (tessera-month-reveal-point)
         (when-let* ((_ (not (tessera-mu4e-thread-fold-at (point))))
                     (position (tessera-entry-point)))
           (goto-char position)
@@ -1075,9 +1180,46 @@ Return RESULT unchanged, including native docids and positions."
     (tessera-mu4e-headers--position-point))
   result)
 
+(defun tessera-mu4e-headers--visible-target-p (buffer)
+  "Return non-nil when BUFFER's selected message is month-visible."
+  (with-current-buffer buffer
+    (or (not tessera--month-enabled)
+        (tessera-month-entry-visible-p
+         (line-beginning-position)))))
+
 (defun tessera-mu4e-headers--position-after-move (_result)
   "Normalize the layout anchor after identity-changing navigation."
   (tessera-mu4e-headers--position-point))
+
+(defun tessera-mu4e-headers--folded-month-p (buffer)
+  "Return non-nil when BUFFER contains a folded month."
+  (with-current-buffer buffer
+    (and tessera--month-enabled
+         (cl-some
+          (lambda (group)
+            (gethash (tessera--month-group-key group)
+                     tessera--month-folds))
+          tessera--month-groups))))
+
+(defun tessera-mu4e-headers--move-across-months
+    (buffer function arguments)
+  "Run native move FUNCTION with ARGUMENTS in BUFFER.
+Search for each next month-visible message before asking FUNCTION
+to finish the native selection and preview behavior."
+  (with-current-buffer buffer
+    (let* ((lines (car arguments))
+           (backward (and (integerp lines) (< lines 0)))
+           (remaining (and (integerp lines) (abs lines))))
+      (if (or (null remaining) (zerop remaining))
+          (apply function arguments)
+        (while (and (> remaining 0)
+                    (mu4e-headers-find-if-next
+                     (lambda (_message)
+                       (not (mu4e-thread-message-folded-p)))
+                     backward))
+          (setq remaining (1- remaining)))
+        (when (zerop remaining)
+          (funcall function 0))))))
 
 (defun tessera-mu4e-headers--move (function &rest arguments)
   "Run native move FUNCTION with ARGUMENTS atomically.
@@ -1089,10 +1231,24 @@ selected target; otherwise restore point and all headers windows."
             (not (buffer-local-value
                   'tessera-mu4e-headers--active buffer)))
         (apply function arguments)
-      (let ((tessera-mu4e-headers--moving t))
-        (tessera--navigation-call
-         buffer function arguments #'numberp
-         #'tessera-mu4e-headers--moved)))))
+      (let ((tessera-mu4e-headers--moving t)
+            (tessera--month-navigation t))
+        (if (tessera-mu4e-headers--folded-month-p buffer)
+            (tessera--navigation-call
+             buffer
+             #'tessera-mu4e-headers--move-across-months
+             (list buffer function arguments)
+             (lambda (result)
+               (and (numberp result)
+                    (tessera-mu4e-headers--visible-target-p
+                     buffer)))
+             #'tessera-mu4e-headers--moved)
+          (tessera--navigation-call
+           buffer function arguments
+           (lambda (result)
+             (and (numberp result)
+                  (tessera-mu4e-headers--visible-target-p buffer)))
+           #'tessera-mu4e-headers--moved))))))
 
 (defun tessera-mu4e-headers--move-interactively
     (function &rest arguments)
@@ -1111,13 +1267,36 @@ selected target; otherwise restore point and all headers windows."
     (buffer function arguments)
   "Run FUNCTION with ARGUMENTS for BUFFER by message identity."
   (let ((before (tessera-mu4e-headers--docid buffer))
-        (tessera-mu4e-headers--moving t))
+        (tessera-mu4e-headers--moving t)
+        (tessera--month-navigation t))
     (tessera--navigation-call
      buffer function arguments
      (lambda (_result)
-       (not (eql before
-                 (tessera-mu4e-headers--docid buffer))))
+       (and (not (eql before
+                      (tessera-mu4e-headers--docid buffer)))
+            (tessera-mu4e-headers--visible-target-p buffer)))
      #'tessera-mu4e-headers--position-after-move)))
+
+(defun tessera-mu4e-headers--goto-message-id
+    (function &rest arguments)
+  "Run message-id FUNCTION with ARGUMENTS atomically.
+An explicit target remains reachable inside a folded month."
+  (let ((buffer (mu4e-get-headers-buffer)))
+    (if (or tessera-mu4e-headers--moving
+            (not (buffer-live-p buffer))
+            (not (buffer-local-value
+                  'tessera-mu4e-headers--active buffer)))
+        (apply function arguments)
+      (let ((tessera-mu4e-headers--moving t)
+            (tessera--month-navigation nil))
+        (tessera--navigation-call
+         buffer function arguments #'numberp
+         #'tessera-mu4e-headers--moved)))))
+
+(defun tessera-mu4e-headers--move-unread (function &rest arguments)
+  "Run unread navigation FUNCTION with ARGUMENTS across open months."
+  (let ((tessera--month-navigation t))
+    (tessera-mu4e-headers--moved (apply function arguments))))
 
 (defun tessera-mu4e-headers--move-to-identity
     (function &rest arguments)
@@ -1185,6 +1364,23 @@ only when the associated headers buffer has an active adapter."
           (funcall select-function)
           (funcall view-function))))))
 
+(defun tessera-mu4e-headers--find-if
+    (function predicate &optional backward)
+  "Call native search FUNCTION with a month-visible PREDICATE.
+BACKWARD retains the native search direction.  Filter only while
+running sequential navigation, not during explicit record lookup."
+  (if (not (and tessera-mu4e-headers--active
+                tessera--month-enabled
+                tessera--month-navigation))
+      (funcall function predicate backward)
+    (funcall
+     function
+     (lambda (message)
+       (and (tessera-month-entry-visible-p
+             (line-beginning-position))
+            (funcall predicate message)))
+     backward)))
+
 (defun tessera-mu4e-headers--update (function &rest arguments)
   "Preserve a layout anchor across native FUNCTION with ARGUMENTS.
 Native updates replace rows and restore a column.  Follow the old
@@ -1216,12 +1412,17 @@ message only while it remains selected after the native update."
                   #'tessera-mu4e-headers--move)
     (advice-remove 'mu4e~headers-move
                    #'tessera-mu4e-headers--move))
-  (dolist (function '(mu4e~headers-prev-or-next-unread
-                      mu4e-headers-goto-message-id))
+  (dolist (function '(mu4e~headers-prev-or-next-unread))
     (if enable
-        (advice-add function :filter-return
-                    #'tessera-mu4e-headers--moved)
-      (advice-remove function #'tessera-mu4e-headers--moved)))
+        (advice-add function :around
+                    #'tessera-mu4e-headers--move-unread)
+      (advice-remove function
+                     #'tessera-mu4e-headers--move-unread)))
+  (if enable
+      (advice-add 'mu4e-headers-goto-message-id :around
+                  #'tessera-mu4e-headers--goto-message-id)
+    (advice-remove 'mu4e-headers-goto-message-id
+                   #'tessera-mu4e-headers--goto-message-id))
   (dolist (function '(mu4e-headers-prev-thread
                       mu4e-headers-next-thread))
     (if enable
@@ -1252,10 +1453,14 @@ message only while it remains selected after the native update."
        function #'tessera-mu4e-headers--fold-move-to-identity)))
   (if enable
       (progn
+        (advice-add 'mu4e-headers-find-if :around
+                    #'tessera-mu4e-headers--find-if)
         (advice-add 'mu4e~headers-update-handler :around
                     #'tessera-mu4e-headers--update)
         (add-hook 'mu4e-headers-found-hook
                   #'tessera-mu4e-headers--position-point t))
+    (advice-remove 'mu4e-headers-find-if
+                   #'tessera-mu4e-headers--find-if)
     (advice-remove 'mu4e~headers-update-handler
                    #'tessera-mu4e-headers--update)
     (remove-hook 'mu4e-headers-found-hook
@@ -1276,6 +1481,7 @@ message only while it remains selected after the native update."
                #'tessera-mu4e-headers--refresh t)
   (remove-hook 'change-major-mode-hook
                #'tessera-mu4e-headers--disable t)
+  (tessera-month-clear)
   (let ((native-hl-line tessera-mu4e-headers--saved-hl-line)
         error-data)
     (unwind-protect
@@ -1321,6 +1527,10 @@ message only while it remains selected after the native update."
             ;; Native line highlighting also covers virtual headings.
             (hl-line-mode -1)
             (setq-local tessera-entry-layout 'two-line)
+            (setq-local tessera--month-enabled
+                        (tessera-mu4e-headers--month-enabled-p))
+            (setq-local tessera--month-thread-date
+                        (tessera-mu4e-headers--month-thread-date))
             ;; Mu4e skips folded messages itself.  Its logical line
             ;; motion must not stop at visual padding newlines.
             (setq-local line-move-ignore-invisible nil)
@@ -1354,9 +1564,19 @@ message only while it remains selected after the native update."
 Nil means explicitly refresh all glyphs and their hover faces."
   (when (or (null option)
             (memq option '(tessera-mu4e-headers-glyphs
+                           tessera-month-glyphs
                            tessera-thread-glyphs
                            tessera-entry-ellipsis
                            tessera-glyph-style tessera-glyph-color)))
+    (tessera-mu4e-headers--months-changed nil)))
+
+(defun tessera-mu4e-headers--months-changed (option)
+  "Refresh active mu4e views affected by month OPTION.
+Nil requests a full refresh, including glyphs and sorting."
+  (when (or (null option)
+            (memq option '(tessera-month-grouping
+                           tessera-mu4e-headers-month-grouping
+                           tessera-mu4e-headers-month-thread-date)))
     (when (gethash 'mu4e-headers tessera--entry-backends)
       (tessera-mu4e-headers--register))
     (save-window-excursion

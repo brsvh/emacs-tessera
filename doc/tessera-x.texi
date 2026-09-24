@@ -7,7 +7,7 @@
 @set txicodequoteundirected
 @set txicodequotebacktick
 @documentlanguage en
-@set VERSION 0.1.0
+@set VERSION 0.1.1
 @syncodeindex vr fn
 @syncodeindex tp fn
 
@@ -411,7 +411,8 @@ user error in unsupported buffers or on a Tree line without a filter.
 currently displayed rows.  Its ordinary filter parser and matcher
 preserve restrictions such as tags and result limits.  The filter is
 not rewritten.  A Tree line's displayed label alone does not specify a
-filter.
+filter.  Entries with missing or invalid dates are excluded without
+changing their stored dates.
 
 @cindex local day boundaries
   Gnus and Elfeed include local midnight and exclude the following
@@ -585,9 +586,10 @@ budgets are applied when the snapshot is rendered.
 @cindex provenance
   A snapshot begins with the application name, creation time, scope,
 and item count.  Each numbered item has a full subject or title and a
-date, followed by available metadata and body text.  Unknown dates are
-identified as such.  Ordinary metadata fields occupy separate lines;
-body text retains its line breaks.
+date, followed by available metadata and body text.  Missing or invalid
+dates appear as @samp{unknown}, including mu4e's no-date marker.  Valid
+dates at the Unix epoch remain dates.  Ordinary metadata fields occupy
+separate lines; body text retains its line breaks.
 
 @table @asis
 @item Mail and news
@@ -1076,6 +1078,14 @@ snapshot, capture the budgets and time, and arrange cancellation when
 the source is killed or changes major mode.
 @end defun
 
+  The new request becomes current before the previous request's cleanup
+functions run.  If cleanup cancels or replaces it, kills the source, or
+changes the source's major mode, startup signals @code{user-error}
+instead of returning an obsolete request.  Any replacement remains
+intact.  Cleanup that merely changes the current buffer does not change
+the new request's source.  A normal return always supplies a pending,
+current request; allocate its resources only after that return.
+
 @defun tessera-x-context-pending-p context
 Return non-@code{nil} only if @var{context} has state @code{pending},
 its source buffer is live, and it is still that source's pending
@@ -1088,18 +1098,30 @@ the work is no longer current.
 
 @defun tessera-x-context-finish context
 Publish @var{context} if it is still pending and current, and return
-@var{context}.  Render its text into a new read-only buffer, set its
-state to @code{ready}, release registered resources, update the source
-reference, and invoke the ready hook.  A stale or finished context is
-returned without being published again.
+@var{context}.  Render its text into a new read-only buffer and release
+registered resources.  If the request is still pending and current,
+set its state to @code{ready}, update the source reference, and invoke
+the ready hook.  A stale or finished context is returned without being
+published again.
 @end defun
 
-  An error during rendering kills the incomplete result buffer and
-fails the request.  Quitting during rendering kills that buffer and
-cancels the request instead.  Both conditions are signalled to the
-caller.  A producer should handle errors from its own retrieval and
-completion path.  Completion itself does not select a window or move
-the source's point or region.
+  Mode hooks and cleanup functions can cancel or replace the request
+during completion.  In that case, completion leaves any replacement
+request intact, does not invoke the old request's ready hook, and
+attempts to kill its unpublished result buffer.
+
+  If a mode hook or cleanup function kills the result buffer while the
+request remains current, completion fails the request and signals an
+error.  It retains the previous successful snapshot and does not invoke
+the ready hook.
+
+  An error during rendering fails the request; quitting cancels it.
+Both paths attempt to kill the incomplete result buffer and release
+registered resources.  A buffer cleanup error or quit does not prevent
+request finalization or replace the original condition, which is
+signalled to the caller.  A producer should handle errors from its own
+retrieval and completion path.  Completion itself does not select a
+window or move the source's point or region.
 
 @cindex resource cleanup
 @defun tessera-x-context-fail context error-data
@@ -1112,9 +1134,15 @@ the previous successful snapshot.  Ignore obsolete requests.
   Register cleanup functions in @code{tessera-x-context-cleanup} as soon
 as resources exist.  They take no arguments and must not assume that the
 current buffer is the source.  Cleanup runs on success, failure, and
-cancellation.  Its list is cleared before invocation, and an error in
-one cleanup function is reported while remaining cleanup functions are
-still attempted.
+cancellation.  Its list is cleared before invocation, and an error or
+quit in one cleanup function is reported while remaining cleanup
+functions are still attempted.  A cleanup function that owns several
+resources should likewise attempt to release each independently.
+
+  MIME extraction, result rendering, and the mu4e and Elfeed backends
+continue releasing other resources when one release fails.  They do not
+force a buffer to be killed if a buffer hook signals an error or quit,
+or a query function refuses the kill.
 
   A backend should distinguish an unreadable individual body from an
 unusable request.  Retain the item's metadata and a note for the former;

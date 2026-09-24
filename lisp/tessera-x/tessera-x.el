@@ -4,7 +4,7 @@
 
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
-;; Version: 0.1.0
+;; Version: 0.1.1
 ;; Package-Requires: ((emacs "30.1") (tessera "0.1.0"))
 ;; Keywords: convenience, mail, news
 ;; URL: https://github.com/brsvh/emacs-tessera
@@ -93,15 +93,21 @@ In a context buffer, this is the snapshot displayed there.")
 (defvar-local tessera-x--pending-context nil
   "Pending context snapshot request in this source buffer.")
 
+(defun tessera-x--cleanup-call (function &rest arguments)
+  "Call cleanup FUNCTION with ARGUMENTS without aborting cleanup.
+Report errors and quits so remaining resources can still be released."
+  (condition-case err
+      (apply function arguments)
+    ((error quit)
+     (message "Tessera cleanup: %s" (error-message-string err))
+     nil)))
+
 (defun tessera-x--context-cleanup (context)
   "Release outstanding resources belonging to CONTEXT."
   (let ((functions (tessera-x-context-cleanup context)))
     (setf (tessera-x-context-cleanup context) nil)
     (dolist (function functions)
-      (condition-case err
-          (funcall function)
-        (error (message "Tessera cleanup: %s"
-                        (error-message-string err)))))))
+      (tessera-x--cleanup-call function))))
 
 (defun tessera-x-context-pending-p (context)
   "Return non-nil if CONTEXT is still its live source's request."
@@ -124,21 +130,32 @@ In a context buffer, this is the snapshot displayed there.")
 (defun tessera-x-context-start (backend scope items)
   "Start a BACKEND request for SCOPE with snapshotted ITEMS.
 Cancel the source's previous pending request, but retain its last
-successful snapshot.  Return the new `tessera-x-context'."
-  (tessera-x-cancel-context)
-  (setq tessera-x--pending-context
-        (make-tessera-x-context
-         :backend backend
-         :source (current-buffer)
-         :scope scope
-         :items items
-         :created (current-time)
-         :max-characters tessera-x-context-max-characters
-         :body-max-characters tessera-x-context-body-max-characters))
-  (add-hook 'kill-buffer-hook #'tessera-x-cancel-context nil t)
-  (add-hook 'change-major-mode-hook
-            #'tessera-x-cancel-context nil t)
-  tessera-x--pending-context)
+successful snapshot.  Return the new pending `tessera-x-context'.
+Signal a `user-error' if cleanup cancels or supersedes this request."
+  (let ((previous tessera-x--pending-context)
+        (context
+         (make-tessera-x-context
+          :backend backend
+          :source (current-buffer)
+          :scope scope
+          :items items
+          :created (current-time)
+          :max-characters tessera-x-context-max-characters
+          :body-max-characters
+          tessera-x-context-body-max-characters)))
+    ;; Cleanup can cancel this request or start a newer one.
+    (setq tessera-x--pending-context context)
+    (add-hook 'kill-buffer-hook #'tessera-x-cancel-context nil t)
+    (add-hook 'change-major-mode-hook
+              #'tessera-x-cancel-context nil t)
+    (when previous
+      (setf (tessera-x-context-state previous) 'cancelled)
+      (save-current-buffer
+        (tessera-x--context-cleanup previous)))
+    (unless (tessera-x-context-pending-p context)
+      (user-error
+       "Context request cancelled or superseded at startup"))
+    context))
 
 (defun tessera-x-context-fail (context error-data)
   "Fail CONTEXT with ERROR-DATA without replacing a ready snapshot."
@@ -162,9 +179,9 @@ successful snapshot.  Return the new `tessera-x-context'."
    (format "\n--- Item %d ---\nSubject: %s\nDate: %s\n"
            index
            (tessera-x--context-field (tessera-x-item-subject item))
-           (if-let* ((date (tessera-x-item-date item)))
-               (format-time-string "%FT%T%z" date)
-             "unknown"))
+           (or (when-let* ((date (tessera-x-item-date item)))
+                 (ignore-errors (format-time-string "%FT%T%z" date)))
+               "unknown"))
    (when (tessera-x-item-group item)
      (format "Group: %s\n"
              (tessera-x--context-field (tessera-x-item-group item))))
@@ -236,40 +253,59 @@ successful snapshot.  Return the new `tessera-x-context'."
 (defun tessera-x-context-finish (context)
   "Publish CONTEXT if current, calling the ready hook once.
 Return CONTEXT.  Preserve source point, mark and region activation.
+Fail a current request if its result buffer dies before publication.
 Hook functions remain responsible for their own window changes."
   (when (tessera-x-context-pending-p context)
     (let ((buffer (generate-new-buffer
                    (format " *Tessera %s Context*"
                            (tessera-x--context-backend-name
-                            context)))))
-      (condition-case err
-          (with-current-buffer buffer
-            (tessera-x--context-render context)
-            (goto-char (point-min))
-            (special-mode)
-            (setq-local tessera-x-current-context context)
-            (set-buffer-modified-p nil))
-        ((error quit)
-         (kill-buffer buffer)
-         (if (eq (car err) 'quit)
-             (when (tessera-x-context-pending-p context)
-               (with-current-buffer (tessera-x-context-source context)
-                 (tessera-x-cancel-context)))
-           (tessera-x-context-fail
-            context (error-message-string err)))
-         (signal (car err) (cdr err))))
-      (setf (tessera-x-context-buffer context) buffer
-            (tessera-x-context-state context) 'ready)
-      (tessera-x--context-cleanup context)
-      (with-current-buffer (tessera-x-context-source context)
-        (setq tessera-x--pending-context nil
-              tessera-x-current-context context)
-        (save-mark-and-excursion
-          (condition-case err
-              (run-hook-with-args
-               'tessera-x-context-ready-hook context)
-            (error (message "Tessera context hook: %s"
-                            (error-message-string err))))))))
+                            context))))
+          published)
+      (unwind-protect
+          (progn
+            (condition-case err
+                (progn
+                  (with-current-buffer buffer
+                    (tessera-x--context-render context)
+                    (goto-char (point-min))
+                    (special-mode))
+                  ;; Hooks can cancel the request or kill its result.
+                  (when (tessera-x-context-pending-p context)
+                    (unless (buffer-live-p buffer)
+                      (error "Context result buffer was killed"))
+                    (with-current-buffer buffer
+                      (setq-local tessera-x-current-context context)
+                      (set-buffer-modified-p nil))
+                    (tessera-x--context-cleanup context)
+                    (when (and (tessera-x-context-pending-p context)
+                               (not (buffer-live-p buffer)))
+                      (error "Context result buffer was killed"))))
+              ((error quit)
+               (if (eq (car err) 'quit)
+                   (when (tessera-x-context-pending-p context)
+                     (with-current-buffer
+                         (tessera-x-context-source context)
+                       (tessera-x-cancel-context)))
+                 (tessera-x-context-fail
+                  context (error-message-string err)))
+               (signal (car err) (cdr err))))
+            ;; Cleanup can replace or cancel an otherwise live result.
+            (when (tessera-x-context-pending-p context)
+              (with-current-buffer (tessera-x-context-source context)
+                (setf (tessera-x-context-buffer context) buffer
+                      (tessera-x-context-state context) 'ready)
+                (setq tessera-x--pending-context nil
+                      tessera-x-current-context context
+                      published t)
+                (save-mark-and-excursion
+                  (condition-case err
+                      (run-hook-with-args
+                       'tessera-x-context-ready-hook context)
+                    (error
+                     (message "Tessera context hook: %s"
+                              (error-message-string err))))))))
+        (unless published
+          (tessera-x--cleanup-call #'kill-buffer buffer)))))
   context)
 
 ;;;###autoload
@@ -467,11 +503,10 @@ On failure retain metadata and record an explicit content note."
                   (when (string-empty-p (or body ""))
                     (setf (tessera-x-item-note item)
                           "No extractable text body"))))
-            (unwind-protect
-                (mm-destroy-parts handle)
-              (dolist (buffer tessera-x--mime-buffers)
-                (when (buffer-live-p buffer)
-                  (kill-buffer buffer)))))))
+            (tessera-x--cleanup-call #'mm-destroy-parts handle)
+            (dolist (buffer tessera-x--mime-buffers)
+              (when (buffer-live-p buffer)
+                (tessera-x--cleanup-call #'kill-buffer buffer))))))
     (error (setf (tessera-x-item-note item)
                  (error-message-string err))))
   item)

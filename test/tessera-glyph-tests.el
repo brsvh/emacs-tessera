@@ -285,6 +285,90 @@
     (should (equal clipped "."))
     (should (= (tessera-entry-point clipped) 0))))
 
+(ert-deftest tessera-month-refresh-is-scoped-and-coalesced ()
+  (let ((tessera--glyph-change-functions
+         '(tessera-gnus-summary--glyphs-changed
+           tessera-mu4e-headers--glyphs-changed
+           tessera-elfeed-search--glyphs-changed))
+        (tessera--month-change-functions
+         '(tessera-gnus-summary--months-changed
+           tessera-mu4e-headers--months-changed
+           tessera-elfeed-search--months-changed))
+        (tessera-month-glyphs nil)
+        (tessera-elfeed-search-month-grouping 'inherit)
+        buffers visited)
+    (unwind-protect
+        (progn
+          (pcase-dolist
+              (`(,mode ,active)
+               '((gnus-summary-mode tessera-gnus-summary--active)
+                 (mu4e-headers-mode tessera-mu4e-headers--active)
+                 (elfeed-search-mode tessera-elfeed-search--active)))
+            (let ((buffer (generate-new-buffer " *month-refresh*")))
+              (push buffer buffers)
+              (with-current-buffer buffer
+                (setq major-mode mode)
+                (set (make-local-variable active) t))))
+          (cl-letf
+              (((symbol-function 'buffer-list)
+                (lambda (&rest _) buffers))
+               ((symbol-function 'tessera-gnus-summary--sync-buffer)
+                (lambda (&rest _) (push major-mode visited)))
+               ((symbol-function 'tessera-mu4e-headers--refresh)
+                (lambda (&rest _) (push major-mode visited)))
+               ((symbol-function 'tessera-elfeed-search--refresh)
+                (lambda (&rest _) (push major-mode visited))))
+            (dolist (refresh
+                     (list #'tessera-refresh-glyphs
+                           (lambda ()
+                             (tessera--set-month-glyphs
+                              'tessera-month-glyphs nil))))
+              (setq visited nil)
+              (funcall refresh)
+              (should (= (length visited) 3))
+              (should (= (length (delete-dups visited)) 3)))
+            (setq visited nil)
+            (tessera--set-month-option
+             'tessera-elfeed-search-month-grouping nil)
+            (should (equal visited '(elfeed-search-mode)))
+            (setq visited nil)
+            (tessera--run-month-change-functions
+             'tessera-month-thread-date)
+            (should (equal visited '(gnus-summary-mode)))))
+      (mapc #'kill-buffer buffers))))
+
+(ert-deftest tessera-month-refresh-continues-after-buffer-error ()
+  (pcase-dolist
+      (`(,mode ,active ,callback ,refresh)
+       '((gnus-summary-mode tessera-gnus-summary--active
+                            tessera-gnus-summary--months-changed
+                            tessera-gnus-summary--sync-buffer)
+         (mu4e-headers-mode tessera-mu4e-headers--active
+                            tessera-mu4e-headers--months-changed
+                            tessera-mu4e-headers--refresh)
+         (elfeed-search-mode tessera-elfeed-search--active
+                             tessera-elfeed-search--months-changed
+                             tessera-elfeed-search--refresh)))
+    (let ((buffers (list (generate-new-buffer " *month-error*")
+                         (generate-new-buffer " *month-success*")))
+          visited)
+      (unwind-protect
+          (progn
+            (dolist (buffer buffers)
+              (with-current-buffer buffer
+                (setq major-mode mode)
+                (set (make-local-variable active) t)))
+            (cl-letf (((symbol-function 'buffer-list)
+                       (lambda (&rest _) buffers))
+                      ((symbol-function refresh)
+                       (lambda (&rest _)
+                         (push (current-buffer) visited)
+                         (when (eq (current-buffer) (car buffers))
+                           (error "Refresh failed")))))
+              (should-error (funcall callback nil)))
+            (should (equal (nreverse visited) buffers)))
+        (mapc #'kill-buffer buffers)))))
+
 (ert-deftest tessera-glyph-callbacks-follow-mode-lifecycle ()
   (let ((tessera--glyph-change-functions nil)
         (tessera-gnus-mode nil)

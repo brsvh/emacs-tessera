@@ -3,8 +3,77 @@ Tessera NEWS -- history of user-visible changes.
 Copyright (C) 2026 Bingshan Chang.
 See the end of the file for license conditions.
 
-This file describes the initial 0.1.0 release of Tessera and Tessera X.
+This file describes releases of Tessera and Tessera X.
 See the Tessera and Tessera X manuals for configuration and Lisp interfaces.
+
+* Changes in Tessera 0.1.1
+
+** Interactive month groups in entry views.
+Gnus Summary, mu4e Headers, and Elfeed Search entries are grouped beneath
+month headings without copying or replacing native records.  Gnus temporarily
+uses matching native date sorting while grouping is active; the prior sorting
+and its buffer locality are restored when grouping is disabled.  Groups start
+expanded and can be folded with mouse button 1.  A folded heading shows read
+and unread record counts using the backend's configured status glyphs.
+
+Native next and previous commands skip folded groups.  Commands that select a
+hidden record reveal its group, as does Isearch.  The global thread-date
+policy defaults to the latest reply.  Gnus can inherit or override that
+policy.  Mu4e uses the latest reply; its 'inherit' setting falls back to
+'latest' when the global policy is 'root'.  Native thread folding does not
+change month assignment.
+
+Missing or invalid dates remain in native order and receive a warning
+background and inline warning glyph.  Fold state survives refreshes while
+the buffer lives.  Global and per-backend options control month grouping,
+spacing, faces, glyphs, title formatting, and thread date policy.
+
+Elfeed retains explicitly customized native date separators.  Its native
+default separator is hidden only while month grouping is active.
+
+Month headings adapt independently to each window's width and account for
+buffer-local font scaling.  Folding reuses the current groups, and Elfeed
+navigation uses their cached entry positions.
+Gnus and Elfeed batch month updates when a command changes several records.
+Changing month title formatting or spacing redraws only the headings.
+In narrowed buffers, folding keeps point within the accessible region and
+leaves at least one accessible month expanded.
+
+** Lower memory use when updating deep threads.
+Gnus and mu4e share current thread paths across unchanged rows instead of
+retaining earlier paths after successive message updates.
+
+** Shared spacing option names.
+'tessera-entry-safe-gap' is now 'tessera-safe-gap', and
+'tessera-entry-flex-gap-min-width' is now 'tessera-flex-gap-min-width'.
+Entries and month headings share these settings.  Because Tessera is still
+below version 1.0, the old names are not retained as compatibility aliases.
+
+* Changes in Tessera X 0.1.1
+
+** Experimental context requests preserve newer work during completion.
+A request cancelled or replaced by a mode hook or cleanup function no longer
+publishes a stale result or invokes its ready hook.  Replacement requests and
+previous successful snapshots remain available.  If the result buffer is
+killed before publication while its request is still current, completion
+fails instead of publishing a dead buffer.
+
+For Lisp producers, 'tessera-x-context-start' now signals a user error if
+cleanup cancels or supersedes the new request during startup.  A normal return
+always supplies the source buffer's current pending request.
+
+** Resource cleanup continues after errors and quits.
+A cleanup error or quit no longer prevents attempts to release remaining
+timers, subprocesses, and temporary buffers.  This applies to MIME extraction,
+snapshot completion, mu index queries, and Elfeed linked-page retrieval.
+Quitting during linked-page response processing cancels the pending request
+and retains the previous successful snapshot.
+
+** Missing and invalid dates no longer prevent snapshot preparation.
+Snapshots display 'unknown' for unusable dates, including mu4e's no-date
+marker, while preserving valid Unix epoch dates.  Elfeed's today command skips
+entries without a usable timestamp instead of failing or changing their
+stored dates.
 
 * Changes in Tessera 0.1.0
 

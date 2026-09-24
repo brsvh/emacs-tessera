@@ -115,7 +115,7 @@ Nil means fetch every selected HTTP link when fetching is enabled."
           (make-tessera-x-item
            :id (copy-tree (elfeed-entry-id entry))
            :subject (elfeed-entry-title entry)
-           :date (seconds-to-time (elfeed-entry-date entry))
+           :date (elfeed-entry-date entry)
            :group (elfeed-feed-title feed)
            :data (elfeed-entry-link entry)
            :metadata
@@ -152,10 +152,12 @@ Nil means fetch every selected HTTP link when fetching is enabled."
 (defun tessera-x-elfeed--stop-fetch (fetch)
   "Release FETCH's timer, response buffers and redirected transfers."
   (when (timerp (tessera-x-elfeed--fetch-timer fetch))
-    (cancel-timer (tessera-x-elfeed--fetch-timer fetch)))
+    (tessera-x--cleanup-call
+     #'cancel-timer (tessera-x-elfeed--fetch-timer fetch)))
   ;; URL may collect earlier redirect buffers before the response.
   ;; Callback arguments retain ownership even when that chain breaks.
-  (let ((buffers (list (tessera-x-elfeed--fetch-buffer fetch))))
+  (let ((buffers (list (tessera-x-elfeed--fetch-buffer fetch)))
+        (seen (make-hash-table :test #'eq)))
     (dolist (buffer (buffer-list))
       (when (and (local-variable-p 'url-callback-arguments buffer)
                  (eq (buffer-local-value
@@ -166,11 +168,12 @@ Nil means fetch every selected HTTP link when fetching is enabled."
                      fetch))
         (push buffer buffers)))
     (dolist (buffer buffers)
-      (while (buffer-live-p buffer)
+      (while (and (buffer-live-p buffer) (not (gethash buffer seen)))
+        (puthash buffer t seen)
         (let ((next (buffer-local-value 'url-redirect-buffer buffer)))
           (when-let* ((process (get-buffer-process buffer)))
-            (delete-process process))
-          (kill-buffer buffer)
+            (tessera-x--cleanup-call #'delete-process process))
+          (tessera-x--cleanup-call #'kill-buffer buffer)
           (setq buffer next)))))
   (setf (tessera-x-elfeed--fetch-timer fetch) nil
         (tessera-x-elfeed--fetch-buffer fetch) nil))
@@ -180,7 +183,7 @@ Nil means fetch every selected HTTP link when fetching is enabled."
   (setf (tessera-x-elfeed--request-queue request) nil)
   (dolist (fetch (tessera-x-elfeed--request-active request))
     (setf (tessera-x-elfeed--fetch-done fetch) t)
-    (tessera-x-elfeed--stop-fetch fetch))
+    (tessera-x--cleanup-call #'tessera-x-elfeed--stop-fetch fetch))
   (setf (tessera-x-elfeed--request-active request) nil))
 
 (defun tessera-x-elfeed--complete (fetch text note)
@@ -192,7 +195,7 @@ Nil means fetch every selected HTTP link when fetching is enabled."
            (item (tessera-x-elfeed--fetch-item fetch)))
       (setf (tessera-x-elfeed--request-active request)
             (delq fetch (tessera-x-elfeed--request-active request)))
-      (tessera-x-elfeed--stop-fetch fetch)
+      (tessera-x--cleanup-call #'tessera-x-elfeed--stop-fetch fetch)
       (when (tessera-x-context-pending-p context)
         (if (and text (not (string-empty-p text)))
             (setf (tessera-x-item-body item) text
@@ -297,6 +300,13 @@ Inspect HTML metadata only within the first 1024 body bytes."
                        (string-trim text)
                      (tessera-x-html-text text))
              "Empty linked page")))
+      (quit
+       (let ((context (tessera-x-elfeed--request-context
+                       (tessera-x-elfeed--fetch-request fetch))))
+         (when (tessera-x-context-pending-p context)
+           (with-current-buffer (tessera-x-context-source context)
+             (tessera-x-cancel-context))))
+       (signal (car err) (cdr err)))
       (error (tessera-x-elfeed--complete
               fetch nil (error-message-string err))))))
 
@@ -419,14 +429,18 @@ Never fetch linked pages.  In Tree, use the native filter at point."
        (lambda (id)
          (let* ((entry (elfeed-db-get-entry id))
                 (date (elfeed-entry-date entry)))
-           (when (< date start)
-             (throw 'elfeed-db-done nil))
-           (when (and (< date end)
-                      (funcall
-                       filter entry (elfeed-entry-feed entry)
-                       count now))
-             (cl-incf count)
-             (push entry entries))))
+           ;; Only finite numeric timestamps can belong to today.
+           (when (and (numberp date)
+                      (or (integerp date)
+                          (not (isnan (- date date)))))
+             (when (< date start)
+               (throw 'elfeed-db-done nil))
+             (when (and (< date end)
+                        (funcall
+                         filter entry (elfeed-entry-feed entry)
+                         count now))
+               (cl-incf count)
+               (push entry entries)))))
        elfeed-db-index))
     (tessera-x-elfeed--build-context
      entries (format "Today, local feed database; filter: %s" scope)

@@ -109,6 +109,47 @@
                      'tessera-x-current-context buffer))
            (kill-buffer buffer))))))
 
+(ert-deftest tessera-x-native-dates-preserve-unknown-and-epoch ()
+  (tessera-x-tests--with-snapshots
+    (let ((elfeed-db '(:version 4))
+          (elfeed-db-feeds (make-hash-table :test #'equal))
+          (tessera-x-context-ready-hook nil))
+      (puthash "test-feed"
+               (elfeed-feed--create :id "test-feed" :title "Feed")
+               elfeed-db-feeds)
+      (dolist (backend '(mu4e elfeed))
+        (dolist (date '(nil invalid 0 (0 0) (0 0 0) (27000 0)))
+          (let* ((message (list :docid 1 :date date))
+                 (entry (elfeed-entry--create
+                         :id '("test-feed" . "entry")
+                         :feed-id "test-feed"
+                         :date date
+                         :content "Stored body"))
+                 (item (if (eq backend 'mu4e)
+                           (tessera-x-mu4e--item message)
+                         (tessera-x-elfeed--item entry)))
+                 (unknown
+                  (or (memq date '(nil invalid))
+                      (and (eq backend 'mu4e)
+                           (equal date '(0 0 0))))))
+            (with-temp-buffer
+              (let ((context (tessera-x-context-start
+                              backend "Date test" (list item))))
+                (tessera-x-context-finish context)
+                (should (eq (tessera-x-context-state context) 'ready))
+                (with-current-buffer
+                    (tessera-x-context-buffer context)
+                  (goto-char (point-min))
+                  (should
+                   (search-forward
+                    (concat "\nDate: "
+                            (if unknown "unknown"
+                              (format-time-string "%FT%T%z" date))
+                            "\n")
+                    nil t)))))
+            (should (equal (plist-get message :date) date))
+            (should (equal (elfeed-entry-date entry) date))))))))
+
 (ert-deftest tessera-x-snapshots-isolate-sources-and-pending-work ()
   (tessera-x-tests--with-snapshots
     (let ((other (generate-new-buffer " *Other context source*"))
@@ -145,6 +186,242 @@
                 (should (buffer-live-p
                          (tessera-x-context-buffer first))))))
         (kill-buffer other)))))
+
+(ert-deftest tessera-x-startup-rechecks-request-ownership ()
+  (tessera-x-tests--with-snapshots
+    (dolist (action '(cancel replace replace-ready close mode))
+      (ert-info ((format "Startup action: %s" action))
+        (let ((source (generate-new-buffer " *Context source*"))
+              starting replacement timer
+              (old-cleanups 0)
+              (new-cleanups 0))
+          (unwind-protect
+              (with-current-buffer source
+                (let* ((previous
+                        (tessera-x-context-start 'test "Ready" nil))
+                       (_ready (tessera-x-context-finish previous))
+                       (old
+                        (tessera-x-context-start 'test "Old" nil)))
+                  (push
+                   (lambda ()
+                     (cl-incf old-cleanups)
+                     (setq starting tessera-x--pending-context)
+                     (pcase action
+                       ('cancel (tessera-x-cancel-context))
+                       ('close (kill-buffer source))
+                       ('mode (fundamental-mode))
+                       (_
+                        (setq replacement
+                              (tessera-x-context-start
+                               'test "Replacement" nil)
+                              timer (run-at-time 600 nil #'ignore))
+                        (push (lambda ()
+                                (cl-incf new-cleanups)
+                                (cancel-timer timer))
+                              (tessera-x-context-cleanup replacement))
+                        (when (eq action 'replace-ready)
+                          (tessera-x-context-finish replacement)))))
+                   (tessera-x-context-cleanup old))
+                  (should-error
+                   (tessera-x-context-start 'test "Next" nil)
+                   :type 'user-error)
+                  (should (= old-cleanups 1))
+                  (should (eq (tessera-x-context-state old)
+                              'cancelled))
+                  (should (eq (tessera-x-context-state starting)
+                              'cancelled))
+                  (should-not (tessera-x-context-buffer starting))
+                  (when (buffer-live-p source)
+                    (should
+                     (eq tessera-x--pending-context
+                         (when (eq action 'replace) replacement)))
+                    (unless (eq action 'mode)
+                      (should
+                       (eq tessera-x-current-context
+                           (if (eq action 'replace-ready)
+                               replacement previous)))))
+                  (when (eq action 'replace)
+                    (should
+                     (tessera-x-context-pending-p replacement))
+                    (should (memq timer timer-list))
+                    (tessera-x-cancel-context))
+                  (when replacement
+                    (should (= new-cleanups 1))
+                    (should-not (memq timer timer-list))
+                    (should-not
+                     (tessera-x-context-cleanup replacement)))))
+            (when timer (cancel-timer timer))
+            (when (buffer-live-p source) (kill-buffer source))))))))
+
+(ert-deftest tessera-x-startup-keeps-source-buffer ()
+  (let ((other (generate-new-buffer " *Other context source*")))
+    (unwind-protect
+        (with-temp-buffer
+          (let* ((source (current-buffer))
+                 (old (tessera-x-context-start 'test "Old" nil)))
+            (push (lambda () (set-buffer other))
+                  (tessera-x-context-cleanup old))
+            (let ((context
+                   (tessera-x-context-start 'test "Next" nil)))
+              (should (eq (current-buffer) source))
+              (should (eq (tessera-x-context-source context) source))
+              (should (tessera-x-context-pending-p context))
+              (should-not (buffer-local-value
+                           'tessera-x--pending-context other)))))
+      (kill-buffer other))))
+
+(ert-deftest tessera-x-completion-rechecks-request-ownership ()
+  (tessera-x-tests--with-snapshots
+    (dolist (phase '(mode cleanup))
+      (dolist (action '(cancel replace replace-ready close))
+        (ert-info ((format "Phase: %s, action: %s" phase action))
+          (let ((source (generate-new-buffer " *Context source*"))
+                rendered replacement calls
+                (cleanup-count 0))
+            (unwind-protect
+                (with-current-buffer source
+                  (let* ((previous
+                          (tessera-x-context-start 'test "Old" nil))
+                         (_ready (tessera-x-context-finish previous))
+                         (context
+                          (tessera-x-context-start 'test "Next" nil))
+                         (invalidate
+                          (lambda ()
+                            (with-current-buffer source
+                              (pcase action
+                                ('cancel (tessera-x-cancel-context))
+                                ('close (kill-buffer source))
+                                (_
+                                 (setq replacement
+                                       (tessera-x-context-start
+                                        'test "Replacement" nil))
+                                 (when (eq action 'replace-ready)
+                                   (tessera-x-context-finish
+                                    replacement)))))))
+                         (special-mode-hook
+                          (list
+                           (lambda ()
+                             (unless rendered
+                               (setq rendered (current-buffer))
+                               (when (eq phase 'mode)
+                                 (funcall invalidate))))))
+                         (tessera-x-context-ready-hook
+                          (list (lambda (ready) (push ready calls)))))
+                    (setf (tessera-x-context-cleanup context)
+                          (append
+                           (when (eq phase 'cleanup)
+                             (list invalidate))
+                           (list (lambda ()
+                                   (cl-incf cleanup-count)))))
+                    (tessera-x-context-finish context)
+                    (should (eq (tessera-x-context-state context)
+                                'cancelled))
+                    (should-not (tessera-x-context-buffer context))
+                    (should-not (buffer-live-p rendered))
+                    (should (= cleanup-count 1))
+                    (should (equal calls
+                                   (when (eq action 'replace-ready)
+                                     (list replacement))))
+                    (when (buffer-live-p source)
+                      (should
+                       (eq tessera-x--pending-context
+                           (when (eq action 'replace) replacement)))
+                      (should
+                       (eq tessera-x-current-context
+                           (if (eq action 'replace-ready)
+                               replacement previous))))
+                    (when (eq action 'replace)
+                      (should
+                       (tessera-x-context-pending-p replacement))
+                      (tessera-x-context-finish replacement)
+                      (should (eq tessera-x-current-context
+                                  replacement)))))
+              (when (buffer-live-p source)
+                (kill-buffer source)))))))))
+
+(ert-deftest tessera-x-completion-rejects-closed-result ()
+  (tessera-x-tests--with-snapshots
+    (dolist (phase '(mode cleanup))
+      (ert-info ((format "Result closed during: %s" phase))
+        (let ((other (generate-new-buffer " *Unrelated buffer*")))
+          (unwind-protect
+              (with-temp-buffer
+                (with-current-buffer other
+                  (setq-local tessera-x-current-context 'untouched)
+                  (insert "Unrelated modified text"))
+                (let* ((previous
+                        (tessera-x-context-start 'test "Old" nil))
+                       (_ready (tessera-x-context-finish previous))
+                       (context
+                        (tessera-x-context-start
+                         'test "Next"
+                         (list (tessera-x-tests--item "result"))))
+                       rendered calls
+                       (cleanup-count 0)
+                       (special-mode-hook
+                        (list
+                         (lambda ()
+                           (setq rendered (current-buffer))
+                           (when (eq phase 'mode)
+                             (kill-buffer rendered)
+                             (set-buffer other)))))
+                       (tessera-x-context-ready-hook
+                        (list (lambda (ready) (push ready calls)))))
+                  (push (lambda ()
+                          (cl-incf cleanup-count)
+                          (when (eq phase 'cleanup)
+                            (kill-buffer rendered)))
+                        (tessera-x-context-cleanup context))
+                  (should-error (tessera-x-context-finish context))
+                  (should (eq (tessera-x-context-state context)
+                              'failed))
+                  (should (string-match-p
+                           "result buffer"
+                           (tessera-x-context-error context)))
+                  (should-not tessera-x--pending-context)
+                  (should-not (tessera-x-context-buffer context))
+                  (should-not (tessera-x-context-cleanup context))
+                  (should-not (buffer-live-p rendered))
+                  (should (eq tessera-x-current-context previous))
+                  (should (buffer-live-p
+                           (tessera-x-context-buffer previous)))
+                  (with-current-buffer other
+                    (should (eq tessera-x-current-context 'untouched))
+                    (should (buffer-modified-p)))
+                  (should (eq (tessera-x-context-finish context)
+                              context))
+                  (should-not calls)
+                  (should (= cleanup-count 1))))
+            (when (buffer-live-p other) (kill-buffer other))))))))
+
+(ert-deftest tessera-x-cleanup-conditions-do-not-abort-finalization ()
+  (tessera-x-tests--with-snapshots
+    (dolist (condition '(error quit))
+      (dolist (state '(cancelled failed ready))
+        (with-temp-buffer
+          (let* ((previous (tessera-x-context-start 'test "Old" nil))
+                 (calls 0)
+                 (ready-calls 0))
+            (tessera-x-context-finish previous)
+            (let ((context (tessera-x-context-start 'test "Next" nil))
+                  (tessera-x-context-ready-hook
+                   (list (lambda (_) (cl-incf ready-calls)))))
+              (setf (tessera-x-context-cleanup context)
+                    (list (lambda () (signal condition nil))
+                          (lambda () (cl-incf calls))))
+              (pcase state
+                ('cancelled (tessera-x-cancel-context))
+                ('failed (tessera-x-context-fail context "Failed"))
+                ('ready (tessera-x-context-finish context)))
+              (should (eq (tessera-x-context-state context) state))
+              (should (= calls 1))
+              (should (= ready-calls (if (eq state 'ready) 1 0)))
+              (should-not tessera-x--pending-context)
+              (should-not (tessera-x-context-cleanup context))
+              (should (eq tessera-x-current-context
+                          (if (eq state 'ready) context previous)))
+              (tessera-x--context-cleanup context)
+              (should (= calls 1)))))))))
 
 (ert-deftest tessera-x-ready-hook-preserves-source-region ()
   (tessera-x-tests--with-snapshots
@@ -186,26 +463,51 @@
             rendered)
         (tessera-x-context-finish ready)
         (dolist (condition '(quit error))
-          (let ((pending (tessera-x-context-start 'test "next" nil)))
-            (push (lambda () (cl-incf cleanup-count))
-                  (tessera-x-context-cleanup pending))
-            (cl-letf (((symbol-function 'tessera-x--context-render)
-                       (lambda (_context)
-                         (setq rendered (current-buffer))
-                         (signal condition nil))))
-              (should
-               (eq (condition-case err
-                       (tessera-x-context-finish pending)
-                     ((error quit) (car err)))
-                   condition)))
-            (should-not (buffer-live-p rendered))
-            (should-not tessera-x--pending-context)
-            (should-not (tessera-x-context-buffer pending))
-            (should (eq (tessera-x-context-state pending)
-                        (if (eq condition 'quit) 'cancelled 'failed)))
-            (tessera-x-context-finish pending)
-            (should (eq tessera-x-current-context ready))))
-        (should (= cleanup-count 2))))))
+          (dolist (cleanup '(nil error quit refuse))
+            (let ((pending (tessera-x-context-start 'test "next" nil))
+                  (original (list condition "Rendering interrupted")))
+              (push (lambda () (cl-incf cleanup-count))
+                    (tessera-x-context-cleanup pending))
+              (unwind-protect
+                  (progn
+                    (cl-letf
+                        (((symbol-function 'tessera-x--context-render)
+                          (lambda (_context)
+                            (setq rendered (current-buffer))
+                            (pcase cleanup
+                              ('refuse
+                               (setq-local kill-buffer-query-functions
+                                           (list #'ignore)))
+                              ((or 'error 'quit)
+                               (add-hook
+                                'kill-buffer-hook
+                                (lambda () (signal cleanup nil))
+                                nil t)))
+                            (signal (car original) (cdr original)))))
+                      (should
+                       (equal
+                        (condition-case err
+                            (tessera-x-context-finish pending)
+                          ((error quit) err))
+                        original)))
+                    (should (eq (buffer-live-p rendered)
+                                (not (null cleanup))))
+                    (should-not tessera-x--pending-context)
+                    (should-not (tessera-x-context-cleanup pending))
+                    (should-not (tessera-x-context-buffer pending))
+                    (should
+                     (eq (tessera-x-context-state pending)
+                         (if (eq condition 'quit)
+                             'cancelled
+                           'failed)))
+                    (tessera-x-context-finish pending)
+                    (should (eq tessera-x-current-context ready)))
+                (when (buffer-live-p rendered)
+                  (with-current-buffer rendered
+                    (setq kill-buffer-hook nil
+                          kill-buffer-query-functions nil))
+                  (kill-buffer rendered))))))
+        (should (= cleanup-count 8))))))
 
 (ert-deftest tessera-x-backend-failures-release-requests ()
   (tessera-x-tests--with-snapshots
@@ -572,53 +874,73 @@
 
 (ert-deftest tessera-x-mime-failures-release-partial-buffers ()
   (dolist (condition '(nil error quit))
-    (let ((item (make-tessera-x-item :id "interrupted"))
-          (copy (symbol-function 'mm-copy-to-buffer))
-          (unrelated (generate-new-buffer " *mm*"))
-          (calls 0)
-          buffers)
-      (unwind-protect
-          (progn
-            (cl-letf (((symbol-function 'mm-copy-to-buffer)
-                       (lambda ()
-                         (let ((buffer (funcall copy)))
-                           (push buffer buffers)
-                           (when (and (= (cl-incf calls) 3) condition)
-                             (signal condition '("MIME interrupted")))
-                           buffer))))
+    (dolist (cleanup '(nil error quit refuse))
+      (let ((item (make-tessera-x-item :id "interrupted"))
+            (copy (symbol-function 'mm-copy-to-buffer))
+            (unrelated (generate-new-buffer " *mm*"))
+            (calls 0)
+            buffers)
+        (unwind-protect
+            (progn
+              (cl-letf (((symbol-function 'mm-copy-to-buffer)
+                         (lambda ()
+                           (let ((buffer (funcall copy)))
+                             (push buffer buffers)
+                             (when (= (cl-incf calls) 3)
+                               (with-current-buffer buffer
+                                 (pcase cleanup
+                                   ('refuse
+                                    (setq-local
+                                     kill-buffer-query-functions
+                                     (list #'ignore)))
+                                   ((or 'error 'quit)
+                                    (add-hook
+                                     'kill-buffer-hook
+                                     (lambda () (signal cleanup nil))
+                                     nil t))))
+                               (when condition
+                                 (signal condition
+                                         '("MIME interrupted"))))
+                             buffer))))
+                (should
+                 (eq (condition-case err
+                         (progn
+                           (tessera-x-read-message
+                            item
+                            (lambda ()
+                              (insert
+                               "From: Sender "
+                               "<sender@example.invalid>\n"
+                               "Content-Type: multipart/mixed;"
+                               " boundary=outer\n\n"
+                               "--outer\nContent-Type: text/plain\n\n"
+                               "First body\n"
+                               "--outer\nContent-Type: text/plain\n\n"
+                               "Second body\n--outer--\n")))
+                           nil)
+                       (quit (car err)))
+                     (and (eq condition 'quit) 'quit))))
+              (should (= (length buffers) 3))
+              (should (eq (buffer-live-p (car buffers))
+                          (not (null cleanup))))
+              (should-not (cl-some #'buffer-live-p (cdr buffers)))
+              (should (buffer-live-p unrelated))
               (should
-               (eq (condition-case err
-                       (progn
-                         (tessera-x-read-message
-                          item
-                          (lambda ()
-                            (insert
-                             "From: Sender <sender@example.invalid>\n"
-                             "Content-Type: multipart/mixed;"
-                             " boundary=outer\n\n"
-                             "--outer\nContent-Type: text/plain\n\n"
-                             "First body\n"
-                             "--outer\nContent-Type: text/plain\n\n"
-                             "Second body\n--outer--\n")))
-                         nil)
-                     (quit (car err)))
-                   (and (eq condition 'quit) 'quit))))
-            (should (= (length buffers) 3))
-            (should-not (cl-some #'buffer-live-p buffers))
-            (should (buffer-live-p unrelated))
-            (should
-             (equal
-              (cdr (assoc "From" (tessera-x-item-metadata item)))
-              "Sender <sender@example.invalid>"))
-            (when (eq condition 'error)
-              (should (string-match-p "MIME interrupted"
-                                      (tessera-x-item-note item))))
-            (unless condition
-              (should (equal (tessera-x-item-body item)
-                             "First body\n\nSecond body"))))
-        (dolist (buffer (cons unrelated buffers))
-          (when (buffer-live-p buffer)
-            (kill-buffer buffer)))))))
+               (equal
+                (cdr (assoc "From" (tessera-x-item-metadata item)))
+                "Sender <sender@example.invalid>"))
+              (when (eq condition 'error)
+                (should (string-match-p "MIME interrupted"
+                                        (tessera-x-item-note item))))
+              (unless condition
+                (should (equal (tessera-x-item-body item)
+                               "First body\n\nSecond body"))))
+          (dolist (buffer (cons unrelated buffers))
+            (when (buffer-live-p buffer)
+              (with-current-buffer buffer
+                (setq kill-buffer-hook nil
+                      kill-buffer-query-functions nil))
+              (kill-buffer buffer))))))))
 
 (ert-deftest tessera-x-multipart-attachments-stay-out-of-bodies ()
   (pcase-dolist
@@ -1037,7 +1359,14 @@
         (should (= calls 1))
         (should (string-match-p "HTTP timeout"
                                 (tessera-x-item-note item)))
-        (tessera-x-elfeed--complete fetch "late response" nil)
+        (let ((response (generate-new-buffer " *Late HTTP*")))
+          (unwind-protect
+              (progn
+                (with-current-buffer response
+                  (insert "Late response must not replace the body")
+                  (tessera-x-elfeed--response nil fetch))
+                (should-not (buffer-live-p response)))
+            (when (buffer-live-p response) (kill-buffer response))))
         (should (= calls 1))
         (should (= (length (tessera-x-item-body item)) 1000))))))
 
@@ -1096,6 +1425,64 @@
               (when (buffer-live-p buffer)
                 (kill-buffer buffer)))))))))
 
+(ert-deftest tessera-x-elfeed-cleanup-continues-after-buffer-hook ()
+  (tessera-x-tests--with-snapshots
+    (dolist (condition '(error quit))
+      (dolist (cancel '(nil t))
+        (with-temp-buffer
+          (let* ((context (tessera-x-context-start
+                           'elfeed "Test" nil))
+                 (request (make-tessera-x-elfeed--request
+                           :context context))
+                 (buffers (cl-loop repeat 2 collect
+                                   (generate-new-buffer " *HTTP*")))
+                 (processes
+                  (mapcar (lambda (buffer)
+                            (make-pipe-process
+                             :name "tessera-cleanup"
+                             :buffer buffer
+                             :noquery t)) buffers))
+                 (fetches
+                  (mapcar
+                   (lambda (buffer)
+                     (make-tessera-x-elfeed--fetch
+                      :request request
+                      :item (tessera-x-tests--item "feed")
+                      :buffer buffer
+                      :timer (run-at-time 60 nil #'ignore))) buffers))
+                 (timers (mapcar #'tessera-x-elfeed--fetch-timer
+                                 fetches)))
+            (unwind-protect
+                (progn
+                  (with-current-buffer (car buffers)
+                    (add-hook 'kill-buffer-hook
+                              (lambda () (signal condition nil))
+                              nil t))
+                  (setf (tessera-x-elfeed--request-active request)
+                        fetches)
+                  (push (apply-partially
+                         #'tessera-x-elfeed--cancel request)
+                        (tessera-x-context-cleanup context))
+                  (if cancel
+                      (tessera-x-cancel-context)
+                    (mapc #'tessera-x-elfeed--timeout fetches))
+                  (should (eq (tessera-x-context-state context)
+                              (if cancel 'cancelled 'ready)))
+                  (should-not tessera-x--pending-context)
+                  (should-not (tessera-x-elfeed--request-active
+                               request))
+                  (should-not (cl-some #'process-live-p processes))
+                  (should-not (cl-intersection timers timer-list))
+                  ;; Honor a failing hook, but release other buffers.
+                  (should (buffer-live-p (car buffers)))
+                  (should-not (buffer-live-p (cadr buffers))))
+              (dolist (buffer buffers)
+                (when (buffer-live-p buffer)
+                  (with-current-buffer buffer
+                    (setq kill-buffer-hook nil))
+                  (kill-buffer buffer)))
+              (mapc #'cancel-timer timers))))))))
+
 (ert-deftest tessera-x-elfeed-stop-keeps-unrelated-transfers ()
   (with-temp-buffer
     (let* ((other (make-tessera-x-elfeed--fetch))
@@ -1106,69 +1493,104 @@
       (tessera-x-elfeed--stop-fetch fetch)
       (should (buffer-live-p buffer)))))
 
-(ert-deftest tessera-x-elfeed-startup-quit-cancels-transfers ()
-  (tessera-x-tests--with-snapshots
-    (with-temp-buffer
-      (let* ((previous (tessera-x-context-start 'elfeed "Old" nil))
-             (items (cl-loop repeat 3 collect
-                             (tessera-x-tests--item "feed")))
-             (calls 0)
-             buffers fetches timer)
-        (tessera-x-context-finish previous)
-        (let* ((context
-                (tessera-x-context-start 'elfeed "New" items))
-               (request (make-tessera-x-elfeed--request
-                         :context context
-                         :queue (copy-sequence items)
-                         :timeout 60)))
-          (push (apply-partially #'tessera-x-elfeed--cancel request)
-                (tessera-x-context-cleanup context))
-          (unwind-protect
-              (progn
-                (cl-letf (((symbol-function 'url-retrieve)
-                           (lambda (_url callback arguments &rest _)
-                             (cl-incf calls)
-                             (push (car arguments) fetches)
-                             (push (generate-new-buffer " *HTTP*")
-                                   buffers)
-                             (with-current-buffer (car buffers)
-                               (setq-local
-                                url-callback-function callback
-                                url-callback-arguments
-                                (cons nil arguments)))
-                             (when (= calls 2)
-                               (setq timer
-                                     (tessera-x-elfeed--fetch-timer
-                                      (cadr fetches)))
-                               (signal 'quit nil))
-                             (car buffers))))
-                  (should
-                   (eq (condition-case err
-                           (tessera-x-elfeed--dispatch request)
-                         (quit (car err)))
-                       'quit)))
-                (should (= calls 2))
-                (should (eq (tessera-x-context-state context)
-                            'cancelled))
-                (should-not tessera-x--pending-context)
-                (should-not (tessera-x-context-cleanup context))
-                (should-not
-                 (tessera-x-elfeed--request-active request))
-                (should-not (tessera-x-elfeed--request-queue request))
-                (should-not (tessera-x-elfeed--request-dispatching
-                             request))
-                (should (cl-every #'tessera-x-elfeed--fetch-done
-                                  fetches))
-                (should-not (cl-some #'buffer-live-p buffers))
-                (should (timerp timer))
-                (should-not (memq timer timer-list))
-                (should (eq tessera-x-current-context previous))
-                (should (buffer-live-p
-                         (tessera-x-context-buffer previous))))
-            (tessera-x-cancel-context)
-            (dolist (buffer buffers)
-              (when (buffer-live-p buffer)
-                (kill-buffer buffer)))))))))
+(ert-deftest tessera-x-elfeed-quit-cancels-transfers ()
+  (dolist (stage '(startup response))
+    (tessera-x-tests--with-snapshots
+      (with-temp-buffer
+        (let* ((previous (tessera-x-context-start 'elfeed "Old" nil))
+               (items (cl-loop repeat 3 collect
+                               (tessera-x-tests--item "feed")))
+               (calls 0)
+               buffers fetches timers)
+          (tessera-x-context-finish previous)
+          (let* ((context
+                  (tessera-x-context-start 'elfeed "New" items))
+                 (request (make-tessera-x-elfeed--request
+                           :context context
+                           :queue (copy-sequence items)
+                           :limit 2
+                           :timeout 60)))
+            (push (apply-partially #'tessera-x-elfeed--cancel request)
+                  (tessera-x-context-cleanup context))
+            (unwind-protect
+                (progn
+                  (cl-letf (((symbol-function 'url-retrieve)
+                             (lambda (_url callback arguments &rest _)
+                               (cl-incf calls)
+                               (push (car arguments) fetches)
+                               (push (generate-new-buffer " *HTTP*")
+                                     buffers)
+                               (with-current-buffer (car buffers)
+                                 (setq-local
+                                  url-callback-function callback
+                                  url-callback-arguments
+                                  (cons nil arguments)))
+                               (when (= calls 2)
+                                 (push (tessera-x-elfeed--fetch-timer
+                                        (cadr fetches)) timers)
+                                 (when (eq stage 'startup)
+                                   (signal 'quit nil)))
+                               (car buffers)))
+                            ((symbol-function 'tessera-x-html-text)
+                             (lambda (_) (signal 'quit nil))))
+                    (should
+                     (eq (condition-case err
+                             (progn
+                               (tessera-x-elfeed--dispatch request)
+                               (setq timers
+                                     (mapcar
+                                      #'tessera-x-elfeed--fetch-timer
+                                      fetches))
+                               (with-current-buffer (car buffers)
+                                 (insert "Content-Type: text/html"
+                                         "\n\n")
+                                 (setq-local
+                                  url-http-response-status 200
+                                  url-http-end-of-headers
+                                  (point-marker))
+                                 (insert "<p>Response body</p>")
+                                 (tessera-x-elfeed--response
+                                  nil (car fetches))))
+                           (quit (car err)))
+                         'quit)))
+                  (should (= calls 2))
+                  (should (eq (tessera-x-context-state context)
+                              'cancelled))
+                  (should-not tessera-x--pending-context)
+                  (should-not (tessera-x-context-cleanup context))
+                  (should-not
+                   (tessera-x-elfeed--request-active request))
+                  (should-not
+                   (tessera-x-elfeed--request-queue request))
+                  (should-not (tessera-x-elfeed--request-dispatching
+                               request))
+                  (should (cl-every #'tessera-x-elfeed--fetch-done
+                                    fetches))
+                  (should-not (cl-some #'buffer-live-p buffers))
+                  (should (= (length timers)
+                             (if (eq stage 'startup) 1 2)))
+                  (should (cl-every #'timerp timers))
+                  (should-not (cl-intersection timers timer-list))
+                  (should (eq tessera-x-current-context previous))
+                  (should (buffer-live-p
+                           (tessera-x-context-buffer previous)))
+                  (dolist (fetch fetches)
+                    (tessera-x-elfeed--timeout fetch)
+                    (let ((late (generate-new-buffer " *Late HTTP*")))
+                      (unwind-protect
+                          (with-current-buffer late
+                            (tessera-x-elfeed--response nil fetch)
+                            (should-not (buffer-live-p late)))
+                        (when (buffer-live-p late)
+                          (kill-buffer late)))))
+                  (should (eq tessera-x-current-context previous))
+                  (should (eq (tessera-x-context-state context)
+                              'cancelled)))
+              (tessera-x-cancel-context)
+              (mapc #'cancel-timer timers)
+              (dolist (buffer buffers)
+                (when (buffer-live-p buffer)
+                  (kill-buffer buffer))))))))))
 
 (ert-deftest tessera-x-elfeed-startup-failures-dont-recurse ()
   (tessera-x-tests--with-snapshots
@@ -1209,6 +1631,27 @@
                       :type 'user-error)
         (setq-local list-buffers-directory "")
         (should (equal (tessera-x-mu4e--today-query) ""))))))
+
+(ert-deftest tessera-x-mu-query-cleanup-continues-after-buffer-hook ()
+  (dolist (condition '(error quit))
+    (let* ((output (generate-new-buffer " *mu output*"))
+           (errors (generate-new-buffer " *mu errors*"))
+           (process (make-pipe-process
+                     :name "tessera-cleanup"
+                     :buffer output
+                     :noquery t)))
+      (unwind-protect
+          (progn
+            (with-current-buffer output
+              (add-hook 'kill-buffer-hook
+                        (lambda () (signal condition nil)) nil t))
+            (tessera-x-mu4e--cancel-query process output errors)
+            (should-not (process-live-p process))
+            (should-not (buffer-live-p errors))
+            (should (buffer-live-p output)))
+        (when (buffer-live-p output)
+          (with-current-buffer output (setq kill-buffer-hook nil)))
+        (tessera-x-mu4e--cancel-query process output errors)))))
 
 (ert-deftest tessera-x-mu-query-startup-releases-resources ()
   (skip-unless (executable-find "sleep"))
@@ -1616,86 +2059,120 @@
     (should (= (length sizes) 2))
     (should (apply #'= sizes))))
 
+(defmacro tessera-x-tests--with-elfeed-db (records &rest body)
+  "Run BODY with a private database of (ID DATE TAGS) RECORDS."
+  (declare (indent 1) (debug (form body)))
+  (let ((record (make-symbol "record"))
+        (entry (make-symbol "entry")))
+    `(let ((elfeed-db '(:version 4))
+           (elfeed-db-feeds (make-hash-table :test #'equal))
+           (elfeed-db-entries (make-hash-table :test #'equal))
+           (elfeed-db-index (avl-tree-create #'elfeed-db-compare)))
+       (puthash "feed" (elfeed-feed--create :id "feed" :title "Feed")
+                elfeed-db-feeds)
+       (dolist (,record ,records)
+         (let ((,entry
+                (elfeed-entry--create
+                 :id (cons "feed" (car ,record))
+                 :feed-id "feed"
+                 :title "Entry"
+                 :date (cadr ,record)
+                 :tags (caddr ,record)
+                 :content "Body"
+                 :link "https://example.invalid/item")))
+           (puthash (elfeed-entry-id ,entry) ,entry elfeed-db-entries)
+           (avl-tree-enter elfeed-db-index (elfeed-entry-id ,entry))))
+       ,@body)))
+
 (ert-deftest tessera-x-elfeed-today-keeps-filter-and-local-boundaries
     ()
   (tessera-x-tests--with-snapshots
-    (let* ((elfeed-db '(:version 4))
-           (elfeed-db-feeds (make-hash-table :test #'equal))
-           (elfeed-db-entries (make-hash-table :test #'equal))
-           (elfeed-db-index (avl-tree-create #'elfeed-db-compare))
-           (bounds (tessera-x-today-bounds))
+    (let* ((bounds (tessera-x-today-bounds))
            (start (float-time (car bounds)))
-           (end (float-time (cdr bounds)))
-           (feed (elfeed-feed--create :id "feed" :title "Feed")))
-      (puthash "feed" feed elfeed-db-feeds)
-      (cl-loop for date in (list (1- start) start (1+ start)
-                                 (+ start 2) end)
-               for tags in '((keep) (keep) (drop) (keep) (keep))
-               for index from 0
-               do
-               (let* ((id (cons "feed" (number-to-string index)))
-                      (entry (elfeed-entry--create
-                              :id id
-                              :feed-id "feed"
-                              :title "Entry"
-                              :date date
-                              :tags tags
-                              :content "Body"
-                              :link "https://example.invalid/item")))
-                 (puthash id entry elfeed-db-entries)
-                 (avl-tree-enter elfeed-db-index id)))
-      (dolist (case '(("+keep" . ("1" "3"))
-                      ("+keep #1" . ("3"))
-                      ("+keep #0" . nil)))
-        (with-temp-buffer
-          (setq-local major-mode 'elfeed-search-mode)
-          (setq-local elfeed-search-filter (car case))
-          (cl-letf (((symbol-function 'url-retrieve)
-                     (lambda (&rest _) (ert-fail "Unexpected HTTP"))))
-            (let ((context (tessera-x-elfeed-prepare-today-context)))
-              (should (eq (tessera-x-context-state context) 'ready))
-              (should
-               (equal (mapcar #'tessera-x-item-id
-                              (tessera-x-context-items context))
-                      (mapcar (lambda (id) (cons "feed" id))
-                              (cdr case)))))))))))
+           (end (float-time (cdr bounds))))
+      (tessera-x-tests--with-elfeed-db
+          (cl-loop for date in (list (1- start) start (1+ start)
+                                     (+ start 2) end)
+                   for tags in '((keep) (keep) (drop) (keep) (keep))
+                   for index from 0
+                   collect (list (number-to-string index) date tags))
+        (dolist (case '(("+keep" . ("1" "3"))
+                        ("+keep #1" . ("3"))
+                        ("+keep #0" . nil)))
+          (with-temp-buffer
+            (setq-local major-mode 'elfeed-search-mode)
+            (setq-local elfeed-search-filter (car case))
+            (cl-letf (((symbol-function 'url-retrieve)
+                       (lambda (&rest _)
+                         (ert-fail "Unexpected HTTP"))))
+              (let ((context
+                     (tessera-x-elfeed-prepare-today-context)))
+                (should (eq (tessera-x-context-state context) 'ready))
+                (should
+                 (equal (mapcar #'tessera-x-item-id
+                                (tessera-x-context-items context))
+                        (mapcar (lambda (id) (cons "feed" id))
+                                (cdr case))))))))))))
 
 (ert-deftest tessera-x-elfeed-today-obeys-both-age-bounds ()
   (tessera-x-tests--with-snapshots
-    (let* ((elfeed-db '(:version 4))
-           (elfeed-db-feeds (make-hash-table :test #'equal))
-           (elfeed-db-entries (make-hash-table :test #'equal))
-           (elfeed-db-index (avl-tree-create #'elfeed-db-compare))
-           (start (car (tessera-x-today-bounds)))
+    (let* ((start (car (tessera-x-today-bounds)))
            (now (+ (float-time start) 43200))
-           (float-time-function (symbol-function 'float-time))
-           (feed (elfeed-feed--create :id "feed" :title "Feed")))
-      (puthash "feed" feed elfeed-db-feeds)
-      (dolist (age '(1800 3600 7200 10800 14400))
-        (let* ((id (cons "feed" (number-to-string age)))
-               (entry (elfeed-entry--create
-                       :id id
-                       :feed-id "feed"
-                       :title "Entry"
-                       :date (- now age)
-                       :content "Body")))
-          (puthash id entry elfeed-db-entries)
-          (avl-tree-enter elfeed-db-index id)))
-      (dolist (case '(("@3-hours-ago--1-hour-ago" . ("10800" "7200"))
-                      ("@3-hours-ago--1-hour-ago #1" . ("7200"))))
-        (with-temp-buffer
-          (setq-local major-mode 'elfeed-search-mode)
-          (setq-local elfeed-search-filter (car case))
-          (cl-letf (((symbol-function 'float-time)
-                     (lambda (&optional time)
-                       (if time (funcall float-time-function time)
-                         now))))
-            (let ((context (tessera-x-elfeed-prepare-today-context)))
-              (should
-               (equal (mapcar (lambda (item)
-                                (cdr (tessera-x-item-id item)))
-                              (tessera-x-context-items context))
-                      (cdr case))))))))))
+           (float-time-function (symbol-function 'float-time)))
+      (tessera-x-tests--with-elfeed-db
+          (mapcar (lambda (age)
+                    (list (number-to-string age) (- now age)))
+                  '(1800 3600 7200 10800 14400))
+        (dolist (case '(("@3-hours-ago--1-hour-ago"
+                         . ("10800" "7200"))
+                        ("@3-hours-ago--1-hour-ago #1" . ("7200"))))
+          (with-temp-buffer
+            (setq-local major-mode 'elfeed-search-mode)
+            (setq-local elfeed-search-filter (car case))
+            (cl-letf (((symbol-function 'float-time)
+                       (lambda (&optional time)
+                         (if time (funcall float-time-function time)
+                           now))))
+              (let ((context
+                     (tessera-x-elfeed-prepare-today-context)))
+                (should
+                 (equal (mapcar (lambda (item)
+                                  (cdr (tessera-x-item-id item)))
+                                (tessera-x-context-items context))
+                        (cdr case)))))))))))
+
+(ert-deftest tessera-x-elfeed-today-skips-unusable-dates ()
+  (tessera-x-tests--with-snapshots
+    (let ((start (truncate (float-time
+                            (car (tessera-x-today-bounds))))))
+      (tessera-x-tests--with-elfeed-db
+          (list (list "broken" (+ start 3) '(keep))
+                (list "newer" (+ start 2) '(keep))
+                (list "older" (1+ start) '(keep))
+                (list "yesterday" (1- start) '(keep)))
+        (let ((entry (elfeed-db-get-entry '("feed" . "broken"))))
+          (dolist (date '(nil invalid "invalid" (27000 0)
+                              0.0e+NaN 1.0e+INF -1.0e+INF))
+            ;; Keep the native index while changing a stored field.
+            (setf (elfeed-entry-date entry) date)
+            (dolist (case '(("+keep" . ("older" "newer"))
+                            ("+keep #1" . ("newer"))))
+              (ert-info ((format "Date: %S, filter: %s"
+                                 date (car case)))
+                (with-temp-buffer
+                  (setq-local major-mode 'elfeed-search-mode)
+                  (setq-local elfeed-search-filter (car case))
+                  (let ((context
+                         (tessera-x-elfeed-prepare-today-context)))
+                    (should (eq (tessera-x-context-state context)
+                                'ready))
+                    (should
+                     (equal (mapcar (lambda (item)
+                                      (cdr (tessera-x-item-id item)))
+                                    (tessera-x-context-items context))
+                            (cdr case)))
+                    (should
+                     (eq (elfeed-entry-date entry) date))))))))))))
 
 (ert-deftest tessera-x-gnus-overview-filters-dates-and-keeps-headers
     ()

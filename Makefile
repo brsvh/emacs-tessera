@@ -17,7 +17,7 @@ PACKAGES := $(sort $(notdir $(PACKAGE_DIRS)))
 PACKAGE_DEPS_tessera-x := tessera
 PACKAGE ?=
 
-.PHONY: all archive autoloads clean compile package test
+.PHONY: all archive autoloads clean compile package test test-tools
 
 ifeq ($(strip $(PACKAGE)),)
 
@@ -202,6 +202,14 @@ clean:
 endif
 
 test:
+	@set -eu
+	for package in $(if $(PACKAGE),$(PACKAGE),$(PACKAGES)); do
+		TESSERA_TEST_PACKAGE="$$package" $(EMACS_BATCH) \
+			$(addprefix -L ,$(EMACS_LOAD_PATH)) \
+			-l test/run-tests.el
+	done
+
+test-tools:
 	$(EMACS_BATCH) \
 		$(addprefix -L ,$(EMACS_LOAD_PATH)) \
-		-l test/run-tests.el
+		-l test/run-tool-tests.el

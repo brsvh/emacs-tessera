@@ -12,6 +12,15 @@
 (require 'mu4e-view)
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-headers)
+(require 'tessera-test-support)
+
+(defvar tessera-mu4e-tests--thread-metadata
+  '((:level 0 :root t :has-child t)
+    (:level 1 :first-child t :has-child t)
+    (:level 2 :first-child t :last-child t)
+    (:level 1 :last-child t)
+    (:level 0 :root t))
+  "Native hierarchy used by the thread fixture.")
 
 (defmacro tessera-mu4e-tests--with-thread (&rest body)
   "Run BODY with native rows containing branches and mixed states."
@@ -31,11 +40,7 @@
                     (lambda (&rest _) buffer)))
            (cl-loop
             for id from 1
-            for meta in '((:level 0 :root t :has-child t)
-                          (:level 1 :first-child t :has-child t)
-                          (:level 2 :first-child t :last-child t)
-                          (:level 1 :last-child t)
-                          (:level 0 :root t))
+            for meta in tessera-mu4e-tests--thread-metadata
             do (mu4e~headers-insert-header
                 (list :docid id
                       :subject (format "Subject %d" id)
@@ -82,6 +87,80 @@
        (seq-some (lambda (overlay)
                    (overlay-get overlay 'tessera-entry-overlay))
                  (overlays-in (point-min) (point-max)))))))
+
+(ert-deftest tessera-mu4e-month-click-restores-thread-layout ()
+  (tessera-mu4e-tests--with-thread
+    (let ((mu4e-headers-open-after-move nil))
+      (dotimes (index 5)
+        (mu4e~headers-goto-docid (1+ index))
+        (let ((message (copy-sequence (mu4e-message-at-point))))
+          (setf (plist-get message :date)
+                (encode-time 0 0 12 1 (if (< index 4) 9 8) 2026))
+          (mu4e~headers-update-handler message nil nil)))
+      (tessera-mu4e-headers--refresh)
+      (tessera-entry-clear-current)
+      (save-window-excursion
+        (set-window-buffer (selected-window) (current-buffer))
+        (tessera--month-window-change (selected-window))
+        (tessera-mu4e-headers--refresh)
+        (mu4e~headers-goto-docid 1)
+        (tessera-entry-clear-current)
+        (cl-labels
+            ((snapshot ()
+               ;; Include both adjacent thread subjects.  Their
+               ;; decoration positions and faces must survive,
+               ;; regardless of whether overlays are reused.
+               (cl-sort
+                (cl-loop
+                 for overlay in (overlays-in (point-min) (point-max))
+                 when (overlay-get overlay 'tessera-entry-overlay)
+                 collect
+                 (list (overlay-start overlay) (overlay-end overlay)
+                       (overlay-get overlay 'priority)
+                       (copy-sequence
+                        (overlay-get overlay 'before-string))
+                       (copy-sequence
+                        (overlay-get overlay 'after-string))))
+                #'string< :key #'prin1-to-string)))
+          (let ((before (snapshot))
+                (transient-mark-mode t))
+            (goto-char (tessera-entry-point))
+            (tessera-entry-highlight-current)
+            (push-mark (point-max) t t)
+            (tessera-tests--click-month '(2026 9))
+            (should (= (mu4e~headers-docid-at-point) 5))
+            (tessera-entry-highlight-current)
+            (tessera-tests--click-month '(2026 9))
+            (should (= (mu4e~headers-docid-at-point) 5))
+            (should (= (point) (tessera-entry-point)))
+            (should-not mark-active)
+            (tessera-entry-clear-current)
+            (should
+             (equal-including-properties before (snapshot)))))))))
+
+(ert-deftest tessera-mu4e-isearch-reveals-folded-month ()
+  (tessera-mu4e-tests--with-thread
+    (dotimes (index 5)
+      (mu4e~headers-goto-docid (1+ index))
+      (let ((message (copy-sequence (mu4e-message-at-point))))
+        (setf (plist-get message :date)
+              (encode-time 0 0 12 1 (if (< index 4) 9 8) 2026))
+        (mu4e~headers-update-handler message nil nil)))
+    (tessera-mu4e-headers--refresh)
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (mu4e~headers-goto-docid 1)
+      (tessera--month-toggle '(2026 8))
+      (should (gethash '(2026 8) tessera--month-folds))
+      (let ((search-invisible 'open)
+            (isearch-lazy-highlight nil)
+            (isearch-lazy-count nil))
+        (unwind-protect
+            (execute-kbd-macro (kbd "C-s Subject SPC 5 RET"))
+          (when isearch-mode (isearch-done))))
+      (should (= 5 (mu4e~headers-docid-at-point)))
+      (should-not (gethash '(2026 8) tessera--month-folds))
+      (should-not (invisible-p (point))))))
 
 (ert-deftest tessera-mu4e-thread-tree-survives-narrow-allocation ()
   (tessera-mu4e-headers--register)
@@ -191,19 +270,39 @@
     (tessera-mu4e-headers--disable)))
 
 (ert-deftest tessera-mu4e-thread-snapshots-share-current-paths ()
-  (tessera-mu4e-tests--with-thread
-    (dotimes (_ 3)
-      (tessera-mu4e-headers--sync nil)
-      (dotimes (index 5)
-        (let ((id (1+ index)))
-          (mu4e~headers-goto-docid id)
-          (let* ((snapshot (get-text-property
-                            (tessera-mu4e-headers--body-start)
-                            'tessera-mu4e-state))
-                 (node (gethash id tessera-mu4e-headers--threads)))
-            (should (eq (nth 4 (nth 2 snapshot))
-                        (tessera-thread-context-reverse-path
-                         node)))))))))
+  (let ((tessera-mu4e-tests--thread-metadata
+         (cl-loop for level below 40
+                  collect (list :level level
+                                :root (zerop level)
+                                :first-child (> level 0)
+                                :last-child (> level 0)
+                                :has-child (< level 39)))))
+    (tessera-mu4e-tests--with-thread
+      (dotimes (index 40)
+        (mu4e~headers-goto-docid (1+ index))
+        (let ((message (copy-sequence (mu4e-message-at-point))))
+          (setf (plist-get message :subject)
+                (format "Updated subject %d" index))
+          (mu4e~headers-update-handler message nil nil))
+        (tessera-mu4e-headers--refresh))
+      (let ((cells (make-hash-table :test #'eq)))
+        (dotimes (index 40)
+          (let ((id (1+ index)))
+            (mu4e~headers-goto-docid id)
+            (let* ((body (tessera-mu4e-headers--body-start))
+                   (snapshot (get-text-property
+                              body 'tessera-mu4e-state))
+                   (context (get-text-property
+                             body 'tessera-entry-context))
+                   (node (gethash id tessera-mu4e-headers--threads))
+                   (path (tessera-thread-context-reverse-path node)))
+              (should (eq node
+                          (tessera-entry-context-thread context)))
+              (should (eq (nth 4 (nth 2 snapshot)) path))
+              (while (and path (not (gethash path cells)))
+                (puthash path t cells)
+                (setq path (cdr path))))))
+        (should (= 39 (hash-table-count cells)))))))
 
 (ert-deftest tessera-mu4e-thread-snapshots-detect-native-mutations ()
   (tessera-mu4e-tests--with-thread
@@ -534,8 +633,9 @@
             ;; Exercise graphical measurement in batch tests too.
             (cl-letf (((symbol-function 'display-graphic-p)
                        (lambda (&optional _) t))
-                      ((symbol-function 'string-pixel-width)
-                       #'string-width))
+                      ((symbol-function 'tessera--string-pixel-width)
+                       (lambda (string &optional _buffer)
+                         (string-width string))))
               (let ((message (copy-sequence (mu4e-message-at-point))))
                 (setq message (plist-put message :flags '(unread)))
                 (mu4e~headers-update-handler message nil nil)))

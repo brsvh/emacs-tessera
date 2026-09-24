@@ -9,6 +9,7 @@
 (require 'ert)
 (require 'tessera-gnus-summary)
 (require 'tessera-gnus-test-support)
+(require 'tessera-test-support)
 
 (defvar gnus-registry-db)
 
@@ -331,6 +332,230 @@
         (should-error (tessera-gnus-summary--register) :type 'error)
         (should-not (gethash 'gnus-summary tessera--entry-backends))
         (should (= gnus-unread-mark ?•))))))
+
+(ert-deftest tessera-gnus-month-search-skips-folded-results ()
+  (with-temp-buffer
+    (insert "abc")
+    (let ((tessera-gnus-summary--active t)
+          (tessera--month-enabled t)
+          (fold (make-overlay 2 3)))
+      (overlay-put fold 'tessera-month-overlay 'fold)
+      (goto-char 1)
+      (should
+       (= 3
+          (tessera-gnus-summary--search-forward
+           (lambda ()
+             (when (< (point) 3)
+               (forward-char)
+               (point))))))
+      (goto-char 2)
+      (should-not
+       (tessera-gnus-summary--search-forward
+        (lambda () (point))))
+      (should (= (point) 2)))))
+
+(ert-deftest tessera-gnus-month-heading-keeps-primary-click ()
+  (save-window-excursion
+    (with-temp-buffer
+      (use-local-map (copy-keymap gnus-summary-mode-map))
+      (let* ((window (selected-window))
+             (group
+              (make-tessera--month-group
+               :key '(2026 9)
+               :time (encode-time 0 0 0 1 9 2026)
+               :unread 0
+               :total 1))
+             (text
+              (tessera--month-compose-header
+               group nil 80 1 nil))
+             (index
+              (tessera-gnus-tests--find
+               0 (length text) 'tessera-month-key
+               '(2026 9) text))
+             (position
+              (list window 1 '(0 . 0) 0
+                    (cons text index))))
+        (set-window-buffer window (current-buffer))
+        (should
+         (equal (mouse-on-link-p position) [mouse-1]))
+        (should
+         (eq (key-binding [mouse-1] nil t position)
+             #'tessera--month-mouse-toggle))
+        (should
+         (eq (key-binding [mouse-2] nil t position)
+             #'gnus-mouse-pick-article))))))
+
+(ert-deftest tessera-gnus-month-goto-keeps-article-selection ()
+  (with-temp-buffer
+    (insert "summary row")
+    (let ((context
+           (make-tessera-entry-context
+            :object (tessera-gnus-tests--header)))
+          (gnus-newsgroup-data
+           (list (gnus-data-make 42 nil 4 nil 0)))
+          (gnus-newsgroup-data-reverse nil)
+          (overlay-arrow-position (copy-marker 2))
+          positioned)
+      (cl-letf (((symbol-function 'gnus-summary-goto-subject)
+                 (lambda (&rest _)
+                   (ert-fail "Month move selected an article")))
+                ((symbol-function 'gnus-summary-display-article)
+                 (lambda (&rest _)
+                   (ert-fail "Month move displayed an article")))
+                ((symbol-function 'gnus-summary-position-point)
+                 (lambda () (setq positioned (point)))))
+        (tessera-gnus-summary--month-goto context)
+        (should (= positioned 4))
+        (should (= overlay-arrow-position 2))))))
+
+(ert-deftest tessera-gnus-month-click-folds-and-expands ()
+  (with-temp-buffer
+    (let ((gnus-show-threads nil)
+          (tessera-gnus-summary--active t)
+          (tessera--month-enabled t)
+          (tessera--month-thread-date 'latest))
+      (use-local-map (copy-keymap gnus-summary-mode-map))
+      (tessera-tests--gnus-rows '(0 0))
+      (setf (mail-header-date
+             (gnus-data-header (cadr gnus-newsgroup-data)))
+            "Sat, 1 Aug 2026 12:00:00 +0800")
+      (tessera-gnus-summary--prepare)
+      (save-window-excursion
+        (set-window-buffer (selected-window) (current-buffer))
+        (tessera--month-window-change (selected-window))
+        (cl-letf (((symbol-function 'gnus-summary-select-article)
+                   (lambda (&rest _) (ert-fail "Opened article"))))
+          (tessera-tests--click-month '(2026 9))
+          (should (gethash '(2026 9) tessera--month-folds))
+          (should (= (get-text-property (point) 'gnus-number) 2))
+          (tessera-tests--click-month '(2026 9))
+          (should-not (gethash '(2026 9) tessera--month-folds))
+          (should-not (invisible-p (point-min))))))))
+
+(ert-deftest tessera-gnus-month-sorting-follows-date-policy ()
+  (dolist (subthread '(gnus-thread-sort-functions (local-sort)))
+    (with-temp-buffer
+      (let ((gnus-thread-sort-functions '(native-thread-sort))
+            (gnus-subthread-sort-functions subthread)
+            (gnus-article-sort-functions '(native-article-sort)))
+        (setq-local tessera--month-enabled t
+                    tessera--month-thread-date 'latest)
+        (should (tessera-gnus-summary--update-month-sorting))
+        (should
+         (equal gnus-thread-sort-functions
+                tessera-gnus-summary--latest-month-sort-functions))
+        (should
+         (equal gnus-article-sort-functions
+                tessera-gnus-summary--month-article-sort-functions))
+        (should (equal gnus-subthread-sort-functions
+                       (if (symbolp subthread)
+                           '(native-thread-sort)
+                         subthread)))
+        (setq-local tessera--month-thread-date 'root)
+        (should (tessera-gnus-summary--update-month-sorting))
+        (should
+         (equal gnus-thread-sort-functions
+                tessera-gnus-summary--root-month-sort-functions))
+        ;; Disabling grouping also restores sorting while the
+        ;; display adapter remains active.
+        (setq-local tessera--month-enabled nil)
+        (should (tessera-gnus-summary--update-month-sorting))
+        (should (equal gnus-thread-sort-functions
+                       '(native-thread-sort)))
+        (should (equal gnus-subthread-sort-functions subthread))
+        (should (equal gnus-article-sort-functions
+                       '(native-article-sort)))))))
+
+(ert-deftest tessera-gnus-month-sorts-old-parents-on-regeneration ()
+  (dolist (policy '(latest root))
+    (with-temp-buffer
+      (let* ((gnus-show-threads t)
+             (gnus-summary-generate-hook nil)
+             (gnus-summary-prepare-hook nil)
+             (gnus-summary-thread-gathering-function #'identity)
+             (gnus-thread-sort-functions nil)
+             (gnus-subthread-sort-functions nil)
+             (gnus-newsgroup-dependencies (gnus-make-hashtable 10))
+             (headers
+              (cl-loop for (id month) in '((20 9) (30 8) (10 5) (5 6))
+                       collect
+                       (make-full-mail-header
+                        id (format "Thread %d" id) "Author"
+                        (format-time-string
+                         "%a, %d %b %Y %T %z"
+                         (encode-time 0 0 12 1 month 2026))
+                        (format "<month-%d@test.invalid>" id)
+                        (when (= id 20)
+                          "<month-10@test.invalid>"))))
+             (gnus-newsgroup-headers (seq-take headers 2))
+             rendered)
+        (setq-local tessera--month-enabled t
+                    tessera--month-thread-date policy)
+        (tessera-gnus-summary--update-month-sorting)
+        (dolist (header gnus-newsgroup-headers)
+          (gnus-dependencies-add-header
+           header gnus-newsgroup-dependencies nil))
+        (cl-letf (((symbol-function 'gnus-summary-prepare-threads)
+                   (lambda (sorted) (setq rendered sorted))))
+          (gnus-summary-prepare)
+          (should (equal (mapcar #'mail-header-number
+                                 (mapcar #'car rendered))
+                         '(20 30)))
+          ;; Loading an older parent changes the root date, while
+          ;; the September reply remains the newest thread member.
+          (setq gnus-newsgroup-headers headers)
+          (dolist (header (nthcdr 2 headers))
+            (gnus-dependencies-add-header
+             header gnus-newsgroup-dependencies nil))
+          (gnus-summary-prepare)
+          (let ((parent
+                 (cl-find 10 rendered
+                          :key (lambda (thread)
+                                 (mail-header-number (car thread))))))
+            (should (= (mail-header-number (caadr parent)) 20)))
+          (should (equal (mapcar #'mail-header-number
+                                 (mapcar #'car rendered))
+                         (if (eq policy 'latest)
+                             '(10 30 5)
+                           '(30 5 10)))))))))
+
+(ert-deftest tessera-gnus-month-coalesces-mark-refreshes ()
+  (with-temp-buffer
+    (let ((tessera-gnus-summary--active t)
+          (tessera--month-enabled t)
+          (tessera-gnus-summary--appearance
+           (tessera-gnus-summary--appearance))
+          (syncs 0))
+      (cl-letf (((symbol-function 'tessera-gnus-summary--sync-buffer)
+                 (lambda (&rest _) (cl-incf syncs)))
+                ((symbol-function 'tessera-gnus-summary--sync-line)
+                 (lambda (&rest _) (ert-fail "Partial refresh"))))
+        (dotimes (_ 10) (tessera-gnus-summary--update-line))
+        (should (zerop syncs))
+        (tessera-gnus-summary--post-command)
+        (should (= syncs 1))
+        (should-not tessera-gnus-summary--dirty)))))
+
+(ert-deftest tessera-gnus-content-cache-prunes-removed-articles ()
+  (with-temp-buffer
+    (let* ((header (tessera-gnus-tests--header))
+           (gnus-newsgroup-headers (list header))
+           (tessera-gnus-summary--active t)
+           (tessera-gnus-summary--content-cache
+            (make-hash-table :test #'equal))
+           (key (tessera-gnus-summary--content-key header)))
+      (puthash key 'retained tessera-gnus-summary--content-cache)
+      (puthash "<removed@test>" 'old
+               tessera-gnus-summary--content-cache)
+      (tessera-gnus-summary--prepare)
+      (should (= (hash-table-count
+                  tessera-gnus-summary--content-cache) 1))
+      (should (eq (gethash key tessera-gnus-summary--content-cache)
+                  'retained))
+      (setq gnus-newsgroup-headers nil)
+      (tessera-gnus-summary--prepare)
+      (should (zerop (hash-table-count
+                      tessera-gnus-summary--content-cache))))))
 
 (ert-deftest tessera-gnus-mark-update-keeps-native-identity ()
   (with-temp-buffer
@@ -892,17 +1117,50 @@
   (dolist (local '(nil t))
     (with-temp-buffer
       (let ((gnus-newsgroup-headers nil)
-            (gnus-summary-line-format "Native format\n"))
+            (gnus-summary-line-format "Native format\n")
+            (gnus-thread-sort-functions '(native-thread-sort))
+            (gnus-subthread-sort-functions
+             'gnus-thread-sort-functions)
+            (gnus-article-sort-functions '(native-article-sort)))
         (when local
-          (setq-local gnus-summary-line-format "Local format\n"))
-        (let ((original gnus-summary-line-format))
+          (setq-local gnus-summary-line-format "Local format\n")
+          (setq-local gnus-thread-sort-functions
+                      '(local-thread-sort))
+          (setq-local gnus-subthread-sort-functions
+                      '(local-subthread-sort))
+          (setq-local gnus-article-sort-functions
+                      '(local-article-sort)))
+        (let ((original gnus-summary-line-format)
+              (original-thread gnus-thread-sort-functions)
+              (original-subthread gnus-subthread-sort-functions)
+              (original-article gnus-article-sort-functions))
           (tessera-gnus-summary--enable)
           (tessera-gnus-summary--enable)
           (should (equal gnus-summary-line-format "%u&tessera;\n"))
+          (should
+           (equal gnus-thread-sort-functions
+                  tessera-gnus-summary--latest-month-sort-functions))
           (tessera-gnus-summary--disable)
           (should (equal gnus-summary-line-format original))
+          (should (equal gnus-thread-sort-functions
+                         original-thread))
+          (should (equal gnus-subthread-sort-functions
+                         original-subthread))
+          (should (equal gnus-article-sort-functions
+                         original-article))
           (should (eq (local-variable-p 'gnus-summary-line-format)
                       local))
+          (should
+           (eq (local-variable-p 'gnus-thread-sort-functions)
+               local))
+          (should
+           (eq (local-variable-p 'gnus-subthread-sort-functions)
+               local))
+          (should
+           (eq (local-variable-p 'gnus-article-sort-functions)
+               local))
+          (should-not
+           tessera-gnus-summary--saved-month-sorting)
           (should-not (memq #'tessera-gnus-summary--post-command
                             post-command-hook)))))))
 
@@ -965,6 +1223,7 @@
         (tessera-gnus--installed nil)
         (gnus-summary-mode-hook nil)
         (tessera--glyph-change-functions nil)
+        (tessera--month-change-functions nil)
         enabled disabled error-data)
     (unwind-protect
         (progn
@@ -1000,6 +1259,8 @@
           (should (= (length disabled) 2))
           (should-not (memq #'tessera-gnus--enable-summary
                             gnus-summary-mode-hook))
+          (should-not (memq #'tessera-gnus--months-changed
+                            tessera--month-change-functions))
           (dolist (buffer (list first second))
             (with-current-buffer buffer
               (should-not tessera-gnus-summary--active))))

@@ -4,7 +4,7 @@
 
 ;; Author: Bingshan Chang <chang@bingshan.org>
 ;; Maintainer: Bingshan Chang <chang@bingshan.org>
-;; Version: 0.1.0
+;; Version: 0.1.1
 ;; Package-Requires: ((emacs "30.1") (alert "1.2"))
 ;; Keywords: convenience, mail, news
 ;; URL: https://github.com/brsvh/emacs-tessera
@@ -32,6 +32,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'color)
 (require 'gv)
 (require 'seq)
 (require 'subr-x)
@@ -54,8 +55,8 @@
   :safe #'symbolp
   :group 'tessera)
 
-(defcustom tessera-entry-safe-gap 1
-  "Width in columns outside each side of an entry surface."
+(defcustom tessera-safe-gap 1
+  "Width in columns outside each side of a Tessera surface."
   :type 'natnum
   :safe #'natnump
   :group 'tessera)
@@ -126,10 +127,106 @@
   :safe #'natnump
   :group 'tessera)
 
-(defcustom tessera-entry-flex-gap-min-width 1
+(defcustom tessera-flex-gap-min-width 1
   "Minimum width in columns between left and right content."
   :type 'natnum
   :safe #'natnump
+  :group 'tessera)
+
+(defvar tessera--month-change-functions nil
+  "Functions called after a month display option changes.
+Each function receives the option symbol, or nil for an explicit
+refresh of all month appearance settings.")
+
+(defun tessera--set-month-option (symbol value)
+  "Set month option SYMBOL to VALUE and refresh active views."
+  (set-default symbol value)
+  (if (memq symbol '(tessera-month-format
+                     tessera-month-left-padding
+                     tessera-month-right-padding
+                     tessera-month-top-padding
+                     tessera-month-bottom-padding
+                     tessera-month-count-gap))
+      (tessera--map-mode-buffers
+       nil #'tessera--month-window-change)
+    (tessera--run-month-change-functions symbol)))
+
+(defun tessera--month-thread-date-p (value)
+  "Return non-nil when VALUE selects a supported thread date."
+  (memq value '(latest root)))
+
+(defcustom tessera-month-grouping t
+  "Whether Tessera groups entries under interactive month headings.
+Backend-specific options can inherit or override this value."
+  :type 'boolean
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera)
+
+(defcustom tessera-month-thread-date 'latest
+  "Date used to assign a native thread to a month.
+The value `latest' uses the newest valid date among its members.
+The value `root' uses the first real member as the thread root."
+  :type '(choice
+          (const :tag "Latest thread message" latest)
+          (const :tag "Thread root" root))
+  :safe #'tessera--month-thread-date-p
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera)
+
+(defcustom tessera-month-format "%Y %B"
+  "Format used for month heading titles.
+The value is passed to `format-time-string' with a representative
+time in the current Emacs time zone."
+  :type 'string
+  :safe #'stringp
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera)
+
+(defcustom tessera-month-left-padding 2
+  "Width inside the left edge of a month heading surface."
+  :type 'natnum
+  :safe #'natnump
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera)
+
+(defcustom tessera-month-right-padding 1
+  "Width inside the right edge of a month heading surface."
+  :type 'natnum
+  :safe #'natnump
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera)
+
+(defcustom tessera-month-top-padding 0.5
+  "Height above a month heading in normal line heights."
+  :type '(restricted-sexp
+          :tag "Normal line heights"
+          :match-alternatives (tessera--nonnegative-number-p))
+  :safe #'tessera--nonnegative-number-p
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera)
+
+(defcustom tessera-month-bottom-padding 0.5
+  "Height below a month heading in normal line heights."
+  :type '(restricted-sexp
+          :tag "Normal line heights"
+          :match-alternatives (tessera--nonnegative-number-p))
+  :safe #'tessera--nonnegative-number-p
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera)
+
+(defcustom tessera-month-count-gap 2
+  "Width between unread and read counts in a month heading."
+  :type 'natnum
+  :safe #'natnump
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
   :group 'tessera)
 
 (defcustom tessera-glyph-style 'unicode
@@ -165,6 +262,35 @@ to every glyph."
 (defface tessera-entry-hover-face
   '((t :inherit highlight))
   "Face used when the pointer is over an entry surface."
+  :group 'tessera)
+
+(defface tessera-month-face
+  '((t :inherit (font-lock-keyword-face default)
+       :weight bold
+       :extend nil))
+  "Base face for the complete month heading surface."
+  :group 'tessera)
+
+(defface tessera-month-title-face
+  '((t :height 1.3 :weight bold :extend nil))
+  "Face for a month heading title."
+  :group 'tessera)
+
+(defface tessera-month-statistics-face
+  '((t :height 1.0 :weight normal :extend nil))
+  "Face for counts in a collapsed month heading."
+  :group 'tessera)
+
+(defface tessera-month-hover-face
+  '((t :inherit highlight))
+  "Face used when the pointer is over a month heading."
+  :group 'tessera)
+
+(defface tessera-month-undated-face
+  '((t :extend nil))
+  "Face applied to entries without a usable date.
+When this face does not specify a background, Tessera computes one
+from the current `warning' foreground and `default' background."
   :group 'tessera)
 
 (defface tessera-glyph-accent-face
@@ -224,13 +350,14 @@ to every glyph."
 
 (defun tessera--map-mode-buffers (mode function)
   "Call FUNCTION in every live buffer derived from MODE.
+When MODE is nil, visit every live buffer.
 Continue after errors or quits, then signal the first condition."
   (let (condition-data)
     (dolist (buffer (buffer-list))
       (when (buffer-live-p buffer)
         (condition-case condition
             (with-current-buffer buffer
-              (when (derived-mode-p mode)
+              (when (or (null mode) (derived-mode-p mode))
                 (funcall function)))
           ((error quit)
            (unless condition-data
@@ -247,13 +374,18 @@ BACKEND identifies the registered adapter.  OBJECT is the backend's
 native object.  BUFFER and WINDOW identify where the entry is being
 rendered.  METADATA belongs to the adapter and remains opaque to the
 Tessera core.  THREAD is an optional `tessera-thread-context'
-provided only when the native backend enables threading."
+provided only when the native backend enables threading.  MONTH-TIME,
+MONTH-UNREAD, and MONTH-UNDATED hold normalized month metadata when
+month grouping is enabled."
   backend
   object
   buffer
   window
   metadata
-  thread)
+  thread
+  month-time
+  month-unread
+  month-undated)
 
 (cl-defstruct (tessera-thread-context
                (:constructor make-tessera-thread-context
@@ -272,7 +404,8 @@ member.  TOTAL and UNREAD include folded members of the result set."
 (defun tessera-thread-context-path (context)
   "Return CONTEXT's branch path in root-to-child order.
 Built contexts share reversed paths.  Materialize the public list
-only when requested, rather than copying every ancestor per row."
+only when requested, rather than copying every ancestor per row.
+Treat the returned list as read-only; update this place with `setf'."
   (or (tessera-thread-context-forward-path context)
       (setf (tessera-thread-context-forward-path context)
             (reverse (tessera-thread-context-reverse-path context)))))
@@ -286,9 +419,7 @@ only when requested, rather than copying every ancestor per row."
 
 (defun tessera--thread-path-tail (context)
   "Return CONTEXT's branch path in child-to-root order."
-  (if-let* ((path (tessera-thread-context-forward-path context)))
-      (reverse path)
-    (tessera-thread-context-reverse-path context)))
+  (tessera-thread-context-reverse-path context))
 
 (defun tessera-thread-context-key (context)
   "Return the fields affecting CONTEXT's displayed row, or nil.
@@ -388,7 +519,12 @@ returning one, shared by both lines."
   segments
   glyph-slots
   layouts
-  thread-layout)
+  thread-layout
+  month-date
+  month-unread-p
+  month-glyph
+  month-warning-segment
+  month-goto)
 
 (defvar tessera--entry-backends (make-hash-table :test #'eq)
   "Registered Tessera entry backends.")
@@ -462,12 +598,12 @@ returning one, shared by both lines."
   "Functions called with a changed glyph option, or nil for all.
 Modes install these callbacks only while enabled.")
 
-(defun tessera--run-glyph-change-functions (option)
-  "Notify every glyph callback about OPTION.
+(defun tessera--run-change-functions (hook option)
+  "Notify every callback on HOOK about OPTION.
 Continue after errors or quits, then signal the first condition."
   (let (condition-data)
     (run-hook-wrapped
-     'tessera--glyph-change-functions
+     hook
      (lambda (function)
        (condition-case condition
            (funcall function option)
@@ -477,6 +613,16 @@ Continue after errors or quits, then signal the first condition."
        nil))
     (when condition-data
       (signal (car condition-data) (cdr condition-data)))))
+
+(defun tessera--run-glyph-change-functions (option)
+  "Notify every glyph callback about OPTION."
+  (tessera--run-change-functions
+   'tessera--glyph-change-functions option))
+
+(defun tessera--run-month-change-functions (option)
+  "Notify every month callback about OPTION."
+  (tessera--run-change-functions
+   'tessera--month-change-functions option))
 
 (defun tessera--glyph-string-p (value)
   "Return non-nil for nonempty, single-line display text VALUE."
@@ -640,6 +786,31 @@ one.  Connectors cannot be hidden or use Nerd Icons.  See
   :set #'tessera--set-thread-glyphs
   :group 'tessera)
 
+(defvar tessera--month-glyph-defaults
+  '((undated
+     :ascii "!"
+     :unicode "⚠"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-calendar_alert")
+     :face tessera-glyph-warning-face))
+  "Default glyph for entries without a usable date.")
+
+(defun tessera--set-month-glyphs (symbol value)
+  "Set month glyph option SYMBOL to validated VALUE."
+  (tessera--validate-glyph-overrides
+   tessera--month-glyph-defaults value 2)
+  (set-default symbol value)
+  (tessera--run-glyph-change-functions symbol))
+
+(defcustom tessera-month-glyphs nil
+  "Overrides for glyphs used by month grouping.
+The `undated' glyph marks an entry whose date is missing, invalid,
+or unavailable.  See `tessera-glyph-resolve' for supported fields."
+  :type (tessera--glyph-custom-type tessera--month-glyph-defaults)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-glyphs
+  :group 'tessera)
+
 (defcustom tessera-entry-ellipsis "…"
   "Text indicating truncated entry content.
 Use nonempty single-line text.  Narrow areas may clip this marker."
@@ -660,6 +831,8 @@ Also retry loading Nerd Icons when next needed, for example after
 installing the library or changing `load-path'."
   (interactive)
   (tessera--validate-thread-glyphs tessera-thread-glyphs)
+  (tessera--validate-glyph-overrides
+   tessera--month-glyph-defaults tessera-month-glyphs 2)
   (dolist (option '(tessera-glyph-style tessera-glyph-color
                                         tessera-entry-ellipsis))
     (tessera--validate-glyph-appearance option (symbol-value option)))
@@ -864,7 +1037,9 @@ DESCRIPTION identifies the layout in errors."
   (tessera--ensure-unique (mapcar #'car layouts) "Layouts"))
 
 (cl-defun tessera-entry-register
-    (backend &key context segments glyph-slots layouts thread-layout)
+    (backend &key context segments glyph-slots layouts thread-layout
+             month-date month-unread-p month-glyph
+             month-warning-segment month-goto)
   "Register or replace entry BACKEND.
 
 CONTEXT is a function of an object, buffer, and window which returns
@@ -873,6 +1048,11 @@ to provider functions.  GLYPH-SLOTS is a list of
 `tessera-glyph-slot' objects.  LAYOUTS is an alist mapping layout IDs
 to `tessera-entry-layout' objects.  Optional THREAD-LAYOUT is a
 `tessera-thread-layout' used when CONTEXT supplies thread membership.
+MONTH-DATE, MONTH-UNREAD-P, MONTH-GLYPH,
+MONTH-WARNING-SEGMENT, and MONTH-GOTO expose native dates, unread
+state, status glyphs, the warning segment, and native positioning to
+month grouping.  MONTH-GOTO returns non-nil after successful
+positioning, or nil to fall back to the rendered entry's position.
 
 The new definition is installed only after it has been validated.
 Return BACKEND."
@@ -880,6 +1060,11 @@ Return BACKEND."
     (error "Backend must be a non-nil symbol"))
   (unless (functionp context)
     (error "Backend `%s' has an invalid context function" backend))
+  (dolist (callback
+           (list month-date month-unread-p month-glyph
+                 month-warning-segment month-goto))
+    (unless (or (null callback) (functionp callback))
+      (error "Backend `%s' has an invalid month callback" backend)))
   (tessera--validate-segments segments)
   (tessera--ensure-list glyph-slots "Glyph slots")
   (dolist (slot glyph-slots)
@@ -903,7 +1088,12 @@ Return BACKEND."
             :segments segments
             :glyph-slots glyph-slots
             :layouts layouts
-            :thread-layout thread-layout)))
+            :thread-layout thread-layout
+            :month-date month-date
+            :month-unread-p month-unread-p
+            :month-glyph month-glyph
+            :month-warning-segment month-warning-segment
+            :month-goto month-goto)))
       (puthash backend definition tessera--entry-backends)))
   backend)
 
@@ -961,6 +1151,21 @@ from IDs to contexts with counts, branch paths, and boundaries."
 
 ;;;; Rendering support
 
+(defvar-local tessera--month-enabled nil
+  "Non-nil when month grouping participates in this buffer.")
+
+(defvar-local tessera--month-thread-date nil
+  "Effective thread date policy in the current buffer.")
+
+(defun tessera--valid-time (value)
+  "Return VALUE as an Emacs time value, or nil when invalid."
+  (when value
+    (condition-case nil
+        (let ((time (time-convert value 'list)))
+          (ignore (decode-time time))
+          time)
+      (error nil))))
+
 (defun tessera--find-entry-backend (backend)
   "Return the registered definition for BACKEND."
   (or (gethash backend tessera--entry-backends)
@@ -1004,13 +1209,14 @@ Reuse cached ancestor prefixes without retaining dead contexts."
     (while (and cursor
                 (not (and (setq cached (gethash cursor cache))
                           (= limit (car cached)))))
-      (push cursor pending)
+      (push (car cursor) pending)
       (setq cursor (cdr cursor)))
-    (let ((path (and cursor (cdr cached))))
-      (dolist (node pending)
-        (when (< (length path) limit)
-          (setq path (append path (list (car node)))))
-        (puthash node (cons limit path) cache))
+    (let* ((prefix (and cursor (cdr cached)))
+           (remaining (- limit (length prefix)))
+           (path (if (or (null pending) (<= remaining 0))
+                     prefix
+                   (append prefix (seq-take pending remaining)))))
+      (puthash tail (cons limit path) cache)
       path)))
 
 (defun tessera-thread-prefix (context &optional width)
@@ -1029,6 +1235,7 @@ layout overlays; the context always retains its full ancestry."
                      (tessera--thread-prefix-path
                       tail (+ 2 (ceiling width indent)))
                    (reverse tail)))
+           (ancestors (butlast path))
            (branch
             (tessera-glyph-render
              (tessera-glyph-resolve
@@ -1036,10 +1243,11 @@ layout overlays; the context always retains its full ancestry."
               tessera--thread-glyph-defaults tessera-thread-glyphs)
              context))
            (vertical
-            (tessera-glyph-render
-             (tessera-glyph-resolve
-              'vertical tessera--thread-glyph-defaults
-              tessera-thread-glyphs) context)))
+            (when (memq t ancestors)
+              (tessera-glyph-render
+               (tessera-glyph-resolve
+                'vertical tessera--thread-glyph-defaults
+                tessera-thread-glyphs) context))))
       (concat
        (mapconcat
         (lambda (continues)
@@ -1048,7 +1256,7 @@ layout overlays; the context always retains its full ancestry."
            (propertize
             (make-string (if continues (1- indent) indent) ?\s)
             'tessera--layout-space t)))
-        (butlast path) "")
+        ancestors "")
        branch))))
 
 (defun tessera--make-entry-context
@@ -1066,6 +1274,23 @@ layout overlays; the context always retains its full ancestry."
     (unless (eq (tessera-entry-context-backend context) backend)
       (error "Entry context names backend `%s', expected `%s'"
              (tessera-entry-context-backend context) backend))
+    (when-let* ((_ tessera--month-enabled)
+                (reader
+                 (tessera--entry-backend-month-date definition)))
+      (let* ((raw (condition-case nil
+                      (funcall reader context)
+                    (error nil)))
+             (time (tessera--valid-time raw))
+             (unread-reader
+              (tessera--entry-backend-month-unread-p definition)))
+        (setf (tessera-entry-context-month-time context) time
+              (tessera-entry-context-month-undated context)
+              (null time)
+              (tessera-entry-context-month-unread context)
+              (and unread-reader
+                   (condition-case nil
+                       (funcall unread-reader context)
+                     (error nil))))))
     context))
 
 (defun tessera--space (width)
@@ -1112,6 +1337,34 @@ RIGHT-OFFSET is a column count or a one-element pixel count list."
   visible
   point)
 
+(defun tessera--month-warning-segment-p
+    (definition context name)
+  "Return non-nil when NAME carries CONTEXT's date warning.
+DEFINITION supplies the backend warning selector."
+  (when-let* ((selector
+               (tessera--entry-backend-month-warning-segment
+                definition)))
+    (eq name
+        (condition-case nil
+            (funcall selector context)
+          (error nil)))))
+
+(defun tessera--month-warning-prefix (context)
+  "Return the inert missing-date warning prefix for CONTEXT."
+  (let* ((glyph
+          (tessera-glyph-resolve
+           'undated tessera--month-glyph-defaults
+           tessera-month-glyphs))
+         (text (tessera-glyph-render glyph context)))
+    (unless (string-empty-p text)
+      (remove-text-properties
+       0 (length text)
+       '(keymap nil follow-link nil pointer nil mouse-face nil)
+       text)
+      (put-text-property 0 (length text) 'help-echo
+                         "Missing or invalid date" text)
+      (concat text (tessera--space 1)))))
+
 (defun tessera--render-segment (reference definition context)
   "Render segment REFERENCE using DEFINITION and CONTEXT."
   (if (eq (car-safe reference) :slots)
@@ -1120,12 +1373,24 @@ RIGHT-OFFSET is a column count or a one-element pixel count list."
            (provider
             (cdr (assq name
                        (tessera--entry-backend-segments definition))))
-           (value (funcall provider context)))
+           (value (funcall provider context))
+           (warning
+            (and tessera--month-enabled
+                 (tessera-entry-context-month-undated context)
+                 (tessera--month-warning-segment-p
+                  definition context name)
+                 (tessera--month-warning-prefix context))))
       (unless (or (null value) (stringp value))
         (error "Segment provider `%s' returned `%S'" name value))
       (when (and value (string-match-p "[\n\r]" value))
         (error "Segment provider `%s' returned multiline text" name))
       (when value
+        (setq value (copy-sequence value))
+        (when warning
+          (unless (string-empty-p value)
+            (put-text-property
+             0 1 'tessera--month-original t value))
+          (setq value (concat warning value)))
         (let* ((properties (and (consp reference) (cdr reference)))
                (width (string-width value))
                (maximum (plist-get properties :max-width))
@@ -1167,7 +1432,7 @@ RIGHT-OFFSET is a column count or a one-element pixel count list."
 
 (defun tessera--single-line-width (left right slot-width)
   "Return the allocated line width for LEFT, RIGHT, and SLOT-WIDTH."
-  (+ (* 2 tessera-entry-safe-gap)
+  (+ (* 2 tessera-safe-gap)
      tessera-entry-left-padding
      slot-width
      (if (and (> slot-width 0)
@@ -1175,7 +1440,7 @@ RIGHT-OFFSET is a column count or a one-element pixel count list."
          tessera-entry-segment-gap
        0)
      (tessera--segments-width left)
-     tessera-entry-flex-gap-min-width
+     tessera-flex-gap-min-width
      (tessera--segments-width right)
      tessera-entry-right-padding))
 
@@ -1319,7 +1584,13 @@ Use a period if the marker's first character is too wide to fit."
               (tessera--rendered-segment-truncate segment)))))
        (when (and (tessera--rendered-segment-point segment)
                   (not (string-empty-p text)))
-         (put-text-property 0 1 'tessera-entry-point t text))
+         (let ((position
+                (or (text-property-any
+                     0 (length text) 'tessera--month-original t text)
+                    0)))
+           (when (< position (length text))
+             (put-text-property
+              position (1+ position) 'tessera-entry-point t text))))
        (tessera--prepare-hover text)))
    (tessera--visible-segments segments)
    (tessera--space tessera-entry-segment-gap)))
@@ -1514,11 +1785,44 @@ render as an empty string."
             ('right remaining))))
     (cons left (- remaining left))))
 
-(defun tessera--fit-glyph-width (text width)
+(defun tessera--string-pixel-width (string &optional buffer)
+  "Measure STRING in pixels with BUFFER's display properties.
+BUFFER defaults to the current buffer.  Use the selected frame.
+Keep measurement independent of line prefixes and line numbers."
+  (if (string-empty-p string)
+      0
+    (let* ((source (or buffer (current-buffer)))
+           (remapping (buffer-local-value
+                       'face-remapping-alist source))
+           (aliases (buffer-local-value
+                     'char-property-alias-alist source))
+           (properties (buffer-local-value
+                        'default-text-properties source)))
+      (with-current-buffer
+          (get-buffer-create " *tessera-pixel-width*" t)
+        (let ((face-remapping-alist remapping)
+              (char-property-alias-alist aliases)
+              (default-text-properties properties)
+              (buffer-undo-list t)
+              (inhibit-read-only t)
+              (inhibit-modification-hooks t)
+              (deactivate-mark nil))
+          (unwind-protect
+              (progn
+                (insert string)
+                (add-text-properties
+                 (point-min) (point-max)
+                 '(display-line-numbers-disable t
+                                                line-prefix "" wrap-prefix ""))
+                (car (buffer-text-pixel-size nil nil t)))
+            (erase-buffer)))))))
+
+(defun tessera--fit-glyph-width (text width &optional buffer)
   "Fit TEXT within WIDTH pixels, returning its final pixel width.
 Shrink only oversized glyphs, preserving their other properties.
-TEXT must be a private rendered copy.  Use the selected frame."
-  (let ((pixels (string-pixel-width text)))
+TEXT must be a private rendered copy.  Use the selected frame and
+BUFFER's display properties, or those of the current buffer."
+  (let ((pixels (tessera--string-pixel-width text buffer)))
     ;; Font sizes are discrete, so a proportional step can round up.
     ;; Bound retries for fonts that cannot be scaled.
     (cl-loop repeat 16
@@ -1527,7 +1831,7 @@ TEXT must be a private rendered copy.  Use the selected frame."
                  0 (length text)
                  (list :height (* 0.99 (/ (float width) pixels)))
                  nil text)
-             (setq pixels (string-pixel-width text)))
+             (setq pixels (tessera--string-pixel-width text buffer)))
     (when (> pixels width)
       (error "Glyph cannot fit within %d pixels" width))
     pixels))
@@ -1578,7 +1882,9 @@ Return nil when the selector returns nil and OMIT-EMPTY is non-nil."
                              (* (tessera-glyph-slot-width slot)
                                 (frame-char-width frame))))
                         (tessera--glyph-slot-padding
-                         slot (tessera--fit-glyph-width text width)
+                         slot (tessera--fit-glyph-width
+                               text width
+                               (tessera-entry-context-buffer context))
                          width)))
                   (tessera--glyph-slot-padding slot content-width)))
                (space (if pixels #'tessera--pixel-space
@@ -1599,7 +1905,9 @@ Return nil when the selector returns nil and OMIT-EMPTY is non-nil."
   (let ((frame (tessera--glyph-frame context)))
     (if (display-graphic-p frame)
         (with-selected-frame frame
-          (tessera--pixel-space (string-pixel-width rendered)))
+          (tessera--pixel-space
+           (tessera--string-pixel-width
+            rendered (tessera-entry-context-buffer context))))
       (tessera--space (tessera-glyph-slot-width slot)))))
 
 (defun tessera--render-glyph-slots
@@ -1644,7 +1952,9 @@ keep their individual positions.  Each selector runs once."
         (cons rendered
               (if (and frame (display-graphic-p frame))
                   (with-selected-frame frame
-                    (ceiling (string-pixel-width rendered)
+                    (ceiling (tessera--string-pixel-width
+                              rendered
+                              (tessera-entry-context-buffer context))
                              (frame-char-width)))
                 width))))))
 
@@ -1674,6 +1984,41 @@ keep their individual positions.  Each selector runs once."
 (defun tessera--visual-line-break ()
   "Return a logical space displayed as a visual line break."
   (propertize " " 'display "\n"))
+
+(defun tessera--month-undated-background (context)
+  "Return the computed missing-date background for CONTEXT."
+  (let* ((frame (tessera--glyph-frame context))
+         (warning
+          (face-attribute 'warning :foreground frame 'default))
+         (background
+          (face-attribute 'default :background frame 'default))
+         (warning-rgb
+          (and (stringp warning) (color-name-to-rgb warning)))
+         (background-rgb
+          (and (stringp background)
+               (color-name-to-rgb background))))
+    (when (and warning-rgb background-rgb)
+      (apply #'color-rgb-to-hex
+             (append (color-blend
+                      warning-rgb background-rgb 0.15)
+                     '(2))))))
+
+(defun tessera--month-undated-faces (context)
+  "Return missing-date faces for CONTEXT.
+An explicitly customized background on
+`tessera-month-undated-face' takes precedence over the computed
+fallback."
+  (let* ((frame (tessera--glyph-frame context))
+         (background
+          (face-attribute
+           'tessera-month-undated-face :background frame nil))
+         (fallback
+          (and (eq background 'unspecified)
+               (tessera--month-undated-background context))))
+    (if fallback
+        (list 'tessera-month-undated-face
+              `(:background ,fallback :extend nil))
+      'tessera-month-undated-face)))
 
 (defun tessera--clip-thread-content (text width)
   "Clip thread TEXT on the right to WIDTH columns when necessary.
@@ -1745,7 +2090,7 @@ LEADING-WIDTH supplies the shared minimum width of that area."
             (if (and (> slot-width 0) (> (length left-string) 0))
                 (tessera--space tessera-entry-segment-gap)
               ""))
-           (margin (+ tessera-entry-safe-gap
+           (margin (+ tessera-safe-gap
                       tessera-entry-right-padding))
            (right-offset
             (if (and (window-live-p window)
@@ -1754,17 +2099,20 @@ LEADING-WIDTH supplies the shared minimum width of that area."
                   (with-selected-window window
                     ;; Fallback fonts need not occupy whole columns.
                     (list (+ (* margin (frame-char-width))
-                             (string-pixel-width right-string)))))
+                             (tessera--string-pixel-width
+                              right-string
+                              (tessera-entry-context-buffer
+                               context))))))
               (+ margin (tessera--segments-width right))))
            (left-string
             (if (window-live-p window)
                 (tessera--clip-thread-content
                  left-string
                  (- (window-body-width window)
-                    tessera-entry-safe-gap tessera-entry-left-padding
+                    tessera-safe-gap tessera-entry-left-padding
                     slot-width (if (string-empty-p slot-gap) 0
                                  tessera-entry-segment-gap)
-                    tessera-entry-flex-gap-min-width
+                    tessera-flex-gap-min-width
                     (if (consp right-offset)
                         (ceiling (car right-offset)
                                  (frame-char-width
@@ -1777,12 +2125,17 @@ LEADING-WIDTH supplies the shared minimum width of that area."
              slots
              slot-gap
              left-string
-             (tessera--space tessera-entry-flex-gap-min-width)
+             (tessera--space tessera-flex-gap-min-width)
              (tessera--align-space right-offset)
              right-string)))
+      (when (and tessera--month-enabled
+                 (tessera-entry-context-month-undated context))
+        (add-face-text-property
+         0 (length surface)
+         (tessera--month-undated-faces context) nil surface))
       ;; Right alignment already reserves right padding and safe gap.
       ;; A trailing after-string can wrap the native newline.
-      (concat (tessera--space tessera-entry-safe-gap) surface))))
+      (concat (tessera--space tessera-safe-gap) surface))))
 
 (defun tessera--render-single-line (layout definition context)
   "Render single-line LAYOUT using DEFINITION and CONTEXT."
@@ -1890,6 +2243,854 @@ span using the face of the character under the pointer."
      (list (nreverse placements) tessera-entry-bottom-padding)
      content)
     content))
+
+;;;; Month grouping
+
+(cl-defstruct tessera--month-entry
+  "Record one rendered native entry and its buffer bounds."
+  start end context)
+
+(cl-defstruct tessera--month-unit
+  "Record one entry or native thread used for month assignment."
+  entries key unread total)
+
+(cl-defstruct tessera--month-group
+  "Record one contiguous month run in the current buffer."
+  key time entries start end unread total)
+
+(defvar-local tessera--month-folds nil
+  "Fold states keyed by (YEAR MONTH) in the current buffer.")
+
+(defvar-local tessera--month-groups nil
+  "Month groups produced by the most recent synchronization.")
+
+(defvar-local tessera--month-overlays nil
+  "Overlays owned by month grouping in the current buffer.")
+
+(defvar-local tessera--month-visible-entries []
+  "Ordered vector of entries outside folded months.")
+
+(defvar-local tessera--month-windows nil
+  "Windows and dimensions used for the installed month headings.")
+
+(defvar-local tessera--month-heading-appearance nil
+  "Appearance settings used for the installed month headings.")
+
+(defvar-local tessera--month-order-warning nil
+  "Non-nil after warning about incompatible month order.")
+
+(defvar tessera--month-invisibility 'tessera-month-hidden
+  "Invisibility symbol used for folded month bodies.")
+
+(defvar-local tessera--month-invisibility-installed nil
+  "Non-nil when Tessera added its month invisibility symbol.")
+
+(defvar tessera--month-navigation nil
+  "Dynamically non-nil while native month-aware navigation runs.")
+
+(defvar tessera--month-header-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [down-mouse-1]
+                #'tessera--month-mouse-toggle)
+    (define-key map [mouse-1] #'tessera--month-mouse-toggle)
+    map)
+  "Mouse-only keymap installed on month heading surfaces.")
+
+(defun tessera--month-invisibility-present-p ()
+  "Return non-nil when the month category is already active."
+  (or (eq buffer-invisibility-spec t)
+      (memq tessera--month-invisibility
+            buffer-invisibility-spec)
+      (assq tessera--month-invisibility
+            buffer-invisibility-spec)))
+
+(defun tessera--month-clear-display ()
+  "Remove month overlays and restore decorations they suppressed."
+  (dolist (overlay tessera--month-overlays)
+    (dolist (saved (overlay-get overlay 'tessera-month-suppressed))
+      (pcase-let ((`(,other ,property ,value) saved))
+        (when (and (overlay-buffer other)
+                   (null (overlay-get other property)))
+          (overlay-put other property value))))
+    (delete-overlay overlay))
+  (setq tessera--month-overlays nil)
+  (remove-hook 'window-size-change-functions
+               #'tessera--month-window-change t)
+  (remove-hook 'post-command-hook
+               #'tessera--month-window-change t)
+  (setq tessera--month-windows nil
+        tessera--month-heading-appearance nil)
+  (when tessera--month-invisibility-installed
+    (remove-from-invisibility-spec tessera--month-invisibility)
+    (setq tessera--month-invisibility-installed nil))
+  (setq tessera--month-groups nil
+        tessera--month-visible-entries []))
+
+(defun tessera-month-clear (&optional preserve-state)
+  "Remove month display from the current buffer.
+Clear remembered fold state unless PRESERVE-STATE is non-nil."
+  (tessera--month-clear-display)
+  (unless preserve-state
+    (setq tessera--month-folds nil
+          tessera--month-order-warning nil))
+  (setq tessera--month-enabled nil
+        tessera--month-thread-date nil))
+
+(defun tessera-month-configure (enabled thread-date)
+  "Configure current buffer month grouping.
+ENABLED controls grouping and warnings.  THREAD-DATE is `latest'
+or `root'.  Existing fold state is retained when grouping is only
+temporarily disabled."
+  (unless (memq thread-date '(latest root))
+    (error "Invalid month thread date policy: %S" thread-date))
+  (setq tessera--month-enabled enabled
+        tessera--month-thread-date thread-date)
+  (if enabled
+      (tessera-month-sync)
+    (tessera--month-clear-display)))
+
+(defun tessera--month-entry-at (position)
+  "Return the rendered entry context at POSITION, or nil."
+  (get-text-property position 'tessera-entry-context))
+
+(defun tessera--month-scan-entries ()
+  "Return rendered entries in current buffer order."
+  (let (entries)
+    (save-excursion
+      (goto-char (point-min))
+      (while (< (point) (point-max))
+        (let* ((start (point))
+               (end (line-end-position))
+               (context (tessera--month-entry-at start))
+               (context-position
+                (and (null context)
+                     (next-single-property-change
+                      start 'tessera-entry-context nil end))))
+          (when (and context-position (< context-position end))
+            (setq context
+                  (tessera--month-entry-at context-position)))
+          (when context
+            (push (make-tessera--month-entry
+                   :start start
+                   :end (min (point-max) (1+ end))
+                   :context context)
+                  entries)))
+        (forward-line 1)))
+    (nreverse entries)))
+
+(defun tessera--month-entry-thread-id (entry)
+  "Return ENTRY's native thread ID, or nil."
+  (when-let* ((thread
+               (tessera-entry-context-thread
+                (tessera--month-entry-context entry))))
+    (tessera-thread-context-root thread)))
+
+(defun tessera--month-key (time)
+  "Return the local (YEAR MONTH) key for TIME."
+  (when time
+    (let ((decoded (decode-time time)))
+      (list (decoded-time-year decoded)
+            (decoded-time-month decoded)))))
+
+(defun tessera--month-latest-time (entries)
+  "Return the newest valid date among ENTRIES."
+  (let (latest)
+    (dolist (entry entries)
+      (when-let* ((time
+                   (tessera-entry-context-month-time
+                    (tessera--month-entry-context entry))))
+        (when (or (null latest) (time-less-p latest time))
+          (setq latest time))))
+    latest))
+
+(defun tessera--month-assignment-time (entries)
+  "Return the configured assignment date for unit ENTRIES.
+Include native members hidden by a folded thread, so folding does not
+change the unit's month."
+  (if (eq tessera--month-thread-date 'root)
+      (tessera-entry-context-month-time
+       (tessera--month-entry-context (car entries)))
+    (tessera--month-latest-time entries)))
+
+(defun tessera--month-unit-counts (entries)
+  "Return (UNREAD TOTAL) for unit ENTRIES."
+  (let* ((context
+          (tessera--month-entry-context (car entries)))
+         (thread (tessera-entry-context-thread context)))
+    (if thread
+        (list (tessera-thread-context-unread thread)
+              (tessera-thread-context-total thread))
+      (list (if (tessera-entry-context-month-unread context)
+                1 0)
+            1))))
+
+(defun tessera--month-make-unit (entries)
+  "Return a month unit containing ENTRIES."
+  (pcase-let* ((time (tessera--month-assignment-time entries))
+               (`(,unread ,total)
+                (tessera--month-unit-counts entries)))
+    (make-tessera--month-unit
+     :entries entries
+     :key (tessera--month-key time)
+     :unread unread
+     :total total)))
+
+(defun tessera--month-build-units (entries)
+  "Return native thread-aware month units for ENTRIES."
+  (let (units current current-id)
+    (dolist (entry entries)
+      (let ((id (tessera--month-entry-thread-id entry)))
+        (if (and current id (equal id current-id))
+            (push entry current)
+          (when current
+            (push (tessera--month-make-unit
+                   (nreverse current))
+                  units))
+          (setq current (list entry)
+                current-id id))))
+    (when current
+      (push (tessera--month-make-unit
+             (nreverse current))
+            units))
+    (nreverse units)))
+
+(defun tessera--month-absorb-undated (units)
+  "Assign undated UNITS to an adjacent dated month.
+Prefer the preceding valid month.  Leading undated units use the
+first following valid month.  Return non-nil when any date exists."
+  (let (previous first-following)
+    (dolist (unit units)
+      (when (tessera--month-unit-key unit)
+        (unless first-following
+          (setq first-following
+                (tessera--month-unit-key unit)))
+        (setq previous (tessera--month-unit-key unit)))
+      (when previous
+        (setf (tessera--month-unit-key unit) previous)))
+    (when first-following
+      (dolist (unit units)
+        (unless (tessera--month-unit-key unit)
+          (setf (tessera--month-unit-key unit)
+                first-following)))
+      t)))
+
+(defun tessera--month-compatible-order-p (units)
+  "Return non-nil when every month in UNITS is contiguous."
+  (let ((seen (make-hash-table :test #'equal))
+        previous compatible)
+    (setq compatible t)
+    (dolist (unit units)
+      (let ((key (tessera--month-unit-key unit)))
+        (unless (equal key previous)
+          (when (gethash key seen)
+            (setq compatible nil))
+          (puthash key t seen)
+          (setq previous key))))
+    compatible))
+
+(defun tessera--month-build-groups (units)
+  "Combine adjacent UNITS into month groups."
+  (let (groups current key)
+    (dolist (unit units)
+      (let ((unit-key (tessera--month-unit-key unit)))
+        (unless (equal unit-key key)
+          (when current (push current groups))
+          (setq key unit-key
+                current
+                (make-tessera--month-group
+                 :key key
+                 :time (encode-time
+                        0 0 0 1 (cadr key) (car key))
+                 :entries nil
+                 :unread 0
+                 :total 0)))
+        (dolist (entry (tessera--month-unit-entries unit))
+          (push entry (tessera--month-group-entries current)))
+        (setf (tessera--month-group-unread current)
+              (+ (tessera--month-group-unread current)
+                 (tessera--month-unit-unread unit))
+              (tessera--month-group-total current)
+              (+ (tessera--month-group-total current)
+                 (tessera--month-unit-total unit)))))
+    (when current (push current groups))
+    (setq groups (nreverse groups))
+    (dolist (group groups)
+      (let ((entries
+             (nreverse (tessera--month-group-entries group))))
+        (setf (tessera--month-group-entries group) entries
+              (tessera--month-group-start group)
+              (tessera--month-entry-start (car entries))
+              (tessera--month-group-end group)
+              (tessera--month-entry-end (car (last entries))))))
+    groups))
+
+(defun tessera--month-prune-folds (groups)
+  "Retain fold states only for current GROUPS."
+  (let ((old (or tessera--month-folds
+                 (make-hash-table :test #'equal)))
+        (fresh (make-hash-table :test #'equal)))
+    (dolist (group groups)
+      (let ((key (tessera--month-group-key group)))
+        (puthash key (and (gethash key old) t) fresh)))
+    (setq tessera--month-folds fresh)))
+
+(defun tessera--month-group-at (&optional position)
+  "Return month group containing POSITION or point."
+  (let ((position (or position (point))))
+    (cl-find-if
+     (lambda (group)
+       (and (<= (tessera--month-group-start group) position)
+            (< position (tessera--month-group-end group))))
+     tessera--month-groups)))
+
+(defun tessera--month-normalize-folds (groups)
+  "Ensure at least one of GROUPS is expanded."
+  (when (and groups
+             (cl-every
+              (lambda (group)
+                (gethash (tessera--month-group-key group)
+                         tessera--month-folds))
+              groups))
+    (let ((group
+           (or (cl-find-if
+                (lambda (candidate)
+                  (and (<= (tessera--month-group-start candidate)
+                           (point))
+                       (< (point)
+                          (tessera--month-group-end candidate))))
+                groups)
+               (car groups))))
+      (puthash (tessera--month-group-key group) nil
+               tessera--month-folds))))
+
+(defun tessera--month-definition (group)
+  "Return the registered backend definition for GROUP."
+  (let* ((entry (car (tessera--month-group-entries group)))
+         (context (tessera--month-entry-context entry)))
+    (tessera--find-entry-backend
+     (tessera-entry-context-backend context))))
+
+(defun tessera--month-count-string (group &optional window)
+  "Return collapsed count text for GROUP in optional WINDOW."
+  (let* ((entry (car (tessera--month-group-entries group)))
+         (context (copy-tessera-entry-context
+                   (tessera--month-entry-context entry)))
+         (definition (tessera--month-definition group))
+         (provider
+          (tessera--entry-backend-month-glyph definition)))
+    (when provider
+      (when window
+        (setf (tessera-entry-context-window context) window))
+      (let* ((unread-glyph
+              (condition-case nil
+                  (funcall provider 'unread context)
+                (error nil)))
+             (read-glyph
+              (condition-case nil
+                  (funcall provider 'read context)
+                (error nil)))
+             (unread
+              (if (tessera-glyph-p unread-glyph)
+                  (tessera-glyph-render unread-glyph context)
+                ""))
+             (read
+              (if (tessera-glyph-p read-glyph)
+                  (tessera-glyph-render read-glyph context)
+                ""))
+             (read-count
+              (- (tessera--month-group-total group)
+                 (tessera--month-group-unread group))))
+        (concat unread
+                (unless (string-empty-p unread) " ")
+                (number-to-string
+                 (tessera--month-group-unread group))
+                (tessera--space tessera-month-count-gap)
+                read
+                (unless (string-empty-p read) " ")
+                (number-to-string read-count))))))
+
+(defun tessera--truncate-string-pixels (string width)
+  "Truncate STRING at the tail to fit within WIDTH pixels."
+  (if (<= (tessera--string-pixel-width string) width)
+      string
+    (let ((ellipsis (copy-sequence tessera-entry-ellipsis))
+          (low 0)
+          (high (length string)))
+      (when (> (length string) 0)
+        (add-text-properties
+         0 (length ellipsis) (text-properties-at 0 string)
+         ellipsis))
+      (while (and (> (tessera--string-pixel-width ellipsis) width)
+                  (> (length ellipsis) 0))
+        (setq ellipsis
+              (substring ellipsis 0 (1- (length ellipsis)))))
+      (while (< low high)
+        (let ((middle (/ (+ low high 1) 2)))
+          (if (<= (tessera--string-pixel-width
+                   (concat (substring string 0 middle) ellipsis))
+                  width)
+              (setq low middle)
+            (setq high (1- middle)))))
+      (if (> (tessera--string-pixel-width ellipsis) width)
+          ""
+        (concat (substring string 0 low) ellipsis)))))
+
+(defun tessera--month-style-text (text face)
+  "Return a copy of TEXT styled with month FACE.
+Keep existing glyph faces ahead of FACE and the base month face."
+  (let ((styled (copy-sequence text)))
+    (add-face-text-property
+     0 (length styled) face t styled)
+    (add-face-text-property
+     0 (length styled) 'tessera-month-face t styled)
+    styled))
+
+(defun tessera--month-compose-header
+    (group collapsed width unit pixelwise &optional window)
+  "Compose GROUP's heading within WIDTH display units.
+COLLAPSED controls statistics.  UNIT is one column in display
+units.  When PIXELWISE is non-nil, WIDTH and UNIT are pixels.
+WINDOW, when non-nil, supplies the display context for count glyphs."
+  (let* ((title
+          (tessera--month-style-text
+           (format-time-string
+            tessera-month-format
+            (tessera--month-group-time group))
+           'tessera-month-title-face))
+         (statistics
+          (and collapsed
+               (tessera--month-count-string group window)))
+         (statistics
+          (and statistics
+               (tessera--month-style-text
+                statistics 'tessera-month-statistics-face)))
+         (measure (if pixelwise
+                      #'tessera--string-pixel-width
+                    #'string-width))
+         (space (if pixelwise
+                    #'tessera--pixel-space
+                  #'tessera--space))
+         (safe-gap
+          (min (* tessera-safe-gap unit) (/ width 2)))
+         (inner-width (max 0 (- width (* 2 safe-gap))))
+         (left-padding
+          (min (* tessera-month-left-padding unit) inner-width))
+         (right-padding
+          (min (* tessera-month-right-padding unit)
+               (- inner-width left-padding)))
+         (fixed (+ left-padding right-padding))
+         (flex-width (* tessera-flex-gap-min-width unit))
+         (statistics-width
+          (and statistics (funcall measure statistics)))
+         (show-statistics
+          (and statistics-width
+               (>= inner-width
+                   (+ fixed unit flex-width statistics-width))))
+         (title-width
+          (max 0
+               (- inner-width fixed
+                  (if show-statistics
+                      (+ flex-width statistics-width)
+                    0))))
+         (title
+          (if pixelwise
+              (tessera--truncate-string-pixels title title-width)
+            (tessera--truncate-string title title-width 'tail)))
+         (fill
+          (max 0
+               (- inner-width fixed (funcall measure title)
+                  (if show-statistics statistics-width 0))))
+         (surface
+          (concat
+           (funcall space left-padding)
+           title
+           (funcall space fill)
+           (and show-statistics statistics)
+           (funcall space right-padding)))
+         (help (if collapsed
+                   "Click to expand this month"
+                 "Click to collapse this month")))
+    (tessera--add-default-property
+     surface 'face 'tessera-month-face)
+    (add-text-properties
+     0 (length surface)
+     (list 'keymap tessera--month-header-map
+           'mouse-face 'tessera-month-hover-face
+           'follow-link [mouse-1]
+           'pointer 'hand
+           'help-echo help
+           'tessera-month-key (tessera--month-group-key group))
+     surface)
+    (concat
+     (or (tessera--padding-string tessera-month-top-padding) "")
+     (tessera--inert-layout-string
+      (funcall space safe-gap))
+     surface
+     (tessera--inert-layout-string
+      (funcall space safe-gap))
+     "\n"
+     (or (tessera--padding-string
+          tessera-month-bottom-padding)
+         ""))))
+
+(defun tessera--month-header-string (group collapsed window)
+  "Return GROUP's heading in COLLAPSED state for WINDOW.
+Use a default width when WINDOW is nil and the buffer is hidden."
+  (let* ((buffer (current-buffer))
+         (frame (and window (window-frame window)))
+         (pixelwise (and frame (display-graphic-p frame)))
+         (width (if window
+                    (window-body-width window pixelwise)
+                  80))
+         (unit (if pixelwise (frame-char-width frame) 1)))
+    (if pixelwise
+        (with-selected-frame frame
+          (with-current-buffer buffer
+            (tessera--month-compose-header
+             group collapsed width unit t window)))
+      (tessera--month-compose-header
+       group collapsed width unit nil window))))
+
+(defun tessera--month-suppress-overlay-strings (start end fold)
+  "Hide decorative overlay strings between START and END.
+Remember them on FOLD for exact restoration."
+  (let (saved)
+    (dolist (overlay (overlays-in start end))
+      (unless (or (eq overlay fold)
+                  (overlay-get overlay 'tessera-month-overlay))
+        (dolist (property '(before-string after-string))
+          (when-let* ((value (overlay-get overlay property)))
+            (push (list overlay property value) saved)
+            (overlay-put overlay property nil)))))
+    (overlay-put fold 'tessera-month-suppressed saved)))
+
+(defun tessera--month-open-isearch (overlay)
+  "Permanently expand the month hidden by OVERLAY for Isearch."
+  (when-let* ((key (overlay-get overlay 'tessera-month-key)))
+    (puthash key nil tessera--month-folds)
+    (tessera--month-redisplay)))
+
+(defun tessera--month-group-anchor (group)
+  "Return GROUP's first position visible to redisplay."
+  (let ((position (tessera--month-group-start group))
+        (end (tessera--month-group-end group)))
+    (while (and (< position end) (invisible-p position))
+      (setq position (next-char-property-change position end)))
+    (if (< position end) position (point-max))))
+
+(defun tessera--month-install-fold (group)
+  "Install a folding overlay for collapsed GROUP."
+  (let ((key (tessera--month-group-key group)))
+    (when (gethash key tessera--month-folds)
+      (let* ((start (tessera--month-group-start group))
+             (end (tessera--month-group-end group))
+             (fold (make-overlay start end nil nil t)))
+        (push fold tessera--month-overlays)
+        (overlay-put fold 'tessera-month-overlay 'fold)
+        (overlay-put fold 'tessera-month-key key)
+        (overlay-put fold 'invisible tessera--month-invisibility)
+        (overlay-put fold 'isearch-open-invisible
+                     #'tessera--month-open-isearch)
+        (overlay-put fold 'isearch-open-invisible-temporary
+                     #'ignore)
+        (tessera--month-suppress-overlay-strings start end fold)))))
+
+(defun tessera--month-install-headings (groups window)
+  "Install heading surfaces for GROUPS in WINDOW."
+  (let ((surfaces (make-hash-table :test #'eql))
+        (anchor (point-max))
+        anchors)
+    ;; A reverse pass shares the next visible anchor across folds.
+    ;; Prepending headings retains their native buffer order.
+    (dolist (group (reverse groups))
+      (let* ((key (tessera--month-group-key group))
+             (collapsed (gethash key tessera--month-folds))
+             (item (tessera--month-header-string
+                    group collapsed window)))
+        (unless collapsed
+          (setq anchor (tessera--month-group-anchor group)))
+        (unless (gethash anchor surfaces)
+          (push anchor anchors))
+        (puthash anchor
+                 (cons item (gethash anchor surfaces))
+                 surfaces)))
+    (dolist (anchor anchors)
+      (let* ((items (gethash anchor surfaces))
+             (header (make-overlay anchor anchor nil nil t)))
+        (push header tessera--month-overlays)
+        (overlay-put header 'tessera-month-overlay 'header)
+        (overlay-put header 'window window)
+        ;; Entry layout overlays use priority 1 so that their
+        ;; padding follows boundary headings at the same anchor.
+        (overlay-put header 'priority 0)
+        (overlay-put header 'before-string
+                     (apply #'concat items))))))
+
+(defun tessera--month-window-state ()
+  "Return the current heading windows and their display dimensions."
+  (mapcar
+   (lambda (window)
+     (list window (window-body-width window t)
+           (window-body-width window)
+           (frame-char-width (window-frame window))))
+   (get-buffer-window-list (current-buffer) nil t)))
+
+(defun tessera--month-heading-appearance ()
+  "Return options affecting only month heading presentation."
+  (list tessera-month-format tessera-month-left-padding
+        tessera-month-right-padding tessera-month-top-padding
+        tessera-month-bottom-padding tessera-month-count-gap
+        (copy-tree face-remapping-alist)))
+
+(defun tessera--month-refresh-headings ()
+  "Redraw headings without rebuilding entries or native folds."
+  (save-restriction
+    (widen)
+    (setq tessera--month-overlays
+          (cl-delete-if
+           (lambda (overlay)
+             (when (eq (overlay-get overlay 'tessera-month-overlay)
+                       'header)
+               (delete-overlay overlay)
+               t))
+           tessera--month-overlays)
+          tessera--month-windows (tessera--month-window-state)
+          tessera--month-heading-appearance
+          (tessera--month-heading-appearance))
+    (dolist (state (or tessera--month-windows '(nil)))
+      (tessera--month-install-headings tessera--month-groups
+                                       (car state)))))
+
+(defun tessera--month-window-change (&optional _window)
+  "Redraw headings after window or heading appearance changes."
+  (when (and tessera--month-groups
+             (or (not (equal tessera--month-windows
+                             (tessera--month-window-state)))
+                 (not (equal tessera--month-heading-appearance
+                             (tessera--month-heading-appearance)))))
+    (tessera--month-refresh-headings)))
+
+(defun tessera--month-display-groups (groups)
+  "Display GROUPS and cache the entries outside folded months."
+  (setq tessera--month-groups groups)
+  (let (visible)
+    (dolist (group groups)
+      (if (gethash (tessera--month-group-key group)
+                   tessera--month-folds)
+          (tessera--month-install-fold group)
+        (dolist (entry (tessera--month-group-entries group))
+          (push entry visible))))
+    (setq tessera--month-visible-entries
+          (vconcat (nreverse visible))))
+  (when groups
+    (unless (tessera--month-invisibility-present-p)
+      (add-to-invisibility-spec tessera--month-invisibility)
+      (setq tessera--month-invisibility-installed t))
+    (tessera--month-refresh-headings)
+    (add-hook 'window-size-change-functions
+              #'tessera--month-window-change nil t)
+    (add-hook 'post-command-hook
+              #'tessera--month-window-change t t)))
+
+(defun tessera--month-redisplay ()
+  "Apply fold state to the already synchronized month groups."
+  (save-restriction
+    (widen)
+    (let ((groups tessera--month-groups))
+      (tessera--month-clear-display)
+      (tessera--month-display-groups groups))))
+
+(defun tessera-month-sync ()
+  "Rebuild month headings and folds for the whole current buffer.
+Preserve any narrowing while including records outside it."
+  (interactive)
+  (save-restriction
+    (widen)
+    (tessera--month-clear-display)
+    (when tessera--month-enabled
+      (let* ((entries (tessera--month-scan-entries))
+             (units (tessera--month-build-units entries))
+             (groups (and (tessera--month-absorb-undated units)
+                          (tessera--month-build-groups units))))
+        (tessera--month-prune-folds groups)
+        (if (tessera--month-compatible-order-p units)
+            (progn
+              (setq tessera--month-order-warning nil)
+              (tessera--month-normalize-folds groups)
+              (tessera--month-display-groups groups))
+          (unless tessera--month-order-warning
+            (setq tessera--month-order-warning t)
+            (message
+             (concat "Tessera month grouping disabled: "
+                     "months are not contiguous"))))))))
+
+(defun tessera--month-event-key (event)
+  "Return the month key stored under mouse EVENT."
+  (when-let* ((position (event-start event))
+              (string-position (posn-string position)))
+    (get-text-property
+     (cdr string-position) 'tessera-month-key
+     (car string-position))))
+
+(defun tessera--month-accessible-entries (group)
+  "Return GROUP's entries accessible under the current restriction."
+  (cl-remove-if-not
+   (lambda (entry)
+     (<= (point-min) (tessera--month-entry-start entry)
+         (1- (point-max))))
+   (tessera--month-group-entries group)))
+
+(defun tessera--month-expanded-count ()
+  "Return the number of accessible, expanded month groups."
+  (cl-count-if
+   (lambda (group)
+     (and (not (gethash (tessera--month-group-key group)
+                        tessera--month-folds))
+          (tessera--month-accessible-entries group)))
+   tessera--month-groups))
+
+(defun tessera--month-neighbor-entry (group)
+  "Return a destination entry outside collapsing GROUP."
+  (let ((tail (memq group tessera--month-groups)))
+    (cl-labels
+        ((entries (candidate)
+           (unless (gethash (tessera--month-group-key candidate)
+                            tessera--month-folds)
+             (tessera--month-accessible-entries candidate))))
+      (or (cl-loop for candidate in (cdr tail)
+                   thereis (car (entries candidate)))
+          (cl-loop for candidate
+                   in (reverse (butlast tessera--month-groups
+                                        (length tail)))
+                   thereis (car (last (entries candidate))))))))
+
+(defun tessera--month-goto-entry (entry)
+  "Move to ENTRY through its backend when possible."
+  (let* ((context (tessera--month-entry-context entry))
+         (definition
+          (tessera--find-entry-backend
+           (tessera-entry-context-backend context)))
+         (positioner
+          (tessera--entry-backend-month-goto definition)))
+    (unless (and positioner (funcall positioner context))
+      (goto-char (max (point-min)
+                      (min (point-max)
+                           (tessera--month-entry-start entry))))
+      (when-let* ((preferred (tessera-entry-point)))
+        (goto-char preferred)))))
+
+(defun tessera--month-toggle (key)
+  "Toggle the month identified by KEY."
+  (when-let* ((group
+               (cl-find key tessera--month-groups
+                        :key #'tessera--month-group-key
+                        :test #'equal)))
+    (let* ((collapsed (gethash key tessera--month-folds))
+           (selected-start
+            (and collapsed
+                 (if (tessera--current-entry-start)
+                     (tessera--current-entry-start)
+                   (line-beginning-position))))
+           (contains-point
+            (and (<= (tessera--month-group-start group) (point))
+                 (< (point) (tessera--month-group-end group))))
+           (destination
+            (and (not collapsed) contains-point
+                 (tessera--month-neighbor-entry group))))
+      (if (and (not collapsed)
+               (or (and contains-point (not destination))
+                   (and (tessera--month-accessible-entries group)
+                        (<= (tessera--month-expanded-count) 1))))
+          (message "At least one month must remain expanded")
+        ;; Restore styled strings before a fold suppresses them.  A
+        ;; later highlight move cannot restore a suppressed property.
+        (tessera-entry-clear-current)
+        (puthash key (not collapsed) tessera--month-folds)
+        (tessera--month-redisplay)
+        (cond
+         (destination
+          (tessera--month-goto-entry destination))
+         ((and selected-start
+               (<= (point-min) selected-start (1- (point-max))))
+          (goto-char selected-start)
+          (when-let* ((preferred (tessera-entry-point))
+                      ((not (invisible-p preferred))))
+            (goto-char preferred))))))))
+
+(defun tessera--month-click-release-p (window)
+  "Return non-nil after a Mouse-1 click release in WINDOW.
+Let Emacs distinguish clicks from drags, including repeated clicks."
+  (let ((track-mouse t)
+        event)
+    (while (mouse-movement-p (setq event (read-event))))
+    (let* ((modifiers (event-modifiers event))
+           (release (and (eq (event-basic-type event) 'mouse-1)
+                         (not (memq 'down modifiers)))))
+      (unless release
+        (push (cons t event) unread-command-events))
+      (and release
+           (not (memq 'drag modifiers))
+           (eq (posn-window (event-start event)) window)))))
+
+(defun tessera--month-mouse-toggle (event)
+  "Toggle the month heading activated by mouse EVENT."
+  (interactive "e")
+  (let* ((position (event-start event))
+         (window (posn-window position))
+         (modifiers (event-modifiers event))
+         (key (tessera--month-event-key event)))
+    (when (and (eq (event-basic-type event) 'mouse-1)
+               (window-live-p window)
+               key
+               (if (memq 'down modifiers)
+                   (tessera--month-click-release-p window)
+                 (not (memq 'drag modifiers))))
+      (with-selected-window window
+        (deactivate-mark t)
+        (setq deactivate-mark t)
+        (tessera--month-toggle key)))))
+
+(defun tessera-month-reveal-point ()
+  "Expand a folded month when point enters it by another command."
+  (unless tessera--month-navigation
+    (when-let* ((group (tessera--month-group-at))
+                (key (tessera--month-group-key group))
+                ((gethash key tessera--month-folds)))
+      (puthash key nil tessera--month-folds)
+      (tessera--month-redisplay))))
+
+(defun tessera-month-entry-visible-p (position)
+  "Return non-nil when the entry at POSITION is month-visible."
+  (not (cl-some
+        (lambda (overlay)
+          (eq (overlay-get overlay 'tessera-month-overlay) 'fold))
+        (overlays-at position))))
+
+(defun tessera--month-visible-entry-position (direction count)
+  "Return the position COUNT visible entries in DIRECTION away.
+DIRECTION is 1 or -1.  Outside a visible entry, the nearest entry in
+DIRECTION counts as the first step.  Return nil when the requested
+target lies beyond the accessible buffer boundary."
+  (let* ((entries tessera--month-visible-entries)
+         (low 0)
+         (high (length entries))
+         current)
+    (while (< low high)
+      (let* ((middle (/ (+ low high) 2))
+             (entry (aref entries middle)))
+        (cond
+         ((< (point) (tessera--month-entry-start entry))
+          (setq high middle))
+         ((>= (point) (tessera--month-entry-end entry))
+          (setq low (1+ middle)))
+         (t (setq current middle high low)))))
+    (let* ((origin (or current (if (> direction 0) (1- low) low)))
+           (target (+ origin (* direction count))))
+      (when (and (<= 0 target) (< target (length entries)))
+        (let ((position
+               (tessera--month-entry-start (aref entries target))))
+          (when (<= (point-min) position (1- (point-max)))
+            position))))))
 
 ;;;; Entry navigation
 
@@ -2039,10 +3240,12 @@ narrowing, and displayed frames need restoration."
             (tessera--navigation-restore snapshot)
             (setq restore-needed nil))
           result)
-      (when restore-needed
-        (ignore-errors
-          (tessera--navigation-restore snapshot)))
-      (tessera--navigation-release snapshot))))
+      (unwind-protect
+          (when restore-needed
+            (condition-case nil
+                (tessera--navigation-restore snapshot)
+              ((error quit) nil)))
+        (tessera--navigation-release snapshot)))))
 
 (defun tessera-entry-point (&optional string)
   "Return the preferred navigation position in STRING or this line.
@@ -2078,6 +3281,11 @@ positions retain their character offset.  Release the saved marker."
 
 (defvar-local tessera--current-entry nil
   "Current entry's boundary markers, layout, and saved decorations.")
+
+(defun tessera--current-entry-start ()
+  "Return the current highlighted entry's start, or nil."
+  (when tessera--current-entry
+    (marker-position (nth 0 tessera--current-entry))))
 
 (defun tessera-entry-clear-current ()
   "Restore the current entry's original faces and decorations."
@@ -2293,9 +3501,13 @@ space for that anchor."
                   tessera-thread-outer-bottom-padding
                 tessera-thread-inner-bottom-padding)
             tessera-entry-bottom-padding)))
-    (tessera--entry-content
-     (tessera--render-entry-lines layout definition context)
-     prefix)))
+    (let ((entry
+           (tessera--entry-content
+            (tessera--render-entry-lines layout definition context)
+            prefix)))
+      (put-text-property 0 (length entry)
+                         'tessera-entry-context context entry)
+      entry)))
 
 (provide 'tessera)
 ;;; tessera.el ends here

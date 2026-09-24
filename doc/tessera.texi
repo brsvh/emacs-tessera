@@ -7,7 +7,7 @@
 @set txicodequoteundirected
 @set txicodequotebacktick
 @documentlanguage en
-@set VERSION 0.1.0
+@set VERSION 0.1.1
 @syncodeindex vr fn
 @syncodeindex tp fn
 
@@ -55,6 +55,7 @@ Documentation License''.
 * Introduction::          What this package provides.
 * Getting Started::       Installing and using the package.
 * Entry Layouts::         Arranging entries and adjusting spacing.
+* Month Groups::          Grouping entries under foldable months.
 * Glyph Appearance::      Choosing symbols, colors, and sizes.
 * Native Threads::        Displaying and folding message threads.
 * Gnus::                  Customizing Gnus Summary rows.
@@ -259,8 +260,9 @@ use different units.
 nonnegative integers.  The outside gap separates the entry surface from
 the window edge; inner padding belongs inside the surface.
 
-@defopt tessera-entry-safe-gap
-Outside gap on each side of an entry, initially @code{1}.
+@defopt tessera-safe-gap
+Outside gap on each side of an entry or month heading, initially
+@code{1}.
 @end defopt
 
 @defopt tessera-entry-left-padding
@@ -276,10 +278,10 @@ Gap between adjacent visible text segments, initially @code{1}.  It also
 separates leading slots from text and affects thread indentation.
 @end defopt
 
-@defopt tessera-entry-flex-gap-min-width
+@defopt tessera-flex-gap-min-width
 Minimum separation between left and right content, initially @code{1}.
-Right content is aligned to the window edge within the right padding and
-outside gap.
+Entries and collapsed month headings share this minimum.  Right content
+is aligned to the window edge within the right padding and outside gap.
 @end defopt
 
 @cindex padding, vertical
@@ -335,10 +337,266 @@ message line, leaving the heading in its ordinary faces.  In an ordinary
 two-line entry, both content lines are highlighted.
 
   Moving the mouse over an element highlights only that element.
-Decorative gaps, margins, empty slots, alignment padding, and blank tree
-indentation do not acquire a hover highlight.  Spaces within a subject
-or contact remain part of that content's hover range.  Semantic glyph
-foregrounds are retained on hover.
+  Decorative gaps, margins, empty slots, alignment padding, and blank
+tree indentation do not acquire a hover highlight.  Spaces within a
+subject or contact remain part of that content's hover range.  Semantic
+glyph foregrounds are retained on hover.
+
+@node Month Groups
+@chapter Month Groups
+@cindex month grouping
+  Tessera can place interactive month headings above Gnus Summary,
+mu4e Headers, and Elfeed Search entries.  It derives these groups from
+native records and never copies or replaces them.  Gnus summaries are
+regenerated in a matching native date order while grouping is active;
+the other adapters retain their existing buffer order.  The native
+application continues to own message identity, marks, selection, and
+bulk operations.
+
+@menu
+* Month Display::       Headings, counts, and mouse folding.
+* Month Navigation::    Moving across folded groups.
+* Month Settings::      Enabling and formatting groups.
+* Missing Dates::       Warning about unusable dates.
+@end menu
+
+@node Month Display
+@section Month Headings and Folding
+@cindex folding, month groups
+  A heading uses the local Emacs time zone and initially displays a
+title such as @samp{2026 April}.  Groups start expanded.  Click the
+heading surface with mouse button 1 to fold or unfold the group.  The
+heading is not a keyboard target, and its outside safe gaps and vertical
+padding are inert.
+
+  An expanded heading shows no counts.  A folded heading shows unread
+and read glyphs with their record counts, including zero counts.  The
+counts are messages or articles, not threads.  Native members hidden by
+a folded thread remain in these totals.  Status glyphs use the
+corresponding backend's glyph definitions and the shared glyph style.
+In a narrow window Tessera omits the statistics before truncating the
+month title with the configured ellipsis.
+
+  Headings fit each window independently when the same buffer is
+displayed in several windows.  Resizing a window adjusts its headings
+without refreshing native records.  Changing month title formatting,
+padding, or count spacing also redraws only the headings.
+
+  At least one month remains expanded.  If point is inside a group
+being folded, Tessera selects the first entry in the next expanded
+month, or the last entry in the previous one.  Native Gnus and mu4e
+preview-follow settings continue to decide whether that selection also
+changes a visible message preview.
+
+  In a narrowed buffer, the destination must be an accessible entry,
+and at least one accessible month must remain expanded.  Folding,
+unfolding, and redrawing headings preserve the narrowing.
+
+  Fold state is buffer-local and keyed by year and month.  It survives
+refreshes and temporarily disabling month grouping.  Months absent
+after a refresh are forgotten, and newly appearing months are expanded.
+Disabling the complete backend mode clears the state.  State is not
+saved after the buffer is killed.
+
+@defvr Face tessera-month-face
+Base face for the whole month heading surface.  By default it uses bold
+weight and inherits from both @code{font-lock-keyword-face} and
+@code{default}, in that precedence order.
+@end defvr
+
+@defvr Face tessera-month-title-face
+Face for the heading title.  Its default height is @code{1.3} with bold
+weight.
+@end defvr
+
+@defvr Face tessera-month-statistics-face
+Face for collapsed-group statistics.  It uses the default text size
+and normal weight, so showing the statistics does not change the
+heading height.  Its attributes take precedence over the base month
+face; status glyphs retain their own faces ahead of both.
+@end defvr
+
+@defvr Face tessera-month-hover-face
+Face used while the pointer is over the clickable heading surface.
+@end defvr
+
+@node Month Navigation
+@section Navigation Across Months
+@cindex navigation, folded months
+  Native next and previous commands treat a folded month as absent.
+They select only the final visible target, so skipping a group does not
+open its records or mark them read.  Native behavior at the beginning
+or end of the result buffer is retained.
+
+  A different command that selects a record inside a folded group
+expands that group.  This includes mu4e positioning by Message-ID.
+Isearch also expands a group permanently when it finds a match there.
+Folding is therefore only a visual and navigation filter: marked
+regions, native message collections, and bulk operations can still
+include the hidden records.
+
+  Threads are assigned as units.  Under the default @code{latest}
+policy, the newest valid date among the thread members in the current
+result chooses the month.  Under @code{root}, the first real member
+presented as the root chooses it.  A logical parent absent from the
+result does not participate.  Members hidden by native thread folding
+do participate, so folding or unfolding a thread does not change its
+month.
+
+  Loading older or newer records can change the members present in a
+thread.  Tessera recalculates its month after the native application
+regenerates the result.  In particular, an older parent loaded by Gnus
+can change a thread's @code{root} month.  Only records in the current
+result buffer participate.
+
+@node Month Settings
+@section Month Group Settings
+
+@defopt tessera-month-grouping
+Global switch for month grouping, initially @code{t}.  Setting it to
+@code{nil} also disables missing-date warnings.
+@end defopt
+
+@defopt tessera-gnus-summary-month-grouping
+Gnus Summary override.  Its initial value, @code{inherit}, follows
+@code{tessera-month-grouping}; @code{t} and @code{nil} override the
+global value.
+@end defopt
+
+@defopt tessera-mu4e-headers-month-grouping
+mu4e Headers override with the same @code{inherit}, @code{t}, and
+@code{nil} values, initially @code{inherit}.
+@end defopt
+
+@defopt tessera-elfeed-search-month-grouping
+Elfeed Search override with the same @code{inherit}, @code{t}, and
+@code{nil} values, initially @code{inherit}.
+@end defopt
+
+@defopt tessera-month-thread-date
+Global thread assignment policy, initially @code{latest}.  The other
+value is @code{root}.  This option does not affect unthreaded entries.
+@end defopt
+
+@defopt tessera-gnus-summary-month-thread-date
+Gnus thread-date override.  Its initial value, @code{inherit}, follows
+the global policy; @code{latest} and @code{root} override it.
+
+While effective Gnus month grouping is enabled, Tessera temporarily
+installs matching buffer-local Gnus sorting.  A threaded summary is
+sorted newest first by the most recent article under @code{latest}, or
+by the root article under @code{root}.  An unthreaded summary is sorted
+newest first by article date.  Tessera preserves the original subthread
+sorting, so selecting a month policy does not also select a new reply
+order within each thread.
+
+The temporary settings remain in force whenever Gnus regenerates the
+summary, including after it loads older articles.  Gnus therefore
+rebuilds and resorts the complete currently loaded result before
+Tessera recalculates groups.  A newly loaded parent can move a thread
+under @code{root}; a newly loaded reply can move it under @code{latest}.
+
+Tessera saves both the values and buffer-local status of
+@code{gnus-thread-sort-functions},
+@code{gnus-subthread-sort-functions}, and
+@code{gnus-article-sort-functions}.  To clear the temporary override,
+disable effective Gnus month grouping or disable
+@code{tessera-gnus-mode}.  An originally local setting is restored to
+its saved value.  An originally inherited setting loses Tessera's local
+binding and resumes inheriting the then-current global value.
+
+An explicit one-shot Gnus resort can replace the current order until
+the next normal summary regeneration.  If that order separates one
+month into multiple runs, Tessera suppresses headings as described in
+@ref{Missing Dates}.
+@end defopt
+
+@defopt tessera-mu4e-headers-month-thread-date
+mu4e thread-date policy, initially @code{latest}.  Its allowed values
+are @code{latest} and @code{inherit}.  Both use the latest message in a
+thread: when the global policy is @code{root}, @code{inherit} falls back
+to @code{latest}.  Tessera does not change mu4e's native sorting.
+@end defopt
+
+@defopt tessera-month-format
+Format passed to @code{format-time-string} for month titles.  Its
+initial value is @samp{%Y %B}.
+@end defopt
+
+@defopt tessera-month-left-padding
+Padding inside the left edge of a heading, initially @code{2} columns.
+@end defopt
+
+@defopt tessera-month-right-padding
+Padding inside the right edge of a heading, initially @code{1} column.
+@end defopt
+
+@defopt tessera-month-top-padding
+Height above a heading in normal line heights, initially @code{0.5}.
+@end defopt
+
+@defopt tessera-month-bottom-padding
+Height below a heading in normal line heights, initially @code{0.5}.
+@end defopt
+
+@defopt tessera-month-count-gap
+Columns between unread and read statistics, initially @code{2}.
+@end defopt
+
+  Headings also use @code{tessera-safe-gap} outside the surface and
+@code{tessera-flex-gap-min-width} before statistics.  @xref{Entry
+Spacing}.  Appearance options refresh active adapters when changed
+with Customize or @code{setopt}.
+
+  While month grouping is active, Elfeed suppresses its uncustomized
+native date separator.  An explicitly customized separator is retained.
+Custom separators remain outside the entry layout and are hidden with a
+folded month.  Disabling month grouping restores a suppressed native
+separator.
+
+@node Missing Dates
+@section Missing and Invalid Dates
+@cindex dates, missing
+@cindex dates, invalid
+  A missing, unparseable, or unreadable date does not create an
+@samp{Undated} group.  A middle or trailing record joins the preceding
+valid month; leading records join the first following valid month.  If
+every date is unusable, Tessera displays no month headings.  A valid
+date remains valid even when it is unusually old or far in the future.
+
+  Mu4e's native missing-date marker also counts as an unusable date.
+The date field displays @samp{None} in mu4e Headers and @samp{Unknown}
+in Elfeed Search, including when month grouping is disabled.  An
+unusable Elfeed date has no date-filter mouse action.
+
+  Each affected record receives a warning background and an inline
+warning glyph.  In a flat layout, the glyph precedes the subject or
+title.  In a thread layout, it precedes the author or contact.  If that
+segment is omitted, the background remains and the glyph is omitted.
+The glyph does not occupy or replace a native status slot, and its hover
+help identifies the date problem.
+
+@defopt tessera-month-glyphs
+Global overrides for the @code{undated} glyph.  Its default forms are
+@samp{!} for ASCII, @samp{⚠} for Unicode, and the Nerd Icons calendar
+alert.  Use the fields described in @ref{Customizing Glyphs}; setting
+@code{:hidden t} hides only the inline glyph.
+@end defopt
+
+@defvr Face tessera-month-undated-face
+Face for records with an unusable date.  Unless its background is
+explicitly customized, Tessera blends 15 percent of the current
+@code{warning} foreground into the @code{default} background.  Current
+entry and hover faces take precedence over this warning background.
+@end defvr
+
+  If the same valid month occurs in separate runs in buffer order,
+Tessera cannot place one heading around it safely.  It therefore
+disables month headings and folding for that buffer and reports the
+condition once.  Gnus's temporary matching sort normally prevents this
+condition; custom thread gathering or an explicit one-shot resort can
+still produce it.  Missing-date warnings remain.  Compatible ordering
+on a later refresh restores grouping silently.
 
 @node Glyph Appearance
 @chapter Glyph Appearance
@@ -1152,7 +1410,9 @@ line break inside a two-line layout.
 
   Successful movement places point at the beginning of the entry title.
 If the requested entry does not exist, point remains at its current
-position.  Other Elfeed commands retain their native behavior.
+position.  From the empty line at the end of the buffer, @kbd{p}
+returns to the last visible entry, skipping folded months.  Other
+Elfeed commands retain their native behavior.
 
 @node Elfeed Glyph Options
 @section Elfeed Glyph Options
@@ -1300,6 +1560,9 @@ below.  Accessors have the form
 @findex tessera-entry-context-window
 @findex tessera-entry-context-metadata
 @findex tessera-entry-context-thread
+@findex tessera-entry-context-month-time
+@findex tessera-entry-context-month-unread
+@findex tessera-entry-context-month-undated
 @table @code
 @item backend
 The registered backend symbol.  It must match the renderer's backend.
@@ -1318,6 +1581,19 @@ Additional adapter-owned data, opaque to the engine.
 
 @item thread
 A @code{tessera-thread-context}, or @code{nil} for an ordinary entry.
+
+@item month-time
+The normalized native date used by month grouping.  The engine fills
+this field after the context provider returns, when month grouping is
+enabled.
+
+@item month-unread
+The native unread state used for month statistics.  The engine fills
+this field from the registered month callback when grouping is enabled.
+
+@item month-undated
+Non-@code{nil} when the backend supplies a date reader but the record
+has no valid date.  The engine fills this field when grouping is enabled.
 @end table
 
   An entry context is not a @code{tessera-x-context} snapshot request.
@@ -1332,7 +1608,8 @@ segment providers, glyph slots, and layouts.  Rendering uses that name
 to select the registered definition.
 
 @defun tessera-entry-register backend &key context segments @
-  glyph-slots layouts thread-layout
+  glyph-slots layouts thread-layout month-date month-unread-p @
+  month-glyph month-warning-segment month-goto
 Register or replace the definition for the non-@code{nil} symbol
 @var{backend}, returning that symbol.  Validate the new definition
 before installing it; invalid definitions signal an error without
@@ -1350,6 +1627,27 @@ one entry context.  @var{glyph-slots} is a list of uniquely named
 when present it contains ordinary head and child entry layouts.  All
 references must name registered segments or slots, and property lists
 must use the supported keys and value types.
+
+  The five optional month callbacks connect native state to
+@ref{Month Groups}.  @var{month-date} receives a context and returns an
+Emacs time value or @code{nil}; errors and invalid time values become
+missing dates.  @var{month-unread-p} receives a context and returns its
+unread state.  @var{month-glyph} receives @code{unread} or @code{read}
+and a context, and returns the corresponding @code{tessera-glyph}.
+@var{month-warning-segment} receives a context and returns the segment
+symbol that should carry its inline warning.
+
+  The engine skips month date and unread callbacks while grouping is
+disabled.  Adapters must rerender entries when enabling grouping so
+that their contexts contain current month metadata.
+
+  @var{month-goto} receives a context and selects that native record.
+It is used when folding must move point to another group.  The callback
+should use native positioning and retain the application's configured
+preview-follow behavior.  Return non-@code{nil} after successful
+positioning, or @code{nil} to use the rendered entry's position as a
+fallback.  A backend without @var{month-date} does not
+participate in month grouping and does not display date warnings.
 
   Registration does not enable a mode, create a buffer, or refresh an
 existing view.  The adapter must arrange these operations.  Its context
@@ -1835,6 +2133,8 @@ result set, including folded records.
 Return the root-to-child branch path.  Each boolean describes whether
 that branch has a following sibling; the representative itself has no
 branch entry.  This is also a @code{setf} place for updating the path.
+Treat the returned list as read-only; use @code{setf} to replace it
+so that shared branch data stays consistent.
 @end defun
 
   For example, @code{(t nil)} describes a child below an ancestor branch
@@ -1910,6 +2210,7 @@ observers support the adapters' display operations.
 
 @menu
 * Native Metadata::     Reading message fields and labels.
+* Month Integration::   Synchronizing month overlays in adapters.
 * Format Callbacks: Native Format Callbacks.  Connecting to Gnus and Elfeed formatters.
 * Fold Observation: Native Fold Observation.  Tracking and padding mu4e folds.
 @end menu
@@ -1950,6 +2251,50 @@ Return a fresh list of unique label and tag names from the native mu4e
 message property list @var{message}.  Read @code{:labels} before
 @code{:tags}, preserving first occurrence order.  Return @code{nil} if
 both are empty.  Names are unchanged and the message is not modified.
+@end defun
+
+@node Month Integration
+@section Integrating Month Groups
+
+@defun tessera-month-configure enabled thread-date
+Set the current buffer's effective month state.  When @var{enabled} is
+non-@code{nil}, synchronize headings and use @var{thread-date}.
+The date policy must be @code{latest} or @code{root}, even when
+grouping is disabled; other values signal an error before changing
+buffer state.  Unthreaded adapters can pass @code{latest}.
+A @code{nil} @var{enabled}
+removes headings and folds, suppresses warnings from subsequent entry
+rendering, and retains buffer-local fold state.  Adapters rerender
+existing entries when changing this state.  Call this only after entry
+rows and their layout properties exist.
+@end defun
+
+@defun tessera-month-sync
+Rebuild month groups, headings, counts, and fold overlays in the current
+buffer.  Preserve fold state for months still present, discard absent
+months, and expand new ones.  This function does not refresh native
+records or enable an adapter.  It includes records outside a narrowed
+region and preserves the buffer's restriction.
+@end defun
+
+@defun tessera-month-clear &optional preserve-state
+Remove month display and disable month participation in the current
+buffer.  Clear fold state unless @var{preserve-state} is non-@code{nil}.
+Subsequent entry rendering omits missing-date warnings.  Backend mode
+shutdown should omit @var{preserve-state} and restore its native rows.
+@end defun
+
+@defun tessera-month-reveal-point
+Expand the month containing point when it is folded.  Adapters call
+this after native and programmatic positioning commands.  Month-aware
+next and previous navigation suppresses this expansion while it skips
+hidden groups.
+@end defun
+
+@defun tessera-month-entry-visible-p position
+Return non-@code{nil} when @var{position} is outside every Tessera month
+fold.  Native invisibility unrelated to month grouping does not affect
+the result.
 @end defun
 
 @node Native Format Callbacks

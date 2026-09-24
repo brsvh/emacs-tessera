@@ -35,6 +35,7 @@
 (require 'tessera-gnus-article)
 (require 'gnus-sum)
 (require 'gnus-spec)
+(require 'parse-time)
 (require 'subr-x)
 (require 'seq)
 
@@ -42,6 +43,30 @@
   "Tessera entries in Gnus summary buffers."
   :group 'tessera-gnus
   :prefix "tessera-gnus-summary-")
+
+(defcustom tessera-gnus-summary-month-grouping 'inherit
+  "Whether Gnus summary buffers use month grouping.
+The value `inherit' follows `tessera-month-grouping'."
+  :type '(choice
+          (const :tag "Inherit global setting" inherit)
+          (const :tag "Enabled" t)
+          (const :tag "Disabled" nil))
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera-gnus-summary)
+
+(defcustom tessera-gnus-summary-month-thread-date 'inherit
+  "Date policy used to place Gnus threads in a month.
+The value `inherit' follows `tessera-month-thread-date'.  While month
+grouping is enabled, Tessera temporarily applies matching native Gnus
+thread and article sorting in each summary buffer."
+  :type '(choice
+          (const :tag "Inherit global setting" inherit)
+          (const :tag "Latest thread article" latest)
+          (const :tag "Thread root" root))
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera-gnus-summary)
 
 ;;;; Glyph options
 
@@ -434,6 +459,9 @@ not enable either native behavior by itself."
 (defvar-local tessera-gnus-summary--saved-settings nil
   "Original values and locality of settings replaced by Tessera.")
 
+(defvar-local tessera-gnus-summary--saved-month-sorting nil
+  "Native sorting replaced while month grouping is active.")
+
 (defvar-local tessera-gnus-summary--dirty nil
   "Whether native buffer changes need synchronization.")
 
@@ -548,6 +576,19 @@ HEADER or registry data.  No Tessera mode needs to be enabled."
   "Return an identity for HEADER within its summary buffer."
   (or (mail-header-message-id header) (mail-header-number header)))
 
+(defun tessera-gnus-summary--prune-content-cache ()
+  "Discard content observations absent from the native summary."
+  (when tessera-gnus-summary--content-cache
+    (let ((current (make-hash-table :test #'equal)))
+      (dolist (header gnus-newsgroup-headers)
+        (puthash (tessera-gnus-summary--content-key header)
+                 t current))
+      (maphash
+       (lambda (key _value)
+         (unless (gethash key current)
+           (remhash key tessera-gnus-summary--content-cache)))
+       tessera-gnus-summary--content-cache))))
+
 (defun tessera-gnus-summary--content-data (header)
   "Return observed content properties for HEADER, or header hints."
   (or (and tessera-gnus-summary--content-cache
@@ -649,6 +690,117 @@ parents and adopted roots.  Threading follows `gnus-show-threads'."
    :window window
    :metadata tessera-gnus-summary--metadata
    :thread (plist-get tessera-gnus-summary--metadata :thread)))
+
+(defvar tessera-gnus-summary--root-month-sort-functions
+  '(gnus-thread-sort-by-number
+    (not gnus-thread-sort-by-date))
+  "Gnus thread sorting used for `root' month assignment.")
+
+(defvar tessera-gnus-summary--latest-month-sort-functions
+  '(gnus-thread-sort-by-number
+    gnus-thread-sort-by-most-recent-date)
+  "Gnus thread sorting used for `latest' month assignment.")
+
+(defvar tessera-gnus-summary--month-article-sort-functions
+  '(gnus-article-sort-by-number
+    (not gnus-article-sort-by-date))
+  "Gnus article sorting used for unthreaded month grouping.")
+
+(defun tessera-gnus-summary--month-enabled-p ()
+  "Return the effective Gnus month grouping setting."
+  (if (eq tessera-gnus-summary-month-grouping 'inherit)
+      tessera-month-grouping
+    tessera-gnus-summary-month-grouping))
+
+(defun tessera-gnus-summary--month-thread-date ()
+  "Return the effective Gnus thread date policy."
+  (if (eq tessera-gnus-summary-month-thread-date 'inherit)
+      tessera-month-thread-date
+    tessera-gnus-summary-month-thread-date))
+
+(defun tessera-gnus-summary--month-sort-functions ()
+  "Return Gnus thread sorting for the effective month policy."
+  (pcase tessera--month-thread-date
+    ('latest
+     tessera-gnus-summary--latest-month-sort-functions)
+    ('root tessera-gnus-summary--root-month-sort-functions)
+    (_ (error "Invalid Gnus month thread date: %S"
+              tessera--month-thread-date))))
+
+(defun tessera-gnus-summary--update-month-sorting ()
+  "Apply or restore sorting for the current month configuration.
+Return non-nil when the effective sort values change."
+  (let ((old-thread gnus-thread-sort-functions)
+        (old-subthread gnus-subthread-sort-functions)
+        (old-article gnus-article-sort-functions))
+    (if tessera--month-enabled
+        (progn
+          (unless tessera-gnus-summary--saved-month-sorting
+            (setq tessera-gnus-summary--saved-month-sorting
+                  (tessera--save-settings
+                   '(gnus-thread-sort-functions
+                     gnus-subthread-sort-functions
+                     gnus-article-sort-functions))))
+          (let ((subthread
+                 (nth 2
+                      (assq
+                       'gnus-subthread-sort-functions
+                       tessera-gnus-summary--saved-month-sorting))))
+            (setq-local
+             gnus-subthread-sort-functions
+             (copy-tree
+              (if (eq subthread 'gnus-thread-sort-functions)
+                  (nth 2
+                       (assq
+                        'gnus-thread-sort-functions
+                        tessera-gnus-summary--saved-month-sorting))
+                subthread))))
+          (setq-local
+           gnus-thread-sort-functions
+           (copy-tree
+            (tessera-gnus-summary--month-sort-functions)))
+          (setq-local
+           gnus-article-sort-functions
+           (copy-tree
+            tessera-gnus-summary--month-article-sort-functions)))
+      (when tessera-gnus-summary--saved-month-sorting
+        (tessera--restore-settings
+         tessera-gnus-summary--saved-month-sorting)
+        (setq tessera-gnus-summary--saved-month-sorting nil)))
+    (or (not (equal old-thread gnus-thread-sort-functions))
+        (not (equal old-subthread
+                    gnus-subthread-sort-functions))
+        (not (equal old-article gnus-article-sort-functions)))))
+
+(defun tessera-gnus-summary--month-date (context)
+  "Return CONTEXT's native article date as an Emacs time."
+  (date-to-time
+   (mail-header-date (tessera-entry-context-object context))))
+
+(defun tessera-gnus-summary--month-glyph (state _context)
+  "Return the configured Gnus status glyph for STATE in CONTEXT."
+  (tessera-glyph-resolve
+   (if (eq state 'unread) 'status-unread 'status-read)
+   tessera-gnus-summary--glyph-defaults
+   tessera-gnus-summary-glyphs
+   (if (eq state 'unread)
+       (tessera-gnus-summary--ascii-mark 'gnus-unread-mark)
+     (tessera-gnus-summary--ascii-mark 'gnus-read-mark))))
+
+(defun tessera-gnus-summary--month-warning-segment (context)
+  "Return the segment that carries CONTEXT's date warning."
+  (if (tessera-entry-context-thread context) 'author 'subject))
+
+(defun tessera-gnus-summary--month-goto (context)
+  "Move to CONTEXT without changing Gnus's selected article."
+  (let ((article
+         (mail-header-number
+          (tessera-entry-context-object context))))
+    (when-let* ((data (gnus-data-find article))
+                (position (gnus-data-pos data)))
+      (goto-char position)
+      (gnus-summary-position-point)
+      t)))
 
 (defun tessera-gnus-summary--state (slot context)
   "Return the native state of SLOT in CONTEXT."
@@ -997,6 +1149,12 @@ value.  Signal an error if neither value is an ASCII character."
    tessera-gnus-summary-glyphs 2)
   (tessera-entry-register
    'gnus-summary :context #'tessera-gnus-summary--context
+   :month-date #'tessera-gnus-summary--month-date
+   :month-unread-p #'tessera-gnus-summary--unread-p
+   :month-glyph #'tessera-gnus-summary--month-glyph
+   :month-warning-segment
+   #'tessera-gnus-summary--month-warning-segment
+   :month-goto #'tessera-gnus-summary--month-goto
    :segments
    '((subject . tessera-gnus-summary--subject)
      (author . tessera-gnus-summary--author)
@@ -1135,10 +1293,13 @@ native mark discovery and in-place updates."
    tessera-thread-inner-top-padding
    tessera-thread-inner-bottom-padding
    tessera-entry-layout tessera-glyph-style tessera-glyph-color
-   tessera-entry-safe-gap tessera-entry-left-padding
+   tessera-safe-gap tessera-entry-left-padding
    tessera-entry-right-padding tessera-entry-top-padding
    tessera-entry-bottom-padding tessera-entry-segment-gap
-   tessera-entry-flex-gap-min-width))
+   tessera-flex-gap-min-width
+   (tessera-gnus-summary--month-enabled-p)
+   (tessera-gnus-summary--month-thread-date)
+   tessera-month-glyphs))
 
 (defun tessera-gnus-summary--restore-faces (start end)
   "Restore Tessera content faces between START and END.
@@ -1347,7 +1508,9 @@ Honor `tessera-gnus-summary-boundary-navigation'."
              (tessera-gnus-summary--navigation-identity buffer)))
         (if (not identity)
             (apply function arguments)
-          (let ((tessera-gnus-summary--navigating t))
+          (let ((tessera-gnus-summary--navigating t)
+                (tessera--month-navigation
+                 tessera--month-enabled))
             (tessera--navigation-call
              buffer function arguments
              (lambda (_result)
@@ -1367,6 +1530,41 @@ Honor `tessera-gnus-summary-boundary-navigation'."
      #'tessera-gnus-summary--navigate-first-unread-article)
     (_ #'tessera-gnus-summary--navigate)))
 
+(defun tessera-gnus-summary--search-forward
+    (function &rest arguments)
+  "Call native search FUNCTION, skipping folded month entries.
+ARGUMENTS retain Gnus's unread, subject, and direction filters."
+  (if (not (and tessera-gnus-summary--active
+                tessera--month-enabled))
+      (apply function arguments)
+    (let ((tessera--month-navigation t)
+          (origin (point-marker))
+          result previous hidden)
+      (unwind-protect
+          (progn
+            (while
+                (progn
+                  (setq previous (point)
+                        result (apply function arguments)
+                        hidden
+                        (and result
+                             (not
+                              (tessera-month-entry-visible-p
+                               (point)))))
+                  (when (and hidden (= previous (point)))
+                    (setq result nil
+                          hidden nil))
+                  hidden))
+            (when (null result)
+              (goto-char origin))
+            result)
+        (set-marker origin nil)))))
+
+(defun tessera-gnus-summary--positioned (&rest _arguments)
+  "Reveal point after native Gnus positioning."
+  (when tessera-gnus-summary--active
+    (tessera-month-reveal-point)))
+
 (defun tessera-gnus-summary--navigation (enable)
   "Adapt native centering when ENABLE is non-nil, or restore it."
   (if enable
@@ -1377,19 +1575,28 @@ Honor `tessera-gnus-summary-boundary-navigation'."
                  tessera-gnus-summary--navigation-functions)
           (advice-add function :around
                       (tessera-gnus-summary--navigation-advice
-                       function))))
+                       function)))
+        (advice-add 'gnus-summary-search-forward :around
+                    #'tessera-gnus-summary--search-forward)
+        (advice-add 'gnus-summary-position-point :after
+                    #'tessera-gnus-summary--positioned))
     (advice-remove 'gnus-horizontal-recenter
                    #'tessera-gnus-summary--horizontal-recenter)
     (dolist (function tessera-gnus-summary--navigation-functions)
       (advice-remove function
                      (tessera-gnus-summary--navigation-advice
-                      function)))))
+                      function)))
+    (advice-remove 'gnus-summary-search-forward
+                   #'tessera-gnus-summary--search-forward)
+    (advice-remove 'gnus-summary-position-point
+                   #'tessera-gnus-summary--positioned)))
 
 (defun tessera-gnus-summary--sync-buffer (&optional force)
   "Synchronize all entries, preserving point within its article.
 FORCE also redraws entries with unchanged marks."
   (save-restriction
     (widen)
+    (tessera--month-clear-display)
     (let ((width tessera-gnus-summary--thread-width))
       (tessera-gnus-summary--build-threads)
       (when (/= width tessera-gnus-summary--thread-width)
@@ -1407,7 +1614,9 @@ FORCE also redraws entries with unchanged marks."
                force face-index thread-paths)
               (forward-line 1)))
         (tessera-gnus-summary--reindex)
-        (tessera-entry-restore-point saved-point)))))
+        (tessera-entry-restore-point saved-point)))
+    (when tessera-gnus-summary--active
+      (tessera-month-sync))))
 
 (defun tessera-gnus-summary--reindex ()
   "Restore native integer positions after a batch of row changes."
@@ -1488,26 +1697,54 @@ THREAD-PATHS caches shared ancestor comparisons for that update."
                (cdr (get-text-property
                      start 'tessera-gnus-summary-entry)) :thread)
               thread)
+        (when-let* ((context
+                     (get-text-property start
+                                        'tessera-entry-context)))
+          (setf (tessera-entry-context-thread context) thread))
         (tessera-gnus-summary--restore-faces start end)
         (if (invisible-p start)
             (tessera-entry-clear-layout start (1+ end))
           (unless (tessera-entry-layout-applied-p start)
             (tessera-entry-apply-layout start end)))))))
 
+(defun tessera-gnus-summary--refresh-content (article)
+  "Refresh ARTICLE after observing new MIME state.
+Preserve point, narrowing, and month folds while row widths change."
+  (save-restriction
+    (widen)
+    (when-let* ((position
+                 (text-property-any (point-min) (point-max)
+                                    'gnus-number article)))
+      (let ((saved-point (tessera-entry-save-point))
+            (tessera-gnus-summary--updating t))
+        (tessera-entry-clear-current)
+        (tessera--month-clear-display)
+        (unwind-protect
+            (progn
+              (goto-char position)
+              (tessera-gnus-summary--sync-line t))
+          (tessera-entry-restore-point saved-point)
+          (tessera-month-sync)))))
+  (tessera-entry-highlight-current))
+
 (defun tessera-gnus-summary--update-line ()
   "Synchronize the article just updated by Gnus."
   (when (and tessera-gnus-summary--active
              (not tessera-gnus-summary--updating))
     (setq tessera-gnus-summary--dirty t)
-    (let ((tessera-gnus-summary--updating t)
-          (saved-point (tessera-entry-save-point)))
-      (unwind-protect
-          (tessera-gnus-summary--sync-line)
-        (tessera-entry-restore-point saved-point)))))
+    ;; A command may mark many articles.  Rebuild month and thread
+    ;; counts once after the command, when all marks have settled.
+    (unless tessera--month-enabled
+      (let ((tessera-gnus-summary--updating t)
+            (saved-point (tessera-entry-save-point)))
+        (unwind-protect
+            (tessera-gnus-summary--sync-line)
+          (tessera-entry-restore-point saved-point))))))
 
 (defun tessera-gnus-summary--prepare ()
   "Attach entry layouts after Gnus has generated a summary."
   (when tessera-gnus-summary--active
+    (tessera-gnus-summary--prune-content-cache)
     (tessera-entry-clear-current)
     (tessera-entry-clear-layout)
     (tessera-gnus-summary--sync-buffer)
@@ -1524,6 +1761,10 @@ THREAD-PATHS caches shared ancestor comparisons for that update."
 (defun tessera-gnus-summary--post-command ()
   "Synchronize native changes and highlight the current entry."
   (when tessera-gnus-summary--active
+    (setq-local tessera--month-enabled
+                (tessera-gnus-summary--month-enabled-p))
+    (setq-local tessera--month-thread-date
+                (tessera-gnus-summary--month-thread-date))
     (let* ((appearance (tessera-gnus-summary--appearance))
            (force (or (not (equal appearance
                                   tessera-gnus-summary--appearance))
@@ -1535,6 +1776,12 @@ THREAD-PATHS caches shared ancestor comparisons for that update."
         (tessera-gnus-summary--sync-buffer force)
         (setq tessera-gnus-summary--appearance appearance
               tessera-gnus-summary--dirty nil)))
+    ;; Already at the root, Gnus's top-thread command does not move.
+    (when (and tessera--month-enabled tessera--month-groups
+               gnus-show-threads
+               (eq this-command 'gnus-summary-top-thread))
+      (gnus-summary-position-point))
+    (tessera-month-reveal-point)
     (tessera-entry-highlight-current)))
 
 (defun tessera-gnus-summary--resize (_frame)
@@ -1567,9 +1814,12 @@ THREAD-PATHS caches shared ancestor comparisons for that update."
   (remove-hook 'change-major-mode-hook
                #'tessera-gnus-summary--disable t)
   (tessera-entry-clear-current)
+  (tessera-month-clear)
+  (tessera-gnus-summary--update-month-sorting)
   (tessera-entry-clear-layout)
   (tessera--restore-settings tessera-gnus-summary--saved-settings)
   (setq tessera-gnus-summary--saved-settings nil
+        tessera-gnus-summary--saved-month-sorting nil
         tessera-gnus-summary--appearance nil
         tessera-gnus-summary--dirty nil
         tessera-gnus-summary--content-cache nil
@@ -1587,6 +1837,11 @@ THREAD-PATHS caches shared ancestor comparisons for that update."
           (progn
             (setq-local gnus-summary-line-format "%u&tessera;\n")
             (setq-local tessera-entry-layout 'two-line)
+            (setq-local tessera--month-enabled
+                        (tessera-gnus-summary--month-enabled-p))
+            (setq-local tessera--month-thread-date
+                        (tessera-gnus-summary--month-thread-date))
+            (tessera-gnus-summary--update-month-sorting)
             (setq tessera-gnus-summary--active t)
             (add-hook 'gnus-summary-update-hook
                       #'tessera-gnus-summary--update-line t t)
@@ -1624,9 +1879,20 @@ THREAD-PATHS caches shared ancestor comparisons for that update."
 Nil means explicitly refresh all glyphs and their hover faces."
   (when (or (null option)
             (memq option '(tessera-gnus-summary-glyphs
+                           tessera-month-glyphs
                            tessera-thread-glyphs
                            tessera-entry-ellipsis
                            tessera-glyph-style tessera-glyph-color)))
+    (tessera-gnus-summary--months-changed nil)))
+
+(defun tessera-gnus-summary--months-changed (option)
+  "Refresh active Gnus views affected by month OPTION.
+Nil requests a full refresh, including glyphs and sorting."
+  (when (or (null option)
+            (memq option '(tessera-month-grouping
+                           tessera-month-thread-date
+                           tessera-gnus-summary-month-grouping
+                           tessera-gnus-summary-month-thread-date)))
     (when (gethash 'gnus-summary tessera--entry-backends)
       (tessera-gnus-summary--register))
     (save-window-excursion
@@ -1634,8 +1900,16 @@ Nil means explicitly refresh all glyphs and their hover faces."
        'gnus-summary-mode
        (lambda ()
          (when tessera-gnus-summary--active
-           (tessera-entry-clear-current)
-           (tessera-gnus-summary--sync-buffer t)
+           (setq-local tessera--month-enabled
+                       (tessera-gnus-summary--month-enabled-p))
+           (setq-local tessera--month-thread-date
+                       (tessera-gnus-summary--month-thread-date))
+           (let ((sort-changed
+                  (tessera-gnus-summary--update-month-sorting)))
+             (tessera-entry-clear-current)
+             (if (and sort-changed gnus-newsgroup-headers)
+                 (tessera-gnus-summary--refresh)
+               (tessera-gnus-summary--sync-buffer t)))
            (setq tessera-gnus-summary--dirty nil
                  tessera-gnus-summary--appearance
                  (tessera-gnus-summary--appearance))

@@ -118,6 +118,26 @@ Gnus and mu4e track shared appearance changes during their normal update cycles.
 In an active Elfeed Search buffer, redraw after changing these settings with ~M-:
 (elfeed-search-update :force)~.
 
+*** Month Groups
+
+Entry views are grouped by month by default.  Headings begin expanded; click a
+heading with mouse button 1 to fold it.  Folded headings show read and unread
+message or article counts, and native next and previous commands skip their
+hidden entries.
+
+Set ~tessera-month-grouping~ to nil to disable the feature globally.  Each
+backend also has an ~inherit~/~t~/~nil~ override.  Gnus and mu4e threads use the
+latest reply date by default; set ~tessera-month-thread-date~ to ~root~ to
+group Gnus threads by the root instead.  Gnus can inherit or override that
+policy.  Mu4e accepts only ~inherit~ and ~latest~; inherited ~root~ falls back
+to ~latest~ because Tessera does not replace mu4e's native sorting.  While Gnus
+grouping is active, Tessera uses matching buffer-local Gnus sorting and restores
+the prior values and locality when grouping or the Gnus adapter is disabled.
+
+Records without a usable date stay in native order and receive a warning
+background and inline warning glyph.  See the [[file:doc/tessera.texi][Tessera manual]] for folding,
+spacing, faces, date formatting, glyphs, and refresh behavior.
+
 *** Glyphs and Faces
 
 Glyphs use Unicode and semantic colors by default.  For monochrome ASCII
@@ -444,11 +464,16 @@ available even when you normally use only one backend.
 
 *** Source Tests
 
-From the checkout root, run the full suite for both packages:
+From the checkout root, run runtime tests for both packages in separate
+Emacs processes:
 
 #+begin_src sh
 make test
 #+end_src
+
+Select one package with ~make test PACKAGE=tessera~ or
+~make test PACKAGE=tessera-x~.  Core tests do not load Tessera X.  Run
+build and formatter regressions separately with ~make test-tools~.
 
 The target uses ~EMACS~ (default: ~emacs~) with ~-Q --batch~.  If external
 libraries are not already available, provide their directories explicitly:
@@ -463,7 +488,8 @@ a nonzero status if a test fails.
 *** Installed Package Tests
 
 Run the same command with ~TESSERA_TEST_PACKAGE_DIRS~ set to the colon-separated
-directories of both installed packages.  Each must contain its ~.el~ sources
+directories of the selected packages and their Tessera dependencies.
+Each must contain its ~.el~ sources
 and ~.elc~ bytecode.  The runner checks that production libraries load from those
 installed copies.
 

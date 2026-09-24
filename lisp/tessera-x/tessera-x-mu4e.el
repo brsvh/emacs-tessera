@@ -93,7 +93,8 @@ A custom function may supply an account-specific query."
                      (plist-get message :message-id)))
    :references (tessera-x-message-ids (plist-get message :references))
    :subject (plist-get message :subject)
-   :date (plist-get message :date)
+   :date (let ((date (plist-get message :date)))
+           (unless (equal date '(0 0 0)) date))
    :data (list :path (plist-get message :path))
    :metadata
    (append
@@ -178,9 +179,11 @@ Inspect the full result buffer, preserving its narrowing and point."
 
 (defun tessera-x-mu4e--cancel-query (process output errors)
   "Stop PROCESS and release OUTPUT and ERRORS buffers."
-  (when (process-live-p process) (delete-process process))
+  (when (process-live-p process)
+    (tessera-x--cleanup-call #'delete-process process))
   (dolist (buffer (list output errors))
-    (when (buffer-live-p buffer) (kill-buffer buffer))))
+    (when (buffer-live-p buffer)
+      (tessera-x--cleanup-call #'kill-buffer buffer))))
 
 (defun tessera-x-mu4e--query-done (process _event)
   "Publish the context attached to finished PROCESS."
@@ -255,9 +258,9 @@ With ANCHOR, include related messages and keep descendants."
               ;; Record resources before allowing a pending quit.
               (let ((inhibit-quit t))
                 (setq output
-                      (generate-new-buffer " *Tessera mu output*")
+                      (generate-new-buffer " *Tessera mu output*" t)
                       errors
-                      (generate-new-buffer " *Tessera mu errors*")
+                      (generate-new-buffer " *Tessera mu errors*" t)
                       process
                       (make-process :name "tessera-mu-context"
                                     :command command

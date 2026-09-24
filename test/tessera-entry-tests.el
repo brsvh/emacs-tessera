@@ -289,7 +289,7 @@
   (let ((tessera--entry-backends (make-hash-table :test #'eq))
         (tessera-entry-layout 'single-line)
         (tessera-glyph-style 'ascii)
-        (tessera-entry-safe-gap 1)
+        (tessera-safe-gap 1)
         (tessera-entry-left-padding 2)
         (tessera-entry-right-padding 1)
         (tessera-entry-top-padding 0)
@@ -320,11 +320,11 @@
   (let ((backend 'tessera-entry-tests)
         (tessera-entry-layout 'single-line)
         (tessera-glyph-style 'ascii)
-        (tessera-entry-safe-gap 1)
+        (tessera-safe-gap 1)
         (tessera-entry-left-padding 1)
         (tessera-entry-right-padding 1)
         (tessera-entry-segment-gap 1)
-        (tessera-entry-flex-gap-min-width 1))
+        (tessera-flex-gap-min-width 1))
     (unwind-protect
         (progn
           (tessera-entry-tests--register backend)
@@ -385,11 +385,11 @@
              (low :optional t :priority 1)
              (high :optional t :priority 10))))
          (tessera-entry-layout 'single-line)
-         (tessera-entry-safe-gap 1)
+         (tessera-safe-gap 1)
          (tessera-entry-left-padding 1)
          (tessera-entry-right-padding 1)
          (tessera-entry-segment-gap 1)
-         (tessera-entry-flex-gap-min-width 1))
+         (tessera-flex-gap-min-width 1))
     (unwind-protect
         (progn
           (tessera-entry-register
@@ -603,11 +603,11 @@
   (let ((backend 'tessera-entry-tests)
         (tessera-entry-layout 'two-line)
         (tessera-glyph-style 'ascii)
-        (tessera-entry-safe-gap 1)
+        (tessera-safe-gap 1)
         (tessera-entry-left-padding 1)
         (tessera-entry-right-padding 1)
         (tessera-entry-segment-gap 1)
-        (tessera-entry-flex-gap-min-width 1)
+        (tessera-flex-gap-min-width 1)
         (tessera-entry-top-padding 0)
         (tessera-entry-bottom-padding 0))
     (unwind-protect
@@ -654,9 +654,45 @@
                        display)))))
       (remhash backend tessera--entry-backends))))
 
+(ert-deftest tessera-entry-pixel-measurement-uses-source-properties ()
+  (with-temp-buffer
+    (setq-local face-remapping-alist '((default (:height 2.0))))
+    (setq-local char-property-alias-alist '((face font-lock-face)))
+    (setq-local default-text-properties '(help-echo "Source"))
+    (let ((source (current-buffer))
+          work-buffer
+          observed)
+      (with-temp-buffer
+        (cl-letf (((symbol-function 'buffer-text-pixel-size)
+                   (lambda (&rest _)
+                     (setq work-buffer (current-buffer))
+                     (push (list face-remapping-alist
+                                 char-property-alias-alist
+                                 default-text-properties
+                                 (buffer-string))
+                           observed)
+                     '(123 . 20))))
+          (should (= 123 (tessera--string-pixel-width "X" source)))
+          (should (= 123 (tessera--string-pixel-width "Y")))
+          (should (= 0 (tessera--string-pixel-width "")))))
+      (should (= (length observed) 2))
+      (should (equal (car observed) '(nil nil nil "Y")))
+      (should (equal (cadr observed)
+                     '(((default (:height 2.0)))
+                       ((face font-lock-face))
+                       (help-echo "Source") "X")))
+      (with-current-buffer work-buffer
+        (should (zerop (buffer-size))))
+      (cl-letf (((symbol-function 'buffer-text-pixel-size)
+                 (lambda (&rest _) (error "Measurement failed"))))
+        (should-error (tessera--string-pixel-width "Error")))
+      (with-current-buffer work-buffer
+        (should (zerop (buffer-size))))
+      (should (zerop (buffer-size))))))
+
 (ert-deftest tessera-entry-aligns-mixed-font-text-by-pixels ()
   (let ((tessera--entry-backends (make-hash-table :test #'eq))
-        (tessera-entry-safe-gap 1)
+        (tessera-safe-gap 1)
         (tessera-entry-right-padding 1))
     (dolist (tessera-entry-layout '(single-line two-line))
       (if (eq tessera-entry-layout 'single-line)
@@ -666,8 +702,8 @@
                  (lambda (&optional _) t))
                 ((symbol-function 'frame-char-width)
                  (lambda (&optional _) 10))
-                ((symbol-function 'string-pixel-width)
-                 (lambda (text)
+                ((symbol-function 'tessera--string-pixel-width)
+                 (lambda (text &optional _buffer)
                    (if (equal text "日本語,café") 73
                      (* 10 (string-width text))))))
         (let ((rendered
@@ -698,8 +734,8 @@
                      (lambda (&optional _) t))
                     ((symbol-function 'frame-char-width)
                      (lambda (&optional _) 10))
-                    ((symbol-function 'string-pixel-width)
-                     (lambda (string)
+                    ((symbol-function 'tessera--string-pixel-width)
+                     (lambda (string &optional _buffer)
                        (push string measured)
                        (cond ((equal string "*") 17)
                              ((string-match-p "\\*" string) 30)
@@ -759,7 +795,7 @@
   (let ((tessera--entry-backends (make-hash-table :test #'eq))
         (tessera-entry-layout 'single-line)
         (tessera-glyph-style 'ascii)
-        (tessera-entry-safe-gap 1)
+        (tessera-safe-gap 1)
         (tessera-entry-left-padding 1)
         (tessera-entry-right-padding 1))
     (tessera-entry-tests--register 'tessera-entry-tests)
@@ -767,8 +803,8 @@
                (lambda (&optional _) t))
               ((symbol-function 'frame-char-width)
                (lambda (&optional _) 1))
-              ((symbol-function 'string-pixel-width)
-               (lambda (text)
+              ((symbol-function 'tessera--string-pixel-width)
+               (lambda (text &optional _buffer)
                  (if (equal text "*")
                      (ceiling
                       (* 5 (or (plist-get
@@ -926,28 +962,66 @@
       (should (= 1 (length (window-list)))))))
 
 (ert-deftest tessera-navigation-restores-after-nonlocal-exit ()
-  (dolist (phase '(function target commit))
-    (with-temp-buffer
-      (insert "first\nsecond\n")
-      (goto-char (point-min))
-      (let ((point (point)))
-        (catch 'tessera-navigation-exit
-          (tessera--navigation-call
-           (current-buffer)
-           (lambda ()
-             (goto-char (point-max))
-             (when (eq phase 'function)
-               (throw 'tessera-navigation-exit nil))
-             t)
-           nil
-           (lambda (result)
-             (when (eq phase 'target)
-               (throw 'tessera-navigation-exit nil))
-             result)
-           (lambda (_result)
-             (when (eq phase 'commit)
-               (throw 'tessera-navigation-exit nil)))))
-        (should (= (point) point))))))
+  (let ((restore (symbol-function 'tessera--navigation-restore))
+        (release (symbol-function 'tessera--navigation-release)))
+    (dolist (phase '(function target commit))
+      (dolist (exit '(error quit throw))
+        (dolist (restore-condition '(nil error quit))
+          (ert-info ((format "Phase: %s, exit: %s, restore: %s"
+                             phase exit restore-condition))
+            (save-window-excursion
+              (with-temp-buffer
+                (switch-to-buffer (current-buffer))
+                (insert "first\nsecond\n")
+                (goto-char (point-min))
+                (let* ((point (point))
+                       (start (window-start))
+                       (releases 0)
+                       (original
+                        (list exit "Native navigation failed"))
+                       (leave
+                        (lambda ()
+                          (if (eq exit 'throw)
+                              (throw 'tessera-navigation-exit
+                                     original)
+                            (signal (car original) (cdr original))))))
+                  (cl-letf
+                      (((symbol-function 'tessera--navigation-restore)
+                        (lambda (snapshot)
+                          (funcall restore snapshot)
+                          (when restore-condition
+                            (signal restore-condition
+                                    '("Restore failed")))))
+                       ((symbol-function 'tessera--navigation-release)
+                        (lambda (snapshot)
+                          (cl-incf releases)
+                          (funcall release snapshot))))
+                    (should
+                     (equal
+                      (condition-case err
+                          (catch 'tessera-navigation-exit
+                            (tessera--navigation-call
+                             (current-buffer)
+                             (lambda ()
+                               (goto-char (point-max))
+                               (set-window-start
+                                (selected-window) (point-max) t)
+                               (when (eq phase 'function)
+                                 (funcall leave))
+                               t)
+                             nil
+                             (lambda (result)
+                               (when (eq phase 'target)
+                                 (funcall leave))
+                               result)
+                             (lambda (_result)
+                               (when (eq phase 'commit)
+                                 (funcall leave)))))
+                        ((error quit) err))
+                      original)))
+                  (should (= releases 1))
+                  (should (= (point) point))
+                  (should (= (window-start) start)))))))))))
 
 (ert-deftest tessera-navigation-restores-buffer-restrictions ()
   (let ((buffer (generate-new-buffer " *tessera-navigation-main*"))
@@ -1066,39 +1140,6 @@
             markers)))
       (kill-buffer buffer)
       (kill-buffer related))))
-
-(ert-deftest tessera-navigation-call-restores-after-errors ()
-  (save-window-excursion
-    (with-temp-buffer
-      (switch-to-buffer (current-buffer))
-      (insert "first\nsecond\n")
-      (goto-char (point-min))
-      (let ((point (point))
-            (start (window-start)))
-        (should-error
-         (tessera--navigation-call
-          (current-buffer)
-          (lambda ()
-            (goto-char (point-max))
-            (set-window-start (selected-window) (point-max) t)
-            (error "Native navigation failed"))
-          nil #'identity))
-        (should (= (point) point))
-        (should (= (window-start) start))
-        (let ((error-data
-               (cl-letf
-                   (((symbol-function
-                      'tessera--navigation-restore)
-                     (lambda (_snapshot)
-                       (error "Restore failed"))))
-                 (should-error
-                  (tessera--navigation-call
-                   (current-buffer)
-                   (lambda ()
-                     (error "Native navigation failed"))
-                   nil #'identity)))))
-          (should (equal (error-message-string error-data)
-                         "Native navigation failed")))))))
 
 (ert-deftest tessera-navigation-restores-unrelated-window ()
   (save-window-excursion
@@ -1313,10 +1354,10 @@
         (tessera-entry-layout 'two-line)
         (tessera-entry-top-padding 0.2)
         (tessera-entry-bottom-padding 0.3)
-        (tessera-entry-safe-gap 1)
+        (tessera-safe-gap 1)
         (tessera-entry-left-padding 1)
         (tessera-entry-segment-gap 1)
-        (tessera-entry-flex-gap-min-width 1)
+        (tessera-flex-gap-min-width 1)
         (tessera-glyph-style 'ascii))
     (with-temp-buffer
       (tessera-entry-tests--insert-current-fixture)

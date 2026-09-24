@@ -36,6 +36,17 @@
   :group 'tessera-elfeed
   :prefix "tessera-elfeed-search-")
 
+(defcustom tessera-elfeed-search-month-grouping 'inherit
+  "Whether Elfeed search buffers use month grouping.
+The value `inherit' follows `tessera-month-grouping'."
+  :type '(choice
+          (const :tag "Inherit global setting" inherit)
+          (const :tag "Enabled" t)
+          (const :tag "Disabled" nil))
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-month-option
+  :group 'tessera-elfeed-search)
+
 ;;;; Glyph options
 
 (defvar tessera-elfeed-search--glyph-defaults
@@ -161,6 +172,9 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (defvar-local tessera-elfeed-search--active nil
   "Non-nil when Tessera renders the current Elfeed search buffer.")
 
+(defvar-local tessera-elfeed-search--months-dirty nil
+  "Non-nil after entry rendering invalidates month metadata.")
+
 (defvar-local tessera-elfeed-search--saved-settings nil
   "Original values and locality of settings replaced by Tessera.")
 
@@ -176,6 +190,9 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
     (define-key map (kbd "p") #'tessera-elfeed-search--previous)
     map)
   "Internal keymap that adapts Elfeed navigation.")
+
+(defvar-local tessera-elfeed-search--month-separator-hidden nil
+  "Non-nil when month grouping hid the native date separator.")
 
 (defun tessera-elfeed-search--entry (context)
   "Return the Elfeed entry stored in CONTEXT."
@@ -196,6 +213,82 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
              (tessera-elfeed-search--entry context)))
       'unread
     'read))
+
+(defun tessera-elfeed-search--month-enabled-p ()
+  "Return the effective Elfeed month grouping setting."
+  (if (eq tessera-elfeed-search-month-grouping 'inherit)
+      tessera-month-grouping
+    tessera-elfeed-search-month-grouping))
+
+(defun tessera-elfeed-search--native-separator-p ()
+  "Return non-nil when the date separator has its native default."
+  (when-let* ((standard
+               (get 'elfeed-search-separator-date-format
+                    'standard-value)))
+    (equal elfeed-search-separator-date-format
+           (eval (car standard) t))))
+
+(defun tessera-elfeed-search--saved-separator ()
+  "Return the date separator saved when Tessera was enabled."
+  (nth 2
+       (assq 'elfeed-search-separator-date-format
+             tessera-elfeed-search--saved-settings)))
+
+(defun tessera-elfeed-search--update-date-separator ()
+  "Hide or restore the native default date separator."
+  (cond
+   ((and (tessera-elfeed-search--month-enabled-p)
+         (not tessera-elfeed-search--month-separator-hidden)
+         (tessera-elfeed-search--native-separator-p))
+    (setq-local elfeed-search-separator-date-format nil)
+    (setq tessera-elfeed-search--month-separator-hidden t))
+   ((and (not (tessera-elfeed-search--month-enabled-p))
+         tessera-elfeed-search--month-separator-hidden)
+    (setq-local elfeed-search-separator-date-format
+                (tessera-elfeed-search--saved-separator))
+    (setq tessera-elfeed-search--month-separator-hidden nil))))
+
+(defun tessera-elfeed-search--month-date (context)
+  "Return CONTEXT's native entry date as an Emacs time."
+  (let ((date
+         (elfeed-entry-date
+          (tessera-elfeed-search--entry context))))
+    (when (numberp date) (seconds-to-time date))))
+
+(defun tessera-elfeed-search--month-unread-p (context)
+  "Return non-nil when CONTEXT contains an unread entry."
+  (eq (tessera-elfeed-search--select-status context) 'unread))
+
+(defun tessera-elfeed-search--month-glyph (state _context)
+  "Return the configured status glyph for STATE."
+  (tessera-glyph-resolve
+   (if (eq state 'unread) 'status-unread 'status-read)
+   tessera-elfeed-search--glyph-defaults
+   tessera-elfeed-search-glyphs))
+
+(defun tessera-elfeed-search--month-warning-segment (_context)
+  "Return the segment that carries an Elfeed date warning."
+  'title)
+
+(defun tessera-elfeed-search--month-goto (context)
+  "Move point to the rendered Elfeed entry in CONTEXT."
+  (let ((object (tessera-entry-context-object context))
+        found)
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (while (and (not found) (< (point) (point-max)))
+        (let ((candidate
+               (get-text-property
+                (point) 'tessera-entry-context)))
+          (if (and candidate
+                   (eq object
+                       (tessera-entry-context-object candidate)))
+              (setq found t)
+            (forward-line 1)))))
+    (when-let* ((preferred (and found (tessera-entry-point))))
+      (goto-char preferred))
+    found))
 
 (defun tessera-elfeed-search--status-slot ()
   "Return the status glyph slot for Elfeed entries."
@@ -318,15 +411,17 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 
 (defun tessera-elfeed-search--date (context)
   "Return the interactive date segment for CONTEXT."
-  (elfeed-add-properties
-   (elfeed-search-format-date
-    (elfeed-entry-date (tessera-elfeed-search--entry context)))
-   'face (if (eq (tessera-elfeed-search--select-status context)
-                 'unread)
-             'tessera-elfeed-search-unread-date-face
-           'tessera-elfeed-search-date-face)
-   'mouse-face 'highlight
-   'follow-link [elfeed-date]))
+  (let ((date (tessera--valid-time
+               (elfeed-entry-date
+                (tessera-elfeed-search--entry context)))))
+    (elfeed-add-properties
+     (if date (elfeed-search-format-date date) "Unknown")
+     'face (if (eq (tessera-elfeed-search--select-status context)
+                   'unread)
+               'tessera-elfeed-search-unread-date-face
+             'tessera-elfeed-search-date-face)
+     'mouse-face (and date 'highlight)
+     'follow-link (and date [elfeed-date]))))
 
 ;;;; Layout registration
 
@@ -365,6 +460,12 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
   (tessera-entry-register
    'elfeed-search
    :context #'tessera-elfeed-search--context
+   :month-date #'tessera-elfeed-search--month-date
+   :month-unread-p #'tessera-elfeed-search--month-unread-p
+   :month-glyph #'tessera-elfeed-search--month-glyph
+   :month-warning-segment
+   #'tessera-elfeed-search--month-warning-segment
+   :month-goto #'tessera-elfeed-search--month-goto
    :segments
    '((title . tessera-elfeed-search--title)
      (feed . tessera-elfeed-search--feed)
@@ -381,6 +482,9 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 
 (defun tessera-elfeed-search-print-entry (entry)
   "Insert a Tessera rendering of Elfeed ENTRY."
+  (unless tessera-elfeed-search--months-dirty
+    (tessera--month-clear-display))
+  (setq tessera-elfeed-search--months-dirty t)
   (let ((start (point)))
     ;; A single-entry update retains the native terminating newline.
     (tessera-entry-clear-layout start (min (point-max) (1+ start)))
@@ -434,11 +538,15 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (defun tessera-elfeed-search--target-position (lines)
   "Return the target position LINES logical entries away.
 Return nil when the requested logical Elfeed entry does not exist."
+  (tessera-elfeed-search--sync-months)
   (unless (zerop lines)
-    (save-excursion
-      (when (and (zerop (forward-line lines))
-                 (tessera-elfeed-search--entry-at-point))
-        (point)))))
+    (if (and tessera--month-enabled tessera--month-groups)
+        (tessera--month-visible-entry-position
+         (if (> lines 0) 1 -1) (abs lines))
+      (save-excursion
+        (when (and (zerop (forward-line lines))
+                   (tessera-elfeed-search--entry-at-point))
+          (point))))))
 
 (defun tessera-elfeed-search--move (lines)
   "Move point LINES logical Elfeed entries when the target exists."
@@ -460,6 +568,11 @@ Return nil when the requested logical Elfeed entry does not exist."
 (defun tessera-elfeed-search--navigation (enable)
   "Install navigation integration when ENABLE is non-nil."
   (if enable
+      (advice-add 'elfeed-search-update-entry :around
+                  #'tessera-elfeed-search--update-entries)
+    (advice-remove 'elfeed-search-update-entry
+                   #'tessera-elfeed-search--update-entries))
+  (if enable
       (add-to-list 'emulation-mode-map-alists
                    'tessera-elfeed-search--emulation-map-alist)
     (setq emulation-mode-map-alists
@@ -476,15 +589,30 @@ Return nil when the requested logical Elfeed entry does not exist."
           (tessera-entry-apply-layout (point) (line-end-position))
           (forward-line 1))))
     (tessera-elfeed-search--style-separators)
+    (setq tessera-elfeed-search--months-dirty t)
+    (tessera-elfeed-search--sync-months)
     (tessera-entry-highlight-current)))
 
-(defun tessera-elfeed-search--refresh-active-buffers ()
-  "Refresh live Elfeed search buffers using Tessera."
-  (tessera--map-mode-buffers
-   'elfeed-search-mode
-   (lambda ()
-     (when tessera-elfeed-search--active
-       (tessera-elfeed-search--refresh)))))
+(defun tessera-elfeed-search--sync-months (&optional _window)
+  "Synchronize changed month metadata before display or navigation."
+  (when (and tessera-elfeed-search--active
+             tessera-elfeed-search--months-dirty)
+    (tessera-month-configure
+     (tessera-elfeed-search--month-enabled-p) 'latest)
+    (setq tessera-elfeed-search--months-dirty nil)))
+
+(defun tessera-elfeed-search--update-entries (function &rest entries)
+  "Call native update FUNCTION for ENTRIES, then synchronize months.
+Batch updates rebuild month metadata once, before native actions
+can navigate using the changed records."
+  (prog1 (apply function entries)
+    (tessera-elfeed-search--sync-months)))
+
+(defun tessera-elfeed-search--post-command ()
+  "Reveal a hidden target and update the current entry face."
+  (tessera-elfeed-search--sync-months)
+  (tessera-month-reveal-point)
+  (tessera-entry-highlight-current))
 
 (defun tessera-elfeed-search--acquire-navigation ()
   "Register one buffer as a navigation integration user."
@@ -520,15 +648,20 @@ navigation registration."
   (remove-hook 'elfeed-search-update-hook
                #'tessera-elfeed-search--apply-layout t)
   (remove-hook 'post-command-hook
-               #'tessera-entry-highlight-current t)
+               #'tessera-elfeed-search--post-command t)
+  (remove-hook 'pre-redisplay-functions
+               #'tessera-elfeed-search--sync-months t)
   (remove-hook 'change-major-mode-hook
                #'tessera-elfeed-search--disable t)
   (remove-hook 'kill-buffer-hook
                #'tessera-elfeed-search--kill-buffer t)
   (tessera-entry-clear-current)
+  (tessera-month-clear)
   (tessera-entry-clear-layout)
   (tessera-elfeed-search--restore-separators)
-  (setq tessera-elfeed-search--saved-settings nil)
+  (setq tessera-elfeed-search--saved-settings nil
+        tessera-elfeed-search--months-dirty nil
+        tessera-elfeed-search--month-separator-hidden nil)
   (when release-navigation
     (tessera-elfeed-search--release-navigation)))
 
@@ -546,11 +679,15 @@ navigation registration."
             (setq-local elfeed-search-print-entry-function
                         #'tessera-elfeed-search-print-entry)
             (setq-local tessera-entry-layout 'two-line)
-            (setq-local elfeed-search-separator-date-format nil)
+            (setq-local tessera--month-enabled
+                        (tessera-elfeed-search--month-enabled-p))
+            (tessera-elfeed-search--update-date-separator)
             (add-hook 'elfeed-search-update-hook
                       #'tessera-elfeed-search--apply-layout t t)
             (add-hook 'post-command-hook
-                      #'tessera-entry-highlight-current nil t)
+                      #'tessera-elfeed-search--post-command nil t)
+            (add-hook 'pre-redisplay-functions
+                      #'tessera-elfeed-search--sync-months nil t)
             (add-hook 'change-major-mode-hook
                       #'tessera-elfeed-search--disable nil t)
             (add-hook 'kill-buffer-hook
@@ -588,12 +725,28 @@ navigation registration."
 Nil means explicitly refresh all glyphs and their hover faces."
   (when (or (null option)
             (memq option '(tessera-elfeed-search-glyphs
+                           tessera-month-glyphs
                            tessera-entry-ellipsis
                            tessera-glyph-style tessera-glyph-color)))
+    (tessera-elfeed-search--months-changed nil)))
+
+(defun tessera-elfeed-search--months-changed (option)
+  "Refresh active Elfeed views affected by month OPTION.
+Nil requests a full refresh, including glyphs."
+  (when (or (null option)
+            (memq option '(tessera-month-grouping
+                           tessera-elfeed-search-month-grouping)))
     (when (gethash 'elfeed-search tessera--entry-backends)
       (tessera-elfeed-search--register))
     (save-window-excursion
-      (tessera-elfeed-search--refresh-active-buffers))))
+      (tessera--map-mode-buffers
+       'elfeed-search-mode
+       (lambda ()
+         (when tessera-elfeed-search--active
+           (setq-local tessera--month-enabled
+                       (tessera-elfeed-search--month-enabled-p))
+           (tessera-elfeed-search--update-date-separator)
+           (tessera-elfeed-search--refresh)))))))
 
 (provide 'tessera-elfeed-search)
 ;;; tessera-elfeed-search.el ends here

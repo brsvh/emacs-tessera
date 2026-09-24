@@ -59,16 +59,25 @@
 
 (declare-function tessera-elfeed-search--glyphs-changed
                   "tessera-elfeed-search")
+(declare-function tessera-elfeed-search--months-changed
+                  "tessera-elfeed-search")
 
 (defun tessera-elfeed--glyphs-changed (option)
   "Forward changed glyph OPTION to an already loaded adapter."
   (when (featurep 'tessera-elfeed-search)
     (tessera-elfeed-search--glyphs-changed option)))
 
+(defun tessera-elfeed--months-changed (option)
+  "Forward changed month OPTION to an already loaded adapter."
+  (when (featurep 'tessera-elfeed-search)
+    (tessera-elfeed-search--months-changed option)))
+
 (defun tessera-elfeed--deactivate ()
   "Remove Elfeed hooks and disable every active search adapter."
   (remove-hook 'tessera--glyph-change-functions
                #'tessera-elfeed--glyphs-changed)
+  (remove-hook 'tessera--month-change-functions
+               #'tessera-elfeed--months-changed)
   (remove-hook 'elfeed-search-mode-hook
                #'tessera-elfeed--enable-search)
   (when (featurep 'tessera-elfeed-search)
@@ -87,6 +96,8 @@
               (progn
                 (add-hook 'tessera--glyph-change-functions
                           #'tessera-elfeed--glyphs-changed)
+                (add-hook 'tessera--month-change-functions
+                          #'tessera-elfeed--months-changed)
                 (add-hook 'elfeed-search-mode-hook
                           #'tessera-elfeed--enable-search)
                 (tessera-elfeed--map-search-buffers

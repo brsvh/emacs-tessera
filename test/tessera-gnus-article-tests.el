@@ -229,6 +229,45 @@
             (should (eq (plist-get content :attachment)
                         'present))))))))
 
+(ert-deftest tessera-gnus-article-updates-folded-month-layout ()
+  (with-temp-buffer
+    (let ((gnus-show-threads nil)
+          (tessera-gnus-summary--active t)
+          (tessera--month-enabled t)
+          (tessera-glyph-style 'ascii))
+      (tessera-gnus-summary--register)
+      (tessera-tests--gnus-rows '(0 0))
+      (setf (mail-header-date
+             (gnus-data-header (gnus-data-find 2)))
+            "Sat, 8 Aug 2026 12:00:00 +0800")
+      (tessera-gnus-summary--sync-buffer t)
+      (setq-local gnus-current-headers
+                  (gnus-data-header (gnus-data-find 1)))
+      (gnus-summary-goto-subject 2)
+      (tessera--month-toggle '(2026 9))
+      (let ((summary (current-buffer)))
+        (with-temp-buffer
+          (gnus-article-mode)
+          (setq-local gnus-summary-buffer summary)
+          (setq-local gnus-article-mime-handles
+                      (mm-make-handle
+                       (current-buffer) '("application/pdf")
+                       nil nil '("attachment")))
+          (tessera-gnus-article--updated)))
+      (should (= (gnus-summary-article-number) 2))
+      (should (= (point) (tessera-entry-point)))
+      (should (gethash '(2026 9) tessera--month-folds))
+      (should
+       (equal (mapcar #'tessera--month-group-start
+                      tessera--month-groups)
+              (mapcar #'tessera--month-entry-start
+                      (tessera--month-scan-entries))))
+      (tessera--month-toggle '(2026 9))
+      (dolist (entry (tessera--month-scan-entries))
+        (should
+         (tessera-entry-layout-applied-p
+          (tessera--month-entry-start entry)))))))
+
 (ert-deftest tessera-gnus-article-coalesces-native-content-events ()
   (with-temp-buffer
     (let ((summary (current-buffer))

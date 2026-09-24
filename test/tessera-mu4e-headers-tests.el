@@ -7,9 +7,76 @@
 ;;; Code:
 
 (require 'ert)
+(require 'wid-edit)
 (require 'mu4e-headers)
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-headers)
+
+(ert-deftest tessera-mu4e-undated-rows-keep-native-identity ()
+  (dolist (date '(nil invalid (0 0 0) (0 0)))
+    (let ((mu4e-headers-mode-hook nil)
+          (mu4e-headers-fields '((:subject)))
+          (mu4e-search-threads nil)
+          (mu4e-search-hide-enabled nil)
+          (tessera-mu4e-headers-month-grouping t)
+          (tessera-glyph-style 'ascii))
+      (with-temp-buffer
+        (mu4e-headers-mode)
+        (let ((inhibit-read-only t)
+              (buffer (current-buffer)))
+          (cl-letf (((symbol-function 'mu4e-get-headers-buffer)
+                     (lambda (&rest _) buffer)))
+            (mu4e~headers-insert-header
+             (list :docid 1 :subject "Undated" :date date)
+             (point-max))
+            (goto-char (point-min))
+            (unwind-protect
+                (progn
+                  (tessera-mu4e--enable-headers)
+                  (should (= (mu4e~headers-docid-at-point) 1))
+                  (let* ((start
+                          (tessera-mu4e-headers--body-start))
+                         (context (get-text-property
+                                   start 'tessera-entry-context))
+                         (valid (equal date '(0 0))))
+                    (should
+                     (eq (tessera-entry-context-month-undated
+                          context) (not valid)))
+                    (if valid
+                        (should tessera--month-groups)
+                      (should-not tessera--month-groups)
+                      (should (string-match-p
+                               "None" (buffer-string))))
+                    (should (equal (plist-get
+                                    (mu4e-message-at-point) :date)
+                                   date))
+                    (let ((tessera--month-enabled nil))
+                      (unless valid
+                        (should
+                         (equal
+                          (substring-no-properties
+                           (tessera-mu4e-headers--field
+                            'date context)) "None"))))))
+              (tessera-mu4e-headers--disable))))))))
+
+(ert-deftest tessera-mu4e-month-thread-date-is-latest-only ()
+  (should
+   (eq (default-value
+        'tessera-mu4e-headers-month-thread-date)
+       'latest))
+  (let ((widget
+         (widget-convert
+          (get 'tessera-mu4e-headers-month-thread-date
+               'custom-type))))
+    (should (widget-apply widget :match 'inherit))
+    (should (widget-apply widget :match 'latest))
+    (should-not (widget-apply widget :match 'root)))
+  (let ((tessera-month-thread-date 'root)
+        (tessera-mu4e-headers-month-thread-date 'inherit))
+    (should (eq (tessera-mu4e-headers--month-thread-date) 'latest)))
+  (let ((tessera-mu4e-headers-month-thread-date 'root))
+    (should-error
+     (tessera-mu4e-headers--month-thread-date))))
 
 (ert-deftest tessera-mu4e-restores-native-line-highlighting ()
   (dolist (enabled '(nil t))
@@ -117,6 +184,7 @@
         (tessera-mu4e--installed nil)
         (mu4e-headers-mode-hook nil)
         (tessera--glyph-change-functions nil)
+        (tessera--month-change-functions nil)
         enabled disabled error-data)
     (unwind-protect
         (progn
@@ -146,6 +214,8 @@
           (should (= (length disabled) 2))
           (should-not (memq #'tessera-mu4e--enable-headers
                             mu4e-headers-mode-hook))
+          (should-not (memq #'tessera-mu4e--months-changed
+                            tessera--month-change-functions))
           (dolist (buffer (list first second))
             (with-current-buffer buffer
               (should-not tessera-mu4e-headers--active))))
@@ -529,6 +599,62 @@
               (should (eq before line-move-ignore-invisible))
               (should (eq local (local-variable-p
                                  'line-move-ignore-invisible))))))))))
+
+(ert-deftest tessera-mu4e-headers-navigation-skips-folded-months ()
+  (let ((mu4e-search-threads nil)
+        (mu4e-headers-mode-hook nil)
+        (mu4e-headers-fields '((:subject)))
+        (mu4e-search-hide-enabled nil)
+        (mu4e-headers-open-after-move nil))
+    (with-temp-buffer
+      (mu4e-headers-mode)
+      (let ((inhibit-read-only t)
+            (buffer (current-buffer)))
+        (cl-letf (((symbol-function 'mu4e-get-headers-buffer)
+                   (lambda (&rest _) buffer)))
+          (cl-loop
+           for docid from 1
+           for month in '(9 8 7)
+           do
+           (mu4e~headers-insert-header
+            (list :docid docid
+                  :message-id (format "message-%d" docid)
+                  :subject "Subject"
+                  :from
+                  '((:name "Author" :email "a@example.test"))
+                  :date (encode-time 0 0 12 1 month 2026)
+                  :flags '(unread))
+            (point-max)))
+          (unwind-protect
+              (progn
+                (tessera-mu4e--enable-headers)
+                (should (= (length tessera--month-groups) 3))
+                (puthash '(2026 8) t tessera--month-folds)
+                (tessera-month-sync)
+                (mu4e~headers-goto-docid 1)
+                (should (= (mu4e-headers-next) 3))
+                (should (= (mu4e~headers-docid-at-point) 3))
+                (should (= (mu4e-headers-prev) 1))
+                (should (= (mu4e~headers-docid-at-point) 1))
+                (should (mu4e-headers-next-unread))
+                (should (= (mu4e~headers-docid-at-point) 3))
+                (should (mu4e-headers-prev-unread))
+                (should (= (mu4e~headers-docid-at-point) 1))
+                (let ((origin (point)))
+                  (should-not
+                   (mu4e-headers-goto-message-id "missing"))
+                  (should (= (point) origin))
+                  (should (gethash '(2026 8) tessera--month-folds)))
+                (should (mu4e-headers-goto-message-id "message-2"))
+                (should (= (mu4e~headers-docid-at-point) 2))
+                (should (= (point) (tessera-entry-point)))
+                (should-not
+                 (gethash '(2026 8) tessera--month-folds))
+                ;; Finding the current record is still a success.
+                (beginning-of-line)
+                (should (mu4e-headers-goto-message-id "message-2"))
+                (should (= (point) (tessera-entry-point))))
+            (tessera-mu4e-headers--disable)))))))
 
 (ert-deftest tessera-mu4e-headers-labels-keep-neutral-separators ()
   (let* ((mu4e--mark-map (make-hash-table))

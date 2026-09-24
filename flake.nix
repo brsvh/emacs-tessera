@@ -65,6 +65,7 @@
                     packageRequires ? [ ],
                     pname,
                     projectRoot,
+                    version,
                     ...
                   }:
                   let
@@ -77,6 +78,7 @@
                     inherit
                       packageRequires
                       pname
+                      version
                       ;
 
                     files = ''("lisp/${pname}/*.el" "doc/${pname}.texi")'';
@@ -92,7 +94,6 @@
                     };
 
                     src = projectRoot;
-                    version = "0.1.0";
                   };
 
                 scope = finalAttrs: _: {
@@ -108,6 +109,7 @@
                     ];
 
                     pname = "tessera";
+                    version = "0.1.1";
                   };
 
                   tessera-x = finalAttrs.callPackage emacs-tessera {
@@ -122,6 +124,7 @@
                     ];
 
                     pname = "tessera-x";
+                    version = "0.1.1";
                   };
                 };
               in

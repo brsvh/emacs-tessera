@@ -70,16 +70,25 @@
 
 (declare-function tessera-gnus-summary--glyphs-changed
                   "tessera-gnus-summary")
+(declare-function tessera-gnus-summary--months-changed
+                  "tessera-gnus-summary")
 
 (defun tessera-gnus--glyphs-changed (option)
   "Forward changed glyph OPTION to an already loaded adapter."
   (when (featurep 'tessera-gnus-summary)
     (tessera-gnus-summary--glyphs-changed option)))
 
+(defun tessera-gnus--months-changed (option)
+  "Forward changed month OPTION to an already loaded adapter."
+  (when (featurep 'tessera-gnus-summary)
+    (tessera-gnus-summary--months-changed option)))
+
 (defun tessera-gnus--deactivate ()
   "Remove Gnus hooks and disable every loaded adapter."
   (remove-hook 'tessera--glyph-change-functions
                #'tessera-gnus--glyphs-changed)
+  (remove-hook 'tessera--month-change-functions
+               #'tessera-gnus--months-changed)
   (remove-hook 'gnus-summary-mode-hook
                #'tessera-gnus--enable-summary)
   (unwind-protect
@@ -105,6 +114,8 @@
               (progn
                 (add-hook 'tessera--glyph-change-functions
                           #'tessera-gnus--glyphs-changed)
+                (add-hook 'tessera--month-change-functions
+                          #'tessera-gnus--months-changed)
                 (require 'tessera-gnus-article)
                 (require 'tessera-gnus-summary)
                 (tessera-gnus-summary--track-folds t)

@@ -62,9 +62,12 @@
         (with-temp-buffer
           (insert-file-contents (expand-file-name "tessera-x.el"
                                                   directory))
-          (cl-assert
-           (equal (package-desc-reqs (package-buffer-info))
-                  '((emacs (30 1)) (tessera (0 1 0))))))
+          (let ((description (package-buffer-info)))
+            (cl-assert
+             (equal (package-desc-version description) '(0 1 1)))
+            (cl-assert
+             (equal (package-desc-reqs description)
+                    '((emacs (30 1)) (tessera (0 1 0)))))))
         (cl-assert (featurep 'tessera))
         (dolist (feature features)
           (tessera-x-isolation--check-require feature))
