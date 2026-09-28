@@ -582,6 +582,7 @@ Return nil when the requested logical Elfeed entry does not exist."
 (defun tessera-elfeed-search--apply-layout ()
   "Attach layouts after Elfeed has inserted entry terminators."
   (when tessera-elfeed-search--active
+    (tessera--header-line-changed)
     (let ((inhibit-read-only t))
       (save-excursion
         (goto-char (point-min))
@@ -606,6 +607,7 @@ Return nil when the requested logical Elfeed entry does not exist."
 Batch updates rebuild month metadata once, before native actions
 can navigate using the changed records."
   (prog1 (apply function entries)
+    (tessera--header-line-changed)
     (tessera-elfeed-search--sync-months)))
 
 (defun tessera-elfeed-search--post-command ()
@@ -641,6 +643,7 @@ can navigate using the changed records."
   "Restore native state in the current Elfeed search buffer.
 When RELEASE-NAVIGATION is non-nil, release this buffer's shared
 navigation registration."
+  (tessera--header-line-disable)
   (setq tessera-elfeed-search--active nil
         tessera-elfeed-search--emulation-map-alist nil)
   (tessera--restore-settings
@@ -667,6 +670,7 @@ navigation registration."
 
 (defun tessera-elfeed-search--enable ()
   "Enable Tessera rendering in the current Elfeed search buffer."
+  (require 'elfeed)
   (unless tessera-elfeed-search--active
     (setq tessera-elfeed-search--saved-settings
           (tessera--save-settings
@@ -701,6 +705,7 @@ navigation registration."
             (tessera-elfeed-search--acquire-navigation)
             (setq navigation-acquired t)
             (tessera-elfeed-search--refresh)
+            (tessera-elfeed-search--header-line-enable)
             (setq completed t))
         (unless completed
           (condition-case nil
@@ -747,6 +752,233 @@ Nil requests a full refresh, including glyphs."
                        (tessera-elfeed-search--month-enabled-p))
            (tessera-elfeed-search--update-date-separator)
            (tessera-elfeed-search--refresh)))))))
+
+;;;; Header line providers
+
+(defcustom tessera-elfeed-search-header-line-action-function
+  #'tessera-elfeed-search-header-line-action
+  "Function rendering the action header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-elfeed-search)
+
+(defcustom tessera-elfeed-search-header-line-info-function
+  #'tessera-elfeed-search-header-line-info
+  "Function rendering the info header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-elfeed-search)
+
+(defcustom tessera-elfeed-search-header-line-extra-function
+  nil
+  "Function rendering the extra header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-elfeed-search)
+
+(defcustom tessera-elfeed-search-header-line-statistics-function
+  #'tessera-elfeed-search-header-line-statistics
+  "Function rendering the statistics header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-elfeed-search)
+
+(defcustom tessera-elfeed-search-header-line-next-update-function
+  nil
+  "Function returning the next update time, or nil when unknown.
+The function receives a `tessera-header-line-context'.  It must
+return an absolute Emacs time value or nil, without scheduling work."
+  :type '(choice (const nil) function)
+  :group 'tessera-elfeed-search)
+
+(defun tessera-elfeed-search--header-line-enable ()
+  "Attach the four-region header to this native view."
+  (tessera--header-line-enable
+   'elfeed-search #'tessera-elfeed-search--header-line-state
+   '((action . tessera-elfeed-search-header-line-action-function)
+     (info . tessera-elfeed-search-header-line-info-function)
+     (extra . tessera-elfeed-search-header-line-extra-function)
+     (statistics
+      . tessera-elfeed-search-header-line-statistics-function))))
+
+(defun tessera-elfeed-search-header-line-statistics (context)
+  "Return this view's cached statistics for CONTEXT."
+  (tessera-header-line-statistics context))
+
+(declare-function elfeed-update "elfeed")
+(declare-function elfeed-entry-id "elfeed-db")
+(declare-function elfeed-entry-feed-id "elfeed-db")
+(defvar elfeed-search-entries)
+(defvar elfeed-search-filter)
+(defvar elfeed-fetch-functions)
+(defvar elfeed-parse-error-hook)
+
+(defvar tessera-elfeed-search--requests nil
+  "Outstanding observed feed request tokens.")
+(defvar tessera-elfeed-search--last-update nil
+  "Completion time of the last observed feed update batch.")
+(defvar tessera-elfeed-search--update-failed nil
+  "Whether the observed batch contains a failed request.")
+
+(defvar tessera-elfeed-search--batch-depth 0
+  "Dynamic nesting depth of native feed update dispatch.")
+(defvar tessera-elfeed-search--batch-started nil
+  "Whether the current native dispatch started a request.")
+
+(defun tessera-elfeed-search--header-line-state ()
+  "Collect real displayed entries, query results, and feed counts."
+  (let ((entries (make-hash-table :test #'equal))
+        (feeds (make-hash-table :test #'equal))
+        (unread 0))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (while (< (point) (point-max))
+          (when-let* ((entry (get-text-property
+                              (point) 'elfeed-entry))
+                      (id (elfeed-entry-id entry)))
+            (unless (gethash id entries)
+              (puthash id t entries)
+              (puthash (elfeed-entry-feed-id entry) t feeds)
+              (when (memq 'unread (elfeed-entry-tags entry))
+                (cl-incf unread))))
+          (forward-line 1))))
+    (list :shown (hash-table-count entries)
+          :unread unread
+          :matched (length elfeed-search-entries)
+          :feeds (hash-table-count feeds)
+          :query elfeed-search-filter
+          :scope (concat "All inserted entries, including folded and "
+                         "off-screen entries; excludes headings.")
+          :glyph-defaults 'tessera-elfeed-search--glyph-defaults
+          :glyph-overrides 'tessera-elfeed-search-glyphs)))
+
+(defun tessera-elfeed-search-header-line-info (context)
+  "Return the current search condition for CONTEXT."
+  (let ((query (or (plist-get
+                    (tessera-header-line-context-state context)
+                    :query) "")))
+    (tessera-header-line-field
+     context 'info "Query" query (concat "Search filter:\n" query))))
+
+(defun tessera-elfeed-search-header-line-action (context)
+  "Return the feed update action for CONTEXT."
+  (tessera-header-line-update
+   context tessera-elfeed-search--last-update
+   (when tessera-elfeed-search-header-line-next-update-function
+     (funcall tessera-elfeed-search-header-line-next-update-function
+              context))
+   (or tessera-elfeed-search--requests
+       (> tessera-elfeed-search--batch-depth 0))
+   #'elfeed-update
+   "Update all feeds.  Last time records the observed batch ending."
+   tessera-elfeed-search--update-failed))
+
+(defun tessera-elfeed-search--update-notify ()
+  "Refresh registered headers, coalescing synchronous batch changes."
+  (when (zerop tessera-elfeed-search--batch-depth)
+    (dolist (buffer tessera--header-line-buffers)
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (when (and (eq tessera--header-line-view 'elfeed-search)
+                     tessera-elfeed-search--active
+                     tessera-header-line-enabled)
+            (force-mode-line-update)))))))
+
+(defun tessera-elfeed-search--request-finished (token success)
+  "Complete observed request TOKEN, recording SUCCESS."
+  (setq tessera-elfeed-search--requests
+        (delq token tessera-elfeed-search--requests))
+  (unless success (setq tessera-elfeed-search--update-failed t))
+  (when (and (null tessera-elfeed-search--requests)
+             (zerop tessera-elfeed-search--batch-depth))
+    (setq tessera-elfeed-search--last-update (current-time)))
+  (tessera-elfeed-search--update-notify))
+
+(defun tessera-elfeed-search--observe-update (function url &rest args)
+  "Observe FUNCTION updating URL with ARGS, including background work.
+Wrap the native fetch completion callback without changing fetching,
+parsing, native hooks, or request ordering."
+  (let ((token (list url))
+        (fetchers elfeed-fetch-functions)
+        finished dispatched)
+    (when (and (null tessera-elfeed-search--requests)
+               (zerop tessera-elfeed-search--batch-depth))
+      (setq tessera-elfeed-search--update-failed nil))
+    (setq tessera-elfeed-search--batch-started t)
+    (push token tessera-elfeed-search--requests)
+    (tessera-elfeed-search--update-notify)
+    (unwind-protect
+        (let ((elfeed-fetch-functions
+               (list
+                (lambda (feed callback)
+                  (let ((elfeed-fetch-functions fetchers))
+                    (run-hook-with-args-until-success
+                     'elfeed-fetch-functions feed
+                     (lambda (result)
+                       (let* (success parse-failed
+                                      (elfeed-parse-error-hook
+                                       (cons (lambda (failed-url _error)
+                                               (when (equal failed-url url)
+                                                 (setq parse-failed t)))
+                                             elfeed-parse-error-hook)))
+                         (unwind-protect
+                             (prog1 (funcall callback result)
+                               (setq success
+                                     (not (or (eq result :error)
+                                              parse-failed))))
+                           (unless finished
+                             (setq finished t)
+                             (tessera-elfeed-search--request-finished
+                              token success)))))))))))
+          (setq dispatched (apply function url args)))
+      (unless (or dispatched finished)
+        (setq finished t)
+        (tessera-elfeed-search--request-finished token nil)))))
+
+(defun tessera-elfeed-search--observe-batch (function &rest args)
+  "Observe FUNCTION dispatching a native batch with ARGS."
+  (when (and (null tessera-elfeed-search--requests)
+             (zerop tessera-elfeed-search--batch-depth))
+    (setq tessera-elfeed-search--update-failed nil))
+  (unwind-protect
+      (let ((tessera-elfeed-search--batch-depth
+             (1+ tessera-elfeed-search--batch-depth))
+            (tessera-elfeed-search--batch-started nil))
+        (unwind-protect
+            (apply function args)
+          (when (and tessera-elfeed-search--batch-started
+                     (null tessera-elfeed-search--requests))
+            (setq tessera-elfeed-search--last-update
+                  (current-time)))))
+    (tessera-elfeed-search--update-notify)))
+
+(defun tessera-elfeed-search--header-line-track (enable)
+  "Observe native update batches when ENABLE is non-nil."
+  (if enable
+      (advice-add 'elfeed--update-feed :around
+                  #'tessera-elfeed-search--observe-update)
+    (advice-remove 'elfeed--update-feed
+                   #'tessera-elfeed-search--observe-update))
+  (dolist (function '(elfeed-update elfeed-update-background))
+    (if enable
+        (advice-add function :around
+                    #'tessera-elfeed-search--observe-batch)
+      (advice-remove function
+                     #'tessera-elfeed-search--observe-batch))))
 
 (provide 'tessera-elfeed-search)
 ;;; tessera-elfeed-search.el ends here

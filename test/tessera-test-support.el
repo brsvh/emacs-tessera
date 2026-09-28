@@ -8,6 +8,16 @@
 
 (require 'cl-lib)
 
+(defun tessera-tests--pixel-width (text &optional face)
+  "Measure TEXT with buffer font remapping and optional base FACE."
+  (let ((remapping face-remapping-alist))
+    (with-temp-buffer
+      (setq-local face-remapping-alist remapping)
+      (insert text)
+      (when face
+        (add-face-text-property (point-min) (point-max) face t))
+      (car (buffer-text-pixel-size nil nil t)))))
+
 (defun tessera-tests--property-position (property value string)
   "Return the position where PROPERTY equals VALUE in STRING."
   (cl-loop for position below (length string)

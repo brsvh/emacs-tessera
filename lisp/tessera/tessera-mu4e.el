@@ -40,6 +40,9 @@
 (declare-function tessera-mu4e-headers--enable "tessera-mu4e-headers")
 (declare-function tessera-mu4e-headers--disable
                   "tessera-mu4e-headers")
+(declare-function tessera-mu4e-headers--header-line-track
+                  "tessera-mu4e-headers")
+
 (declare-function tessera-mu4e-headers--register
                   "tessera-mu4e-headers")
 (declare-function tessera-mu4e-headers--navigation
@@ -58,6 +61,7 @@
   "Enable Tessera in the current mu4e headers buffer."
   (require 'mu4e-headers)
   (require 'tessera-mu4e-headers)
+  (tessera-mu4e-headers--header-line-track t)
   (tessera-mu4e-headers--register)
   (tessera-mu4e-headers--enable))
 
@@ -85,6 +89,7 @@
   (remove-hook 'mu4e-headers-mode-hook
                #'tessera-mu4e--enable-headers)
   (when (featurep 'tessera-mu4e-headers)
+    (tessera-mu4e-headers--header-line-track nil)
     (let ((tessera-mu4e-headers--bulk-deactivating t))
       (unwind-protect
           (tessera-mu4e--map-headers-buffers

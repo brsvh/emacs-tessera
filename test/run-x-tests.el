@@ -62,12 +62,21 @@
         (with-temp-buffer
           (insert-file-contents (expand-file-name "tessera-x.el"
                                                   directory))
-          (let ((description (package-buffer-info)))
+          (let* ((description (package-buffer-info))
+                 (requirements (package-desc-reqs description))
+                 (core-version
+                  (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name "tessera.el" directory))
+                    (package-desc-version (package-buffer-info)))))
+            (cl-assert (package-desc-version description))
+            (cl-assert (assq 'emacs requirements))
+            (cl-assert (assq 'tessera requirements))
             (cl-assert
-             (equal (package-desc-version description) '(0 1 1)))
-            (cl-assert
-             (equal (package-desc-reqs description)
-                    '((emacs (30 1)) (tessera (0 1 0)))))))
+             (not (version-list-<
+                   core-version (cadr (assq 'tessera requirements)))))
+            (dolist (dependency requirements)
+              (cl-assert (memq (car dependency) '(emacs tessera))))))
         (cl-assert (featurep 'tessera))
         (dolist (feature features)
           (tessera-x-isolation--check-require feature))

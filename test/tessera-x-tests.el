@@ -76,7 +76,7 @@
                     subthread-scope today-query-function)
                    (tessera-x-elfeed
                     fetch-linked-content fetch-minimum-characters
-                    fetch-timeout fetch-concurrency)))
+                    fetch-timeout fetch-concurrency fetch-max-bytes)))
     (let ((prefix (symbol-name (car entry))))
       (dolist (suffix (cdr entry))
         (let ((option
@@ -1892,6 +1892,55 @@
                        (buffer-string)))))
         (delete-directory directory t)))))
 
+(defun tessera-x-tests--http-response
+    (headers body check &optional limit)
+  "Run CHECK on an HTTP item and its stored body after parsing.
+HEADERS and encoded BODY populate a private response buffer.
+LIMIT bounds body parsing.  Assert completion and resource cleanup."
+  (tessera-x-tests--with-snapshots
+    (with-temp-buffer
+      (let* ((item (tessera-x-tests--item "feed"))
+             (stored (tessera-x-item-body item))
+             (context (tessera-x-context-start
+                       'elfeed "HTTP response" (list item)))
+             (request (make-tessera-x-elfeed--request
+                       :context context :max-bytes limit))
+             (fetch (make-tessera-x-elfeed--fetch
+                     :request request :item item))
+             (response (generate-new-buffer " *HTTP fixture*")))
+        (setf (tessera-x-elfeed--request-active request) (list fetch))
+        (unwind-protect
+            (progn
+              (with-current-buffer response
+                (set-buffer-multibyte nil)
+                (insert "HTTP/1.1 200 OK\r\n" headers "\r\n\r\n")
+                (setq-local url-http-response-status 200
+                            url-http-end-of-headers (point-marker))
+                (insert body)
+                (tessera-x-elfeed--response nil fetch))
+              (should (eq (tessera-x-context-state context) 'ready))
+              (should-not (buffer-live-p response))
+              (should-not (tessera-x-elfeed--request-active request))
+              (funcall check item stored))
+          (when (buffer-live-p response) (kill-buffer response)))))))
+
+(ert-deftest tessera-x-elfeed-rejects-large-bodies-before-parsing ()
+  (dolist (limit '(0 1 2 nil))
+    (let ((too-large (and limit (< limit 2)))
+          (parsed 0))
+      (cl-letf (((symbol-function 'tessera-x-html-text)
+                 (lambda (text) (cl-incf parsed) text)))
+        (tessera-x-tests--http-response
+         "" (encode-coding-string "é" 'utf-8)
+         (lambda (item stored)
+           (should (= parsed (if too-large 0 1)))
+           (should (equal (tessera-x-item-body item)
+                          (if too-large stored "é")))
+           (when too-large
+             (should (string-match-p "Linked body exceeds"
+                                     (tessera-x-item-note item)))))
+         limit)))))
+
 (ert-deftest tessera-x-elfeed-http-parses-content-and-charset ()
   (dolist (header
            (list
@@ -1905,33 +1954,14 @@
                     "Content-Type: text/html; charset=iso-8859-1")
             "Content-Type: text/html;\r\n\tcharset=iso-8859-1"))
     (ert-info ((format "Response header: %S" header))
-      (tessera-x-tests--with-snapshots
-        (with-temp-buffer
-          (let* ((item (tessera-x-tests--item "feed"))
-                 (context (tessera-x-context-start
-                           'elfeed "http parser" (list item)))
-                 (request
-                  (make-tessera-x-elfeed--request :context context))
-                 (fetch (make-tessera-x-elfeed--fetch
-                         :request request
-                         :item item))
-                 (response (generate-new-buffer " *HTTP fixture*")))
-            (setf (tessera-x-elfeed--request-active request)
-                  (list fetch))
-            (with-current-buffer response
-              (set-buffer-multibyte nil)
-              (insert "HTTP/1.1 200 OK\r\n" header "\r\n\r\n")
-              (setq-local url-http-response-status 200)
-              (setq-local url-http-end-of-headers (point-marker))
-              (insert (encode-coding-string
-                       "<p>café fetched body</p>" 'iso-latin-1))
-              (tessera-x-elfeed--response nil fetch))
-            (should (eq (tessera-x-context-state context) 'ready))
-            (should-not (buffer-live-p response))
-            (should (equal (tessera-x-item-body item)
-                           "café fetched body"))
-            (should (equal (tessera-x-item-note item)
-                           "Fetched linked page"))))))))
+      (tessera-x-tests--http-response
+       header (encode-coding-string
+               "<p>café fetched body</p>" 'iso-latin-1)
+       (lambda (item _stored)
+         (should (equal (tessera-x-item-body item)
+                        "café fetched body"))
+         (should (equal (tessera-x-item-note item)
+                        "Fetched linked page")))))))
 
 (ert-deftest tessera-x-elfeed-http-detects-document-charset ()
   (pcase-dolist
@@ -2002,42 +2032,22 @@
          ("text/plain" "<meta charset=\"iso-8859-1\">"
           utf-8 "café")))
     (ert-info ((format "%s: %s" type declaration))
-      (tessera-x-tests--with-snapshots
-        (with-temp-buffer
-          (let* ((item (tessera-x-tests--item "feed"))
-                 (context (tessera-x-context-start
-                           'elfeed "document charset" (list item)))
-                 (request
-                  (make-tessera-x-elfeed--request :context context))
-                 (fetch (make-tessera-x-elfeed--fetch
-                         :request request
-                         :item item))
-                 (response (generate-new-buffer " *HTTP fixture*"))
-                 (html
-                  (cond
-                   (fragment (concat declaration "<p>" body "</p>"))
-                   ((string-prefix-p "<?xml" declaration)
-                    (concat declaration "<html><body>"
-                            body "</body></html>"))
-                   (t (concat "<html><head>" declaration
-                              "</head><body>" body
-                              "</body></html>")))))
-            (setf (tessera-x-elfeed--request-active request)
-                  (list fetch))
-            (with-current-buffer response
-              (set-buffer-multibyte nil)
-              (insert "HTTP/1.1 200 OK\r\nContent-Type: " type
-                      "\r\nX-Charset: utf-8\r\n\r\n")
-              (setq-local url-http-response-status 200)
-              (setq-local url-http-end-of-headers (point-marker))
-              (insert (encode-coding-string html coding))
-              (tessera-x-elfeed--response nil fetch))
-            (should (eq (tessera-x-context-state context) 'ready))
-            (should-not (buffer-live-p response))
-            (should (equal (tessera-x-item-body item)
-                           (if (equal type "text/plain") html body)))
-            (should (equal (tessera-x-item-note item)
-                           "Fetched linked page"))))))))
+      (let ((html
+             (cond
+              (fragment (concat declaration "<p>" body "</p>"))
+              ((string-prefix-p "<?xml" declaration)
+               (concat declaration "<html><body>" body
+                       "</body></html>"))
+              (t (concat "<html><head>" declaration
+                         "</head><body>" body "</body></html>")))))
+        (tessera-x-tests--http-response
+         (concat "Content-Type: " type "\r\nX-Charset: utf-8")
+         (encode-coding-string html coding)
+         (lambda (item _stored)
+           (should (equal (tessera-x-item-body item)
+                          (if (equal type "text/plain") html body)))
+           (should (equal (tessera-x-item-note item)
+                          "Fetched linked page"))))))))
 
 (ert-deftest tessera-x-elfeed-charset-scan-is-bounded ()
   (let ((parse (symbol-function 'libxml-parse-html-region)) sizes)
@@ -2083,6 +2093,72 @@
            (puthash (elfeed-entry-id ,entry) ,entry elfeed-db-entries)
            (avl-tree-enter elfeed-db-index (elfeed-entry-id ,entry))))
        ,@body)))
+
+(ert-deftest tessera-x-elfeed-captures-buffer-local-body-limit ()
+  (dolist (limit '(1 nil))
+    (dolist (immediate '(nil t))
+      (tessera-x-tests--with-snapshots
+        (tessera-x-tests--with-elfeed-db '(("entry" 1 nil))
+          (with-temp-buffer
+            (setq-local major-mode 'elfeed-search-mode
+                        tessera-x-elfeed-fetch-max-bytes limit)
+            (let ((tessera-x-elfeed-fetch-linked-content t)
+                  (tessera-x-elfeed-fetch-minimum-characters nil)
+                  response callback arguments context request timer)
+              (unwind-protect
+                  (cl-letf
+                      (((symbol-function 'elfeed-search-selected)
+                        (lambda (&rest _)
+                          (list (elfeed-db-get-entry
+                                 '("feed" . "entry")))))
+                       ((symbol-function 'url-retrieve)
+                        (lambda (_url function args &rest _)
+                          (setq callback function arguments args
+                                request
+                                (tessera-x-elfeed--fetch-request
+                                 (car args))
+                                response
+                                (generate-new-buffer " *HTTP limit*"))
+                          ;; Change the source option after capture,
+                          ;; before either kind of completion.
+                          (setq-local tessera-x-elfeed-fetch-max-bytes
+                                      (if limit nil 0))
+                          (with-current-buffer response
+                            (set-buffer-multibyte nil)
+                            (insert "HTTP/1.1 200 OK\r\n"
+                                    "Content-Type: text/plain"
+                                    "\r\n\r\n")
+                            (setq-local url-http-response-status 200
+                                        url-http-end-of-headers
+                                        (point-marker))
+                            (insert "XY")
+                            (when immediate
+                              (apply callback nil arguments)))
+                          response)))
+                    (setq context (tessera-x-elfeed-prepare-context))
+                    (should (equal
+                             (tessera-x-elfeed--request-max-bytes
+                              request)
+                             limit))
+                    (unless immediate
+                      (should (tessera-x-context-pending-p context))
+                      (setq timer (tessera-x-elfeed--fetch-timer
+                                   (car arguments)))
+                      (with-current-buffer response
+                        (apply callback nil arguments)))
+                    (should (eq (tessera-x-context-state context)
+                                'ready))
+                    (should (equal
+                             (tessera-x-item-body
+                              (car (tessera-x-context-items context)))
+                             (if limit "Body" "XY")))
+                    (should-not (buffer-live-p response))
+                    (should-not (memq timer timer-list)))
+                (when (and context
+                           (tessera-x-context-pending-p context))
+                  (tessera-x-cancel-context))
+                (when (buffer-live-p response)
+                  (kill-buffer response))))))))))
 
 (ert-deftest tessera-x-elfeed-today-keeps-filter-and-local-boundaries
     ()

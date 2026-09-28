@@ -97,11 +97,18 @@ Nil means fetch every selected HTTP link when fetching is enabled."
   :type 'natnum
   :group 'tessera-x-elfeed)
 
+(defcustom tessera-x-elfeed-fetch-max-bytes (* 2 1024 1024)
+  "Maximum linked response body size to decode and parse, in bytes.
+Larger responses retain the stored feed body.  Nil disables this
+limit.  This bounds parsing input, not the preceding HTTP transfer."
+  :type '(choice (const :tag "Unlimited" nil) natnum)
+  :group 'tessera-x-elfeed)
+
 ;;;; Context snapshots
 
 (cl-defstruct tessera-x-elfeed--request
   "Bounded HTTP work for a context snapshot."
-  context queue active dispatching (limit 4) timeout)
+  context queue active dispatching (limit 4) timeout max-bytes)
 
 (cl-defstruct tessera-x-elfeed--fetch
   "One HTTP transfer, completed at most once."
@@ -270,6 +277,14 @@ Inspect HTML metadata only within the first 1024 body bytes."
                        (<= 200 url-http-response-status 299)
                        (markerp url-http-end-of-headers))
             (error "HTTP failure %s" url-http-response-status))
+          (when-let* ((limit
+                       (tessera-x-elfeed--request-max-bytes
+                        (tessera-x-elfeed--fetch-request fetch)))
+                      (size (- (position-bytes (point-max))
+                               (position-bytes
+                                url-http-end-of-headers)))
+                      (_ (> size limit)))
+            (error "Linked body exceeds %d bytes" limit))
           (let* ((header
                   (save-restriction
                     (narrow-to-region
@@ -368,6 +383,7 @@ Suppress HTTP retrieval when LOCAL-ONLY is set."
            :context context
            :limit (max 1 tessera-x-elfeed-fetch-concurrency)
            :timeout tessera-x-elfeed-fetch-timeout
+           :max-bytes tessera-x-elfeed-fetch-max-bytes
            :queue
            (unless (or local-only
                        (not tessera-x-elfeed-fetch-linked-content))

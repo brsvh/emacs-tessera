@@ -38,6 +38,9 @@
 
 ;;;; Adapter lifecycle
 
+(declare-function tessera-gnus-summary--header-line-track
+                  "tessera-gnus-summary")
+
 (declare-function tessera-gnus-summary--register
                   "tessera-gnus-summary")
 (declare-function tessera-gnus-summary--enable
@@ -65,6 +68,7 @@
 (defun tessera-gnus--enable-summary ()
   "Enable Tessera in the current Gnus summary buffer."
   (require 'tessera-gnus-summary)
+  (tessera-gnus-summary--header-line-track t)
   (tessera-gnus-summary--register)
   (tessera-gnus-summary--enable))
 
@@ -96,7 +100,9 @@
         (tessera-gnus-article--track-content nil))
     (when (featurep 'tessera-gnus-summary)
       (unwind-protect
-          (tessera-gnus-summary--track-folds nil)
+          (progn
+            (tessera-gnus-summary--header-line-track nil)
+            (tessera-gnus-summary--track-folds nil))
         (unwind-protect
             (tessera-gnus-summary--navigation nil)
           (tessera-gnus--map-summary-buffers

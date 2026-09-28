@@ -35,6 +35,9 @@
   :group 'tessera
   :prefix "tessera-elfeed-")
 
+(declare-function tessera-elfeed-search--header-line-track
+                  "tessera-elfeed-search")
+
 (declare-function tessera-elfeed-search--disable
                   "tessera-elfeed-search")
 (declare-function tessera-elfeed-search--enable
@@ -54,6 +57,7 @@
 (defun tessera-elfeed--enable-search ()
   "Enable the Tessera adapter in the current Elfeed search buffer."
   (require 'tessera-elfeed-search)
+  (tessera-elfeed-search--header-line-track t)
   (tessera-elfeed-search--register)
   (tessera-elfeed-search--enable))
 
@@ -81,6 +85,7 @@
   (remove-hook 'elfeed-search-mode-hook
                #'tessera-elfeed--enable-search)
   (when (featurep 'tessera-elfeed-search)
+    (tessera-elfeed-search--header-line-track nil)
     (tessera-elfeed--map-search-buffers
      #'tessera-elfeed-search--disable)))
 

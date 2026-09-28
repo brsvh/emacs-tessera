@@ -55,6 +55,7 @@ Documentation License''.
 * Introduction::          What this package provides.
 * Getting Started::       Installing and using the package.
 * Entry Layouts::         Arranging entries and adjusting spacing.
+* Header Lines::          Queries, update actions, and result counts.
 * Month Groups::          Grouping entries under foldable months.
 * Glyph Appearance::      Choosing symbols, colors, and sizes.
 * Native Threads::        Displaying and folding message threads.
@@ -64,6 +65,7 @@ Documentation License''.
 * Refreshing: Refreshing the Display.  Applying appearance changes.
 * Entry Backends: Writing an Entry Backend.  Adding a display adapter in Lisp.
 * Thread Interfaces: Thread Backend Interfaces.  Adding thread display to an adapter.
+* Header Providers::      Replacing individual header regions.
 * Native Interfaces: Native Adapter Interfaces.  Reading metadata and adapting views.
 * Troubleshooting::       Diagnosing problems and reporting bugs.
 * Copying::               The GNU Free Documentation License.
@@ -341,6 +343,220 @@ two-line entry, both content lines are highlighted.
 tree indentation do not acquire a hover highlight.  Spaces within a
 subject or contact remain part of that content's hover range.  Semantic
 glyph foregrounds are retained on hover.
+
+@node Header Lines
+@chapter Header Lines
+@cindex header lines
+
+  Elfeed Search, Gnus Summary, and mu4e Headers use a shared header
+layout when their Tessera modes are enabled.  The left side contains an
+update action and information about the current query or source.  The
+right side contains optional extra information and statistics.  Hover
+over text or a glyph to see its meaning; click the update action with
+@kbd{mouse-1} to invoke the native update command.
+
+@menu
+* Header Contents::       Understanding queries and counts.
+* Header Updates::        Updating data and displaying times.
+* Header Appearance::     Controlling spacing, faces, and glyphs.
+@end menu
+
+@node Header Contents
+@section Understanding Header Contents
+@cindex displayed entry counts
+@cindex loaded article counts
+
+  Elfeed and mu4e display their current search conditions after
+@samp{Query:}.  Gnus displays the current source group after
+@samp{Group:}.  A Gnus virtual or search group can combine several
+underlying sources.  Mu4e also displays its context name, without a
+label in the extra region.  Gnus and Elfeed leave that region empty
+by default.
+
+  The displayed count includes all real entries inserted into the
+buffer, including entries outside the window and inside folded threads
+or month groups.  Narrowing does not change this count.  Headings,
+pseudo thread roots, and result footers do not count as entries.  Unread
+counts refer to this displayed set.
+
+@table @asis
+@item Elfeed Search
+The count has the form @samp{500/1284}: displayed entries followed by
+entries in the current query result.  The display limit can truncate
+that result.  A count limit in the query itself still applies to the
+denominator.  The feed count covers distinct feeds among the displayed
+entries.
+
+@item Gnus Summary
+The count has the form @samp{200/600}: displayed articles followed by
+loaded article headers.  Limiting the summary can reduce the first
+number without reducing the second.  The denominator is neither the
+whole group's article count nor the number of downloaded bodies.
+
+@item mu4e Headers
+The count is the number of inserted message rows.  It includes folded
+messages but excludes messages that mu4e did not insert.
+@end table
+
+  Information fields are shortened when the window is narrow.  Hover
+over the remaining text or ellipsis to see the complete value.  Each
+window lays out its header independently, even when several windows
+show the same buffer.  Empty regions do not leave extra gaps behind.
+
+  Each statistic has its own hover target and tooltip.  The displayed
+count and its denominator explain their respective populations
+separately; unread and feed counts have independent explanations.
+Spaces between statistics and the slash are inert.  Labels and values
+also have separate hover spans, preserving their individual faces.
+
+@node Header Updates
+@section Updating Data and Displaying Times
+@cindex relative update times
+
+  Clicking the action invokes @code{elfeed-update} in Elfeed,
+@code{gnus-summary-rescan-group} in Gnus, or
+@code{mu4e-update-mail-and-index} in mu4e.  These are native operations:
+Elfeed updates all configured feeds, Gnus rescans the current group,
+and mu4e retrieves mail and updates its index.  Their usual errors,
+windows, and cancellation commands still apply.
+
+  Elfeed records the end of an observed feed update batch, including
+background updates and requests that produce no new entries.  Its
+header shows @samp{Failed} if an observed request fails.  Gnus records
+completed rescans by full group name; a failed rescan retains the
+previous completion time.  Mu4e uses its native index completion time.
+Index completion alone does not assert that mail retrieval succeeded.
+These times are not changed by simply redrawing a list.
+
+  An em dash means that no corresponding time is known.  Tessera does
+not reconstruct Elfeed or Gnus update history from before observation
+began.  Times recorded by Tessera last for the Emacs session.
+
+@defopt tessera-header-line-update-time
+This option chooses the time shown by default action functions.  Its
+value is @code{auto} by default: show the next update when a reliable
+schedule is known, and otherwise show the last update.  The value
+@code{last} always selects the last update.  The value @code{next}
+selects the next update, displaying an em dash if it is unknown.
+
+Durations use whole minutes, hours, or days, such as @samp{1 minute},
+@samp{5 minutes}, @samp{2 hours}, and @samp{3 days}.  Durations below
+one minute appear as @samp{<1 minute}.  A past scheduled time appears as
+@samp{due}.  An active update takes precedence and appears as
+@samp{Updating@dots{}}.  Hover text includes the absolute time when
+known.
+@end defopt
+
+  Mu4e reads the next time from its active native update timer.  Elfeed
+and Gnus have no default next-time provider: external schedulers and
+idle-dependent tasks need an explicit function.
+
+@defopt tessera-elfeed-search-header-line-next-update-function
+@defoptx tessera-gnus-summary-header-line-next-update-function
+@defoptx tessera-mu4e-headers-header-line-next-update-function
+Each option is a function receiving a header rendering context and
+returning an absolute Emacs time value, or @code{nil} when unknown.
+The Elfeed and Gnus defaults are @code{nil}.  The mu4e default reads
+its active update timer.  A function should read an existing schedule;
+it must not start or schedule updates.  @xref{Header Providers}, for
+the context contract.
+@end defopt
+
+  A shared timer requests redisplay of visible headers once a minute.
+Native updates also request redisplay when their state changes.  This
+timer does not retrieve mail or feeds, and is released when the last
+registered view is disabled or killed.
+
+@node Header Appearance
+@section Controlling Header Appearance
+
+@defopt tessera-header-line-enabled
+When non-@code{nil}, enabled Tessera views replace their native header
+lines.  The default is @code{t}.  Set this option to @code{nil} to
+retain the native header while keeping Tessera entry layouts.  It can
+be buffer-local.  Disabling a Tessera mode restores native header
+settings, including their buffer locality.
+@end defopt
+
+@defopt tessera-header-line-left-padding
+@defoptx tessera-header-line-right-padding
+These nonnegative integers give the interior horizontal padding in
+columns.  Both default to 0.  Each side also includes
+@code{tessera-safe-gap}.  There is no additional vertical padding.
+@end defopt
+
+  One space separates the action from the query or group and extra
+information from statistics.  One space also separates statistic items;
+the slash between displayed and total counts has no surrounding spaces.
+A flexible gap separates the left and right regions.  Long information
+and extra values yield space to the action and statistics; extremely
+narrow windows also shorten those regions.
+
+  Each region has a base face.  Field labels and values have their own
+faces, which take precedence for the attributes they specify.  Default
+semantic colors follow the current frame's theme.  Explicit face
+customizations take precedence over the foreground fallbacks; changing
+a theme does not overwrite user faces.
+
+@vtable @code
+@item tessera-header-line-action-face
+@itemx tessera-header-line-info-face
+Base faces for actions and query or source information.
+
+@item tessera-header-line-extra-face
+Extra information, using the theme's type-name foreground by default.
+
+@item tessera-header-line-statistics-face
+Primary counts, using the theme's constant foreground by default.
+
+@item tessera-header-line-action-label-face
+Bold action labels, using the function-name foreground by default.
+
+@item tessera-header-line-action-value-face
+Update times, using the constant foreground with normal weight.
+
+@item tessera-header-line-info-label-face
+Bold information labels, using the keyword foreground by default.
+
+@item tessera-header-line-info-value-face
+Query conditions, using the string foreground with normal weight and
+italic slant.
+
+@item tessera-gnus-summary-header-line-group-face
+The Gnus group value, using bold italic text over the information value
+face.
+
+@item tessera-header-line-unread-face
+Unread counts, using the glyph accent foreground and semibold weight.
+
+@item tessera-header-line-secondary-face
+Denominators and supplementary statistics, inheriting @code{shadow}.
+
+@item tessera-header-line-hover-face
+Hovered text, inheriting @code{tessera-entry-hover-face} to match entry
+hover styling.  Glyphs retain their configured foregrounds on hover.
+@end vtable
+
+@defopt tessera-header-line-glyphs
+This alist customizes the header glyph IDs @code{status-unread},
+@code{total}, and @code{feeds}.  It uses the glyph property lists
+described in @ref{Customizing Glyphs}.  The default is @code{nil}.
+Native view glyph defaults and overrides apply to IDs shared with the
+view, such as @code{status-unread}; view-specific overrides take
+precedence over this alist.  Hidden glyphs leave their counts visible.
+@end defopt
+
+  Header glyphs obey @code{tessera-glyph-style} and
+@code{tessera-glyph-color}, including Unicode and ASCII fallbacks.
+@xref{Glyph Appearance}.
+
+@deffn Command tessera-header-line-refresh
+Recompute the current active view's cached header data and request
+redisplay.  Use this after @code{setq}, buffer-local changes, or changes
+to data used by a custom provider.  It does nothing in other buffers.
+Provider options changed through Customize or @code{setopt} refresh
+active views automatically.  @xref{Header Providers}.
+@end deffn
 
 @node Month Groups
 @chapter Month Groups
@@ -1162,9 +1378,10 @@ future Headers buffers.
 @end deffn
 @vindex tessera-mu4e-mode-hook
   The initial local layout is @code{two-line}.  While active, Tessera
-hides the native column header and highlights the entry containing
-point.  Disabling restores native rows, pending-mark presentation, the
-header line, and saved local settings.
+replaces the native column header with the shared header line
+(@pxref{Header Lines}) and highlights the entry containing point.
+Disabling restores native rows, pending-mark presentation, the header
+line, and saved local settings.
 
 @node mu4e Row Contents
 @section mu4e Row Contents
@@ -1484,7 +1701,8 @@ underline.  The unread variant retains unread emphasis.
 @chapter Refreshing the Display
 @cindex refreshing
   Gnus and mu4e track native changes, theme changes, and shared
-appearance options during their normal update cycles.  After manually
+appearance options during their normal update cycles.  Buffer-local
+font scaling also refreshes entry widths and truncation.  After manually
 changing individual faces, use @kbd{M-x tessera-refresh-glyphs} to
 refresh resolved hover colors as well as text faces.
 
@@ -1685,6 +1903,12 @@ content and properties; let the layout allocate decoration around it.
 @cindex width allocation
   Segment references accept the following keys.  Unspecified flags are
 @code{nil}; the default minimum and priority are zero.
+
+  Width limits use the frame's character columns.  In graphical
+windows, Tessera measures styled text in pixels before allocating those
+columns and truncating the text.  Buffer-local font scaling and faces
+with different character widths therefore affect how much text fits.
+Terminals use character-column measurements directly.
 
 @table @code
 @item :grow
@@ -2199,6 +2423,178 @@ content: shrinking or omitting it would misrepresent parentage.
 Backend-specific providers may style counts with native faces.  Keep
 configured connector faces intact.  The adapter must also update the
 display when native folding changes which messages are visible.
+
+@node Header Providers
+@chapter Writing Header Providers
+@cindex header providers
+
+  A @dfn{header provider} renders one region of an existing native
+view's header.  Replacing a provider changes that region's content and
+interaction without replacing the shared layout.  This chapter assumes
+familiarity with the regions described in @ref{Header Lines}.
+
+@findex tessera-elfeed-search-header-line-action
+@findex tessera-gnus-summary-header-line-action
+@findex tessera-mu4e-headers-header-line-action
+@defopt tessera-elfeed-search-header-line-action-function
+@defoptx tessera-gnus-summary-header-line-action-function
+@defoptx tessera-mu4e-headers-header-line-action-function
+The action provider for each view.  The default is the corresponding
+@code{tessera-@var{view}-header-line-action} function, where @var{view}
+is @code{elfeed-search}, @code{gnus-summary}, or @code{mu4e-headers}.
+Default actions invoke native update commands.
+@end defopt
+
+@findex tessera-elfeed-search-header-line-info
+@findex tessera-gnus-summary-header-line-info
+@findex tessera-mu4e-headers-header-line-info
+@defopt tessera-elfeed-search-header-line-info-function
+@defoptx tessera-gnus-summary-header-line-info-function
+@defoptx tessera-mu4e-headers-header-line-info-function
+The information provider for each view.  The corresponding
+@code{tessera-@var{view}-header-line-info} function is the default.
+It displays a query for Elfeed and mu4e, and a source group for Gnus.
+@end defopt
+
+@findex tessera-mu4e-headers-header-line-extra
+@defopt tessera-elfeed-search-header-line-extra-function
+@defoptx tessera-gnus-summary-header-line-extra-function
+@defoptx tessera-mu4e-headers-header-line-extra-function
+The extra-information provider for each view.  Elfeed and Gnus default
+to @code{nil}.  Mu4e defaults to
+@code{tessera-mu4e-headers-header-line-extra}, which returns the native
+context name without a label.
+@end defopt
+
+@findex tessera-elfeed-search-header-line-statistics
+@findex tessera-gnus-summary-header-line-statistics
+@findex tessera-mu4e-headers-header-line-statistics
+@defopt tessera-elfeed-search-header-line-statistics-function
+@defoptx tessera-gnus-summary-header-line-statistics-function
+@defoptx tessera-mu4e-headers-header-line-statistics-function
+The statistics provider for each view.  The corresponding
+@code{tessera-@var{view}-header-line-statistics} function is the
+default.
+It formats the cached population described in @ref{Header Contents}.
+@end defopt
+
+  All four options accept a function or @code{nil}, which hides the
+region.  A function receives one @code{tessera-header-line-context}
+object and returns a single-line string, or @code{nil} to hide its
+region for that render.  An empty string also hides the region.  Text
+properties can supply faces, @code{help-echo}, @code{mouse-face},
+@code{keymap}, and @code{pointer}.  The renderer copies the string,
+retains its properties, appends the base region face, and fills missing
+tooltips with the full text.  It supplies the header hover face only
+where @code{mouse-face} is missing, separating targets at face, tooltip,
+and keymap boundaries.  To make a separator inert, give it
+@code{help-echo ""} and @code{mouse-face (:inherit nil)} properties.
+
+  Providers run during redisplay with the source buffer current and
+the target window selected.  They must be fast and must not fetch data,
+edit buffers, change window selection, or modify the context or cached
+state.  Native change events invalidate the cached state separately.
+A provider error produces a header error indicator with details in its
+tooltip, leaving the buffer's contents intact.  Use
+@code{tessera-header-line-refresh} after changing external provider
+data.
+
+@findex tessera-header-line-context-view
+@findex tessera-header-line-context-buffer
+@findex tessera-header-line-context-window
+@findex tessera-header-line-context-state
+@findex tessera-header-line-context-now
+@deftp {Data Type} tessera-header-line-context
+This object describes the rendering environment, independently of
+the extra region or a native mu4e context.  The accessors
+@code{tessera-header-line-context-view},
+@code{tessera-header-line-context-buffer},
+@code{tessera-header-line-context-window},
+@code{tessera-header-line-context-state}, and
+@code{tessera-header-line-context-now} return the view symbol, source
+buffer, target window, cached property list, and current Emacs time.
+
+All native views supply @code{:shown}, @code{:unread}, and @code{:scope}
+in the state.  Counts are nonnegative integers.  Elfeed also supplies
+@code{:matched}, @code{:feeds}, and @code{:query}; Gnus supplies
+@code{:loaded} and @code{:group}; mu4e supplies @code{:query}.  Query
+and group values are strings or @code{nil}.  The @code{:scope} string
+explains the counted population.  The @code{:glyph-defaults} and
+@code{:glyph-overrides} values name the native view's glyph variables.
+@end deftp
+
+  For example, this user-defined Elfeed provider keeps the default field
+styling while displaying a short description instead of the raw query:
+
+@lisp
+(require 'tessera-elfeed-search)
+
+(defun my-elfeed-header-info (context)
+  (tessera-header-line-field
+   context 'info "Query" "Reading list"
+   "The current Elfeed reading-list filter."))
+
+(setopt tessera-elfeed-search-header-line-info-function
+        #'my-elfeed-header-info)
+@end lisp
+
+@defun tessera-header-line-field context role label value help @
+  &optional value-face
+Return a labelled string for @var{role}, either @code{action} or
+@code{info}.  @var{label} is a string or @code{nil}; @var{value} and
+@var{help} are strings.  The label and value receive separate faces,
+and @var{help} becomes the tooltip.  Existing value properties are
+preserved except for @code{help-echo}.  Optional @var{value-face}
+precedes the default value face.  Inputs are not modified.
+@end defun
+
+@defun tessera-header-line-button text command
+Copy @var{text} and attach @var{command}, an interactive function, to
+@kbd{mouse-1}.  Clicking selects the event's window for the duration of
+the native invocation.  The returned string has a hand pointer.
+The caller supplies its tooltip.  Replacing an action provider does
+not implicitly retain the default update command.
+@end defun
+
+@defun tessera-header-line-duration seconds
+Return the duration string described in @ref{Header Updates}.
+@var{seconds} is a number; negative values are treated as zero.
+@end defun
+
+@defun tessera-header-line-update context last next running command @
+  help &optional failed
+Return an update field and button using the configured time policy.
+@var{last} and @var{next} are absolute Emacs times or @code{nil}.
+Non-@code{nil} @var{running} selects the updating state; otherwise
+non-@code{nil} @var{failed} selects the failure state.  @var{command}
+is the interactive update command.  @var{help} is a string explaining
+its scope; the helper appends the absolute time and click description.
+This function only constructs text and does not invoke @var{command}.
+@end defun
+
+@defun tessera-header-line-glyph context id
+Return a glyph string for @var{id}: @code{status-unread}, @code{total},
+or @code{feeds}.  The context's native glyph defaults and overrides
+combine with shared header defaults.  A hidden glyph returns an empty
+string.  The caller supplies its tooltip and interaction properties.
+@end defun
+
+@defun tessera-header-line-statistic context id value help @
+  &optional face
+Return a glyph and formatted @var{value}, with @var{help} as the
+tooltip.  @var{id} is a header glyph ID.  Optional @var{face} styles the
+value; otherwise it inherits the surrounding statistics region.  A
+hidden glyph leaves the value visible.
+@end defun
+
+@defun tessera-header-line-statistics context
+Return the standard statistics string from @var{context}'s cached
+state.  A @code{:matched} or @code{:loaded} count supplies a
+denominator; @code{:matched} takes precedence if both are present.
+A @code{:feeds} count adds the feed statistic.  Absent @code{:shown}
+and @code{:unread} counts are treated as zero.  A present zero count
+remains visible.
+@end defun
 
 @node Native Adapter Interfaces
 @chapter Native Adapter Interfaces

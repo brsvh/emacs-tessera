@@ -8,6 +8,36 @@ See the Tessera and Tessera X manuals for configuration and Lisp interfaces.
 
 * Changes in Tessera 0.1.1
 
+** Shared header lines for native entry views.
+Elfeed Search, Gnus Summary, and mu4e Headers display update actions,
+query or source information, optional extra information, and statistics.
+Each region has a replaceable function, independent faces, and hover help.
+The update action invokes the native command.  Relative times can show the
+last update or a known next update; Tessera does not schedule retrieval.
+
+Elfeed distinguishes displayed entries from query results.  Gnus distinguishes
+displayed articles from loaded headers.  Unread counts cover the displayed
+set, including folded and off-screen entries.  Statistics respect the glyph
+style and color settings, and long fields adapt to each window's width.
+Header interior padding defaults to zero.  Adjacent fields and statistic
+items use one separating space; displayed and total counts use '500/1284'.
+
+The new headers are enabled with the existing display modes.  Set
+'tessera-header-line-enabled' to nil to keep native headers while retaining
+Tessera entry layouts.  Disabling a mode restores its native header settings.
+
+Elfeed headers report feed parsing failures as failed updates.  Header
+truncation accounts for the face of the ellipsis, including custom fonts
+and fields containing different font sizes.  Feed update notifications visit
+only registered Elfeed headers and combine changes during batch dispatch.
+
+** Entry layouts follow buffer-local font scaling.
+Gnus Summary and mu4e Headers refresh cached entry widths and truncation
+after font remapping changes, including 'text-scale-adjust'.  In graphical
+windows, entry width allocation and truncation use measured text widths,
+including font scaling and mixed faces.  Spacing options retain their
+character-column units.
+
 ** Interactive month groups in entry views.
 Gnus Summary, mu4e Headers, and Elfeed Search entries are grouped beneath
 month headings without copying or replacing native records.  Gnus temporarily
@@ -50,6 +80,12 @@ Entries and month headings share these settings.  Because Tessera is still
 below version 1.0, the old names are not retained as compatibility aliases.
 
 * Changes in Tessera X 0.1.1
+
+** Linked-page parsing has a separate input size limit.
+'tessera-x-elfeed-fetch-max-bytes' defaults to 2097152 bytes (2 MiB).
+Larger responses retain the stored feed body without decoding or HTML
+parsing.  Set the option to nil to disable this limit.  The check occurs
+after retrieval and does not limit the HTTP transfer or response buffer.
 
 ** Experimental context requests preserve newer work during completion.
 A request cancelled or replaced by a mode hook or cleanup function no longer

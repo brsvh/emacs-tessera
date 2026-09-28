@@ -1365,6 +1365,15 @@ DEFINITION supplies the backend warning selector."
                          "Missing or invalid date" text)
       (concat text (tessera--space 1)))))
 
+(defun tessera--entry-pixel-width (text context)
+  "Measure TEXT in graphical CONTEXT, or return nil on a terminal."
+  (let ((window (tessera-entry-context-window context)))
+    (when (and (window-live-p window)
+               (display-graphic-p (window-frame window)))
+      (with-selected-frame (window-frame window)
+        (tessera--string-pixel-width
+         text (tessera-entry-context-buffer context))))))
+
 (defun tessera--render-segment (reference definition context)
   "Render segment REFERENCE using DEFINITION and CONTEXT."
   (if (eq (car-safe reference) :slots)
@@ -1392,7 +1401,14 @@ DEFINITION supplies the backend warning selector."
              0 1 'tessera--month-original t value))
           (setq value (concat warning value)))
         (let* ((properties (and (consp reference) (cdr reference)))
-               (width (string-width value))
+               (pixels (tessera--entry-pixel-width value context))
+               (width (if pixels
+                          (ceiling pixels
+                                   (frame-char-width
+                                    (window-frame
+                                     (tessera-entry-context-window
+                                      context))))
+                        (string-width value)))
                (maximum (plist-get properties :max-width))
                (truncate (plist-get properties :truncate)))
           (tessera--make-rendered-segment
@@ -1572,16 +1588,32 @@ Use a period if the marker's first character is too wide to fit."
                  (- natural-width right-width)))))
             (_ string))))))))
 
-(defun tessera--render-segment-group (segments)
-  "Return visible SEGMENTS as one rendered string."
+(defun tessera--render-segment-group (segments &optional context)
+  "Return visible SEGMENTS as one rendered string.
+Graphical CONTEXT supplies pixel measurements for truncation."
   (mapconcat
    (lambda (segment)
-     (let ((text
-            (copy-sequence
-             (tessera--truncate-string
-              (tessera--rendered-segment-string segment)
-              (tessera--rendered-segment-target-width segment)
-              (tessera--rendered-segment-truncate segment)))))
+     (let* ((window (and context
+                         (tessera-entry-context-window context)))
+            (unit (and (window-live-p window)
+                       (display-graphic-p (window-frame window))
+                       (frame-char-width (window-frame window))))
+            (method (tessera--rendered-segment-truncate segment))
+            (text
+             (copy-sequence
+              (if (and unit method)
+                  (tessera--truncate-string-pixels
+                   (tessera--rendered-segment-string segment)
+                   (* unit
+                      (tessera--rendered-segment-target-width
+                       segment))
+                   (lambda (text)
+                     (tessera--entry-pixel-width text context))
+                   nil method)
+                (tessera--truncate-string
+                 (tessera--rendered-segment-string segment)
+                 (tessera--rendered-segment-target-width segment)
+                 method)))))
        (when (and (tessera--rendered-segment-point segment)
                   (not (string-empty-p text)))
          (let ((position
@@ -1688,8 +1720,12 @@ or use `tessera-entry-hover-face'.  Preserve neutral separators."
 
 (defun tessera--glyph-text (glyph context)
   "Return the best available text for GLYPH in CONTEXT."
-  (let ((frame (tessera--glyph-frame context))
-        (ascii (tessera-glyph-ascii glyph)))
+  (tessera--glyph-text-for-frame
+   glyph (tessera--glyph-frame context)))
+
+(defun tessera--glyph-text-for-frame (glyph frame)
+  "Return the preferred representation of GLYPH for FRAME."
+  (let ((ascii (tessera-glyph-ascii glyph)))
     (pcase tessera-glyph-style
       ('ascii ascii)
       ('unicode
@@ -1813,7 +1849,8 @@ Keep measurement independent of line prefixes and line numbers."
                 (add-text-properties
                  (point-min) (point-max)
                  '(display-line-numbers-disable t
-                                                line-prefix "" wrap-prefix ""))
+                                                line-prefix ""
+                                                wrap-prefix ""))
                 (car (buffer-text-pixel-size nil nil t)))
             (erase-buffer)))))))
 
@@ -2020,31 +2057,53 @@ fallback."
               `(:background ,fallback :extend nil))
       'tessera-month-undated-face)))
 
-(defun tessera--clip-thread-content (text width)
+(defun tessera--clip-thread-content (text width &optional context)
   "Clip thread TEXT on the right to WIDTH columns when necessary.
 The tree provider supplies `tessera--overflow-help' for the ellipsis.
 Retain original columns and move a hidden navigation anchor onto the
-ellipsis.  Keep layout whitespace outside its mouse hover range."
-  (let ((help (and (> (length text) 0)
-                   (get-text-property
-                    0 'tessera--overflow-help text)))
-        (width (max 1 width)))
-    (if (or (not help) (<= (string-width text) width))
+ellipsis.  Keep layout whitespace outside its mouse hover range.
+Graphical CONTEXT supplies pixel measurements for clipping."
+  (let* ((window (and context
+                      (tessera-entry-context-window context)))
+         (unit (and (window-live-p window)
+                    (display-graphic-p (window-frame window))
+                    (frame-char-width (window-frame window))))
+         (measure (if unit
+                      (lambda (text)
+                        (tessera--entry-pixel-width text context))
+                    #'string-width))
+         (help (and (> (length text) 0)
+                    (get-text-property
+                     0 'tessera--overflow-help text)))
+         (width (* (or unit 1) (max 1 width))))
+    (if (or (not help) (<= (funcall measure text) width))
         text
-      (let* ((marker (tessera--ellipsis width))
-             (remaining (- width (string-width marker)))
-             (prefix (truncate-string-to-width text remaining))
-             (ellipsis
-              (propertize marker 'tessera--overflow t
+      (let* ((ellipsis
+              (propertize (tessera--ellipsis width)
+                          'tessera--overflow t
                           'face 'tessera-glyph-muted-face
                           'mouse-face (list 'tessera-entry-hover-face)
-                          'help-echo help)))
+                          'help-echo help))
+             (ellipsis (if unit
+                           (tessera--truncate-string-pixels
+                            ellipsis width measure "")
+                         ellipsis))
+             (remaining (- width (funcall measure ellipsis)))
+             (prefix (if unit
+                         (tessera--truncate-string-pixels
+                          text remaining measure "")
+                       (truncate-string-to-width text remaining))))
         (when (and (tessera-entry-point text)
                    (not (tessera-entry-point prefix)))
+          (when (string-empty-p ellipsis)
+            (setq ellipsis
+                  (propertize " " 'display '(space :width 0))))
           (put-text-property 0 (length ellipsis)
                              'tessera-entry-point t ellipsis))
         (concat prefix
-                (tessera--space (- remaining (string-width prefix)))
+                (funcall (if unit #'tessera--pixel-space
+                           #'tessera--space)
+                         (- remaining (funcall measure prefix)))
                 ellipsis)))))
 
 (defun tessera--render-line
@@ -2063,7 +2122,8 @@ LEADING-WIDTH supplies the shared minimum width of that area."
          (leading (tessera--render-segments
                    leading-references definition context))
          (slot-area (if leading
-                        (cons (tessera--render-segment-group leading)
+                        (cons (tessera--render-segment-group
+                               leading context)
                               (tessera--segments-width leading))
                       slot-area))
          (minimum (if (functionp leading-width)
@@ -2084,8 +2144,9 @@ LEADING-WIDTH supplies the shared minimum width of that area."
     (when (window-live-p window)
       (tessera--allocate-segment-widths
        left right slot-width (window-body-width window)))
-    (let* ((left-string (tessera--render-segment-group left))
-           (right-string (tessera--render-segment-group right))
+    (let* ((left-string (tessera--render-segment-group left context))
+           (right-string
+            (tessera--render-segment-group right context))
            (slot-gap
             (if (and (> slot-width 0) (> (length left-string) 0))
                 (tessera--space tessera-entry-segment-gap)
@@ -2117,7 +2178,8 @@ LEADING-WIDTH supplies the shared minimum width of that area."
                         (ceiling (car right-offset)
                                  (frame-char-width
                                   (window-frame window)))
-                      right-offset)))
+                      right-offset))
+                 context)
               left-string))
            (surface
             (concat
@@ -2609,31 +2671,70 @@ first following valid month.  Return non-nil when any date exists."
                 (unless (string-empty-p read) " ")
                 (number-to-string read-count))))))
 
-(defun tessera--truncate-string-pixels (string width)
-  "Truncate STRING at the tail to fit within WIDTH pixels."
-  (if (<= (tessera--string-pixel-width string) width)
+(defun tessera--truncate-string-pixels
+    (string width &optional measure ending method)
+  "Truncate STRING to fit within WIDTH pixels.
+MEASURE measures styled text, defaulting to pixel width.
+ENDING, when non-nil, is a suffix inheriting the final retained
+character's properties.  Keep at least one character in that case.
+Otherwise use `tessera-entry-ellipsis' with STRING's first face.
+METHOD is `head', `middle', or `tail' (the default).
+ENDING is supported only with tail truncation."
+  (setq measure (or measure #'tessera--string-pixel-width))
+  (if (<= (funcall measure string) width)
       string
-    (let ((ellipsis (copy-sequence tessera-entry-ellipsis))
-          (low 0)
-          (high (length string)))
-      (when (> (length string) 0)
-        (add-text-properties
-         0 (length ellipsis) (text-properties-at 0 string)
-         ellipsis))
-      (while (and (> (tessera--string-pixel-width ellipsis) width)
-                  (> (length ellipsis) 0))
-        (setq ellipsis
-              (substring ellipsis 0 (1- (length ellipsis)))))
-      (while (< low high)
-        (let ((middle (/ (+ low high 1) 2)))
-          (if (<= (tessera--string-pixel-width
-                   (concat (substring string 0 middle) ellipsis))
-                  width)
-              (setq low middle)
-            (setq high (1- middle)))))
-      (if (> (tessera--string-pixel-width ellipsis) width)
-          ""
-        (concat (substring string 0 low) ellipsis)))))
+    (let ((ellipsis (copy-sequence
+                     (or ending tessera-entry-ellipsis)))
+          ranges fitted)
+      (if (and ending (not (string-empty-p ending)))
+          (let ((start 0))
+            ;; A smaller suffix font can make a longer prefix fit.
+            ;; Search each constant-property span separately, starting
+            ;; at the right, to retain the longest fitting prefix.
+            (while (< start (length string))
+              (let ((end (next-property-change
+                          start string (length string))))
+                (push (cons start end) ranges)
+                (setq start end))))
+        (setq ranges (list (cons 0 (length string))))
+        (when (> (length string) 0)
+          (add-text-properties
+           0 (length ellipsis) (text-properties-at 0 string)
+           ellipsis))
+        (while (and (> (funcall measure ellipsis) width)
+                    (> (length ellipsis) 0))
+          (setq ellipsis
+                (substring ellipsis 0 (1- (length ellipsis)))))
+        (setq fitted ellipsis))
+      (while ranges
+        (let* ((range (pop ranges))
+               (low (car range))
+               (high (cdr range))
+               (suffix (if ending
+                           (apply #'propertize ending
+                                  (text-properties-at low string))
+                         ellipsis))
+               match)
+          (while (< low high)
+            (let* ((middle (/ (+ low high 1) 2))
+                   (candidate
+                    (pcase method
+                      ('head
+                       (concat suffix (substring string (- middle))))
+                      ('middle
+                       (concat (substring string 0 (/ (1+ middle) 2))
+                               suffix
+                               (substring
+                                string
+                                (- (length string) (/ middle 2)))))
+                      (_ (concat (substring string 0 middle)
+                                 suffix)))))
+              (if (<= (funcall measure candidate) width)
+                  (setq low middle match candidate)
+                (setq high (1- middle)))))
+          (when match
+            (setq fitted match ranges nil))))
+      (or fitted ""))))
 
 (defun tessera--month-style-text (text face)
   "Return a copy of TEXT styled with month FACE.
@@ -3508,6 +3609,584 @@ space for that anchor."
       (put-text-property 0 (length entry)
                          'tessera-entry-context context entry)
       entry)))
+
+;;;; Header lines
+
+(defgroup tessera-header-line nil
+  "Shared header lines for native views."
+  :group 'tessera)
+
+(defun tessera--set-header-line-option (symbol value)
+  "Set SYMBOL to VALUE and refresh active header lines."
+  (set-default symbol value)
+  (when (boundp 'tessera--header-line-buffers)
+    (dolist (buffer tessera--header-line-buffers)
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (tessera-header-line-refresh))))))
+
+(defcustom tessera-header-line-enabled t
+  "Whether active Tessera views replace the native header line.
+This option can be buffer-local.  Disabling it retains entry layouts."
+  :type 'boolean
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-header-line)
+
+(defcustom tessera-header-line-left-padding 0
+  "Columns inside the header line's left safe gap."
+  :type 'natnum
+  :safe #'natnump
+  :group 'tessera-header-line)
+
+(defcustom tessera-header-line-right-padding 0
+  "Columns inside the header line's right safe gap."
+  :type 'natnum
+  :safe #'natnump
+  :group 'tessera-header-line)
+
+(defcustom tessera-header-line-update-time 'auto
+  "Which update time the default action displays.
+The value `auto' prefers a known next update, then the last update.
+The value `last' always shows the last update.  The value `next'
+shows the next update, or an unknown value when none is available.
+This option changes presentation; it never schedules an update."
+  :type '(choice (const auto) (const last) (const next))
+  :group 'tessera-header-line)
+
+(defface tessera-header-line-action-face
+  '((t :weight normal))
+  "Base face for the action region."
+  :group 'tessera-header-line)
+
+(defface tessera-header-line-info-face
+  '((t :weight normal))
+  "Base face for the query or source region."
+  :group 'tessera-header-line)
+
+(defface tessera-header-line-extra-face
+  '((t :weight normal))
+  "Face for extra information; default color comes from type names."
+  :group 'tessera-header-line)
+
+(defface tessera-header-line-statistics-face
+  '((t :weight normal))
+  "Face for primary counts; default color comes from constants."
+  :group 'tessera-header-line)
+
+(defface tessera-header-line-action-label-face
+  '((t :weight bold :slant normal))
+  "Face for action labels; default color comes from function names."
+  :group 'tessera-header-line)
+
+(defface tessera-header-line-action-value-face
+  '((t :weight normal))
+  "Face for update times; default color comes from constants."
+  :group 'tessera-header-line)
+
+(defface tessera-header-line-info-label-face
+  '((t :weight bold :slant normal))
+  "Face for information labels; default color comes from keywords."
+  :group 'tessera-header-line)
+
+(defface tessera-header-line-info-value-face
+  '((t :weight normal :slant italic))
+  "Face for query conditions; default color comes from strings."
+  :group 'tessera-header-line)
+
+(defface tessera-header-line-unread-face
+  '((t :weight semibold))
+  "Face for unread counts; default color comes from glyph accents."
+  :group 'tessera-header-line)
+
+(defface tessera-header-line-secondary-face
+  '((t :inherit shadow))
+  "Face for denominators and supplementary statistics."
+  :group 'tessera-header-line)
+
+(defface tessera-header-line-hover-face
+  '((t :inherit tessera-entry-hover-face :extend nil))
+  "Face for hovered header text, following entry hover styling."
+  :group 'tessera-header-line)
+
+(defvar tessera--header-line-face-colors
+  '((tessera-header-line-action-label-face
+     . font-lock-function-name-face)
+    (tessera-header-line-action-value-face . font-lock-constant-face)
+    (tessera-header-line-info-label-face . font-lock-keyword-face)
+    (tessera-header-line-info-value-face . font-lock-string-face)
+    (tessera-header-line-extra-face . font-lock-type-face)
+    (tessera-header-line-statistics-face . font-lock-constant-face)
+    (tessera-header-line-unread-face . tessera-glyph-accent-face))
+  "Foreground sources used only when header faces leave it unset.")
+
+(defvar tessera--header-line-glyph-defaults
+  '((status-unread
+     :ascii "Unread:" :unicode "●"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email")
+     :face tessera-glyph-accent-face)
+    (total
+     :ascii "Shown:" :unicode "≡"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-email_multiple_outline")
+     :face tessera-glyph-muted-face)
+    (feeds
+     :ascii "Feeds:" :unicode "◉"
+     :nerd-icons ( :function nerd-icons-mdicon
+                   :name "nf-md-rss")
+     :face tessera-glyph-informational-face))
+  "Default header statistics glyphs.")
+
+(defun tessera--set-header-line-glyphs (symbol value)
+  "Validate header glyph VALUE, set SYMBOL, and refresh headers."
+  (tessera--validate-glyph-overrides
+   tessera--header-line-glyph-defaults value 20)
+  (tessera--set-header-line-option symbol value))
+
+(defcustom tessera-header-line-glyphs nil
+  "Overrides for header glyphs: `status-unread', `total', `feeds'.
+Native view glyph overrides take precedence for shared IDs."
+  :type (tessera--glyph-custom-type
+         tessera--header-line-glyph-defaults)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-glyphs
+  :group 'tessera-header-line)
+
+(cl-defstruct tessera-header-line-context
+  "Describe a header's VIEW, BUFFER, WINDOW, cached STATE and NOW.
+STATE is a view-owned plist.  Providers must not modify this context
+or its state.  NOW is the current Emacs time value."
+  view buffer window state now)
+
+(defvar tessera--header-line-buffers nil
+  "Buffers registered for header rendering.")
+(defvar tessera--header-line-timer nil
+  "Shared timer refreshing relative times in visible headers.")
+(defvar tessera--header-line-format
+  '(:eval (tessera--header-line-display))
+  "Owned mode line construct, returning a literal string variable.")
+(defvar-local tessera--header-line-view nil)
+(defvar-local tessera--header-line-reader nil)
+(defvar-local tessera--header-line-providers nil)
+(defvar-local tessera--header-line-native nil)
+(defvar-local tessera--header-line-state nil)
+(defvar-local tessera--header-line-dirty nil)
+(defvar-local tessera--header-line-string nil)
+(put 'tessera--header-line-string 'risky-local-variable t)
+
+(defun tessera-header-line-duration (seconds)
+  "Format nonnegative SECONDS as whole minutes, hours, or days."
+  (let* ((seconds (max 0 seconds))
+         (unit (cond ((>= seconds 86400) '(86400 . "day"))
+                     ((>= seconds 3600) '(3600 . "hour"))
+                     (t '(60 . "minute"))))
+         (count (floor seconds (car unit))))
+    (if (< seconds 60) "<1 minute"
+      (format "%d %s%s" count (cdr unit)
+              (if (= count 1) "" "s")))))
+
+(defun tessera--header-line-face (face context)
+  "Return FACE with its theme foreground fallback for CONTEXT."
+  (let ((source (alist-get face tessera--header-line-face-colors)))
+    (if source
+        (list face
+              (list :foreground
+                    (face-attribute
+                     source :foreground
+                     (window-frame
+                      (tessera-header-line-context-window context))
+                     'default)))
+      (list face))))
+
+(defun tessera-header-line-field
+    (context role label value help &optional value-face)
+  "Build a labelled field in CONTEXT for ROLE, `action' or `info'.
+LABEL may be nil.  VALUE and HELP are strings.  Optional VALUE-FACE
+precedes the default value face.  Existing VALUE properties survive."
+  (let ((prefix (format "tessera-header-line-%s-" role)))
+    (concat
+     (when label
+       (propertize
+        (concat label ": ")
+        'face (tessera--header-line-face
+               (intern (concat prefix "label-face")) context)
+        'help-echo help))
+     (let ((text (copy-sequence value)))
+       (add-face-text-property
+        0 (length text)
+        (append (when value-face (list value-face))
+                (tessera--header-line-face
+                 (intern (concat prefix "value-face")) context))
+        t text)
+       (put-text-property 0 (length text) 'help-echo help text)
+       text))))
+
+(defun tessera--header-line-click (event)
+  "Run the command stored on the header text clicked by EVENT."
+  (interactive "e")
+  (let* ((position (event-start event))
+         (string (posn-string position))
+         (window (posn-window position))
+         (command (and string
+                       (get-text-property
+                        (cdr string) 'tessera-header-line-command
+                        (car string)))))
+    (when (and (window-live-p window) (commandp command))
+      (with-selected-window window
+        (call-interactively command)))))
+
+(defvar tessera--header-line-action-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [header-line down-mouse-1] #'ignore)
+    (define-key map [header-line mouse-1]
+                #'tessera--header-line-click)
+    map)
+  "Keymap for native header actions.")
+
+(defun tessera-header-line-button (text command)
+  "Return a copy of TEXT invoking COMMAND on Mouse-1."
+  (propertize (copy-sequence text)
+              'keymap tessera--header-line-action-map
+              'pointer 'hand
+              'tessera-header-line-command command))
+
+(defun tessera-header-line-update
+    (context last next running command help &optional failed)
+  "Build an update action in CONTEXT invoking COMMAND.
+LAST and NEXT are time values or nil.  RUNNING indicates an active
+update; FAILED indicates an observed failure.  HELP explains scope."
+  (let* ((now (tessera-header-line-context-now context))
+         (future (or (eq tessera-header-line-update-time 'next)
+                     (and next
+                          (eq tessera-header-line-update-time
+                              'auto))))
+         (time (if future next last))
+         (label (if future "Next Update" "Update"))
+         (value
+          (cond (running "Updating…")
+                (failed "Failed")
+                ((null time) "—")
+                ((and future (not (time-less-p now time))) "due")
+                (future
+                 (tessera-header-line-duration
+                  (float-time (time-subtract time now))))
+                (t (concat
+                    (tessera-header-line-duration
+                     (float-time (time-subtract now time)))
+                    " ago"))))
+         (help (concat
+                help "\n"
+                (if time
+                    (concat (if future "Scheduled: " "Last: ")
+                            (format-time-string
+                             "%Y-%m-%d %H:%M:%S %Z" time))
+                  "No recorded time is available.")
+                "\nMouse-1: update using the native command.")))
+    (tessera-header-line-button
+     (tessera-header-line-field
+      context 'action (unless running label) value help
+      (when failed 'error))
+     command)))
+
+(defun tessera-header-line-glyph (context id)
+  "Render statistics glyph ID in CONTEXT using native preferences."
+  (let* ((state (tessera-header-line-context-state context))
+         (defaults (plist-get state :glyph-defaults))
+         (overrides (plist-get state :glyph-overrides))
+         (glyph
+          (tessera-glyph-resolve
+           id (append (and defaults (symbol-value defaults))
+                      tessera--header-line-glyph-defaults)
+           (append (and overrides (symbol-value overrides))
+                   tessera-header-line-glyphs)
+           (plist-get
+            (cdr (assq id tessera--header-line-glyph-defaults))
+            :ascii)))
+         (frame (window-frame
+                 (tessera-header-line-context-window context))))
+    (if (tessera-glyph-hidden glyph) ""
+      (let ((text (copy-sequence
+                   (tessera--glyph-text-for-frame glyph frame)))
+            (face (tessera--glyph-color-face glyph)))
+        (when face
+          (add-face-text-property 0 (length text) face t text)
+          (put-text-property
+           0 (length text) 'mouse-face
+           (list (if (symbolp face)
+                     (list :foreground
+                           (face-attribute
+                            face :foreground frame 'default))
+                   face)
+                 'tessera-header-line-hover-face)
+           text))
+        text))))
+
+(defun tessera-header-line-statistic
+    (context id value help &optional face)
+  "Render ID and VALUE in CONTEXT, with HELP and optional FACE."
+  (let ((glyph (tessera-header-line-glyph context id)))
+    (propertize
+     (concat (unless (string-empty-p glyph) (concat glyph " "))
+             (propertize
+              (format "%s" value)
+              'face (when face
+                      (tessera--header-line-face face context))))
+     'help-echo help)))
+
+(defun tessera-header-line-statistics (context)
+  "Render cached unread, shown, matched, loaded and feed counts.
+CONTEXT's STATE supplies these keys and a descriptive :scope."
+  (let* ((state (tessera-header-line-context-state context))
+         (shown (or (plist-get state :shown) 0))
+         (matched (plist-get state :matched))
+         (loaded (plist-get state :loaded))
+         (feeds (plist-get state :feeds))
+         (unread (or (plist-get state :unread) 0))
+         (gap (propertize " " 'help-echo ""
+                          'mouse-face '(:inherit nil)))
+         (scope (or (plist-get state :scope) "Displayed entries.")))
+    (concat
+     (tessera-header-line-statistic
+      context 'status-unread unread
+      (format "Unread: %d entries in this buffer.\n%s" unread scope)
+      'tessera-header-line-unread-face)
+     gap
+     (tessera-header-line-statistic
+      context 'total shown
+      (format "Displayed: %d entries in this buffer.\n%s"
+              shown scope))
+     (when (or matched loaded)
+       (concat
+        (propertize "/"
+                    'face 'tessera-header-line-secondary-face
+                    'help-echo "" 'mouse-face '(:inherit nil))
+        (propertize
+         (number-to-string (or matched loaded))
+         'face 'tessera-header-line-secondary-face
+         'help-echo
+         (if matched
+             (format
+              (concat "Query results: %d entries; %d displayed.\n"
+                      "Includes any count limit in the query.\n"
+                      "The display limit may hide remaining results.")
+              matched shown)
+           (format
+            (concat "Loaded article headers: %d; %d displayed.\n"
+                    "Not the group total or downloaded bodies.")
+            loaded shown)))))
+     (when feeds
+       (concat gap
+               (tessera-header-line-statistic
+                context 'feeds feeds
+                (format
+                 "Feeds: %d.\nDistinct feeds among displayed entries."
+                 feeds)))))))
+
+(defun tessera--header-line-region (role text context)
+  "Copy and decorate ROLE's TEXT for CONTEXT; nil hides the region."
+  (when (and text (not (equal text "")))
+    (unless (and (stringp text) (not (string-match-p "[\n\r]" text)))
+      (error "Header provider %s must return single-line text" role))
+    (let* ((text (copy-sequence text))
+           (face (intern (format "tessera-header-line-%s-face" role)))
+           (help (substring-no-properties text)))
+      (add-face-text-property
+       0 (length text) (tessera--header-line-face face context)
+       t text)
+      (let ((position 0))
+        (while (< position (length text))
+          (let ((next (length text)))
+            (dolist (property '(face help-echo mouse-face keymap))
+              (setq next (min next (next-single-property-change
+                                    position property text next))))
+            (unless (get-text-property position 'help-echo text)
+              (put-text-property position next 'help-echo help text))
+            (unless (get-text-property position 'mouse-face text)
+              ;; Separate face and tooltip spans by identity, as in
+              ;; entry rendering, so hovering cannot join fields.
+              (put-text-property
+               position next 'mouse-face
+               (list 'tessera-header-line-hover-face) text))
+            (setq position next))))
+      text)))
+
+(defun tessera--header-line-width (text)
+  "Measure TEXT using the header face and buffer font remapping."
+  (if (string-empty-p text) 0
+    (let ((text (copy-sequence text)))
+      (add-face-text-property 0 (length text) 'header-line t text)
+      (tessera--string-pixel-width text))))
+
+(defun tessera--header-line-fit (text width)
+  "Fit TEXT into pixel WIDTH, preserving properties on the ellipsis."
+  (when (and text (> width 0))
+    (let ((fitted
+           (tessera--truncate-string-pixels
+            text width #'tessera--header-line-width "…")))
+      (unless (string-empty-p fitted) fitted))))
+
+(defun tessera--header-line-render (window)
+  "Compose this buffer's cached header for WINDOW."
+  (let* ((context (make-tessera-header-line-context
+                   :view tessera--header-line-view
+                   :buffer (current-buffer)
+                   :window window
+                   :state tessera--header-line-state
+                   :now (current-time)))
+         (parts
+          (mapcar
+           (lambda (entry)
+             (let ((function (symbol-value (cdr entry))))
+               (when function
+                 (tessera--header-line-region
+                  (car entry) (funcall function context) context))))
+           tessera--header-line-providers))
+         (unit (frame-char-width (window-frame window)))
+         (left (* unit (+ tessera-safe-gap
+                          tessera-header-line-left-padding)))
+         (right (* unit (+ tessera-safe-gap
+                           tessera-header-line-right-padding)))
+         (gap (* unit tessera-flex-gap-min-width))
+         (width (max 0 (- (window-body-width window t) left right)))
+         (field-gap " ")
+         (field-gap-width (tessera--header-line-width field-gap))
+         (action (nth 0 parts))
+         (info (nth 1 parts))
+         (extra-text (nth 2 parts))
+         (stats (tessera--header-line-fit (nth 3 parts) (/ width 2)))
+         (stats-width (tessera--header-line-width (or stats ""))))
+    ;; Keep primary ends legible before spending width on long fields.
+    (setq action
+          (tessera--header-line-fit
+           action (- width gap stats-width)))
+    (let* ((remaining
+            (max 0 (- width gap stats-width
+                      (tessera--header-line-width (or action "")))))
+           (extra-budget (if info (/ remaining 3) remaining)))
+      (setq extra-text
+            (tessera--header-line-fit
+             extra-text
+             (- extra-budget (if stats field-gap-width 0))))
+      (setq info
+            (tessera--header-line-fit
+             info (- remaining
+                     (tessera--header-line-width (or extra-text ""))
+                     (if (and extra-text stats) field-gap-width 0)
+                     (if action field-gap-width 0)))))
+    (let ((lhs (string-join (delq nil (list action info)) field-gap))
+          (rhs (string-join (delq nil (list extra-text stats))
+                            field-gap)))
+      (concat
+       (propertize " " 'display `(space :width (,left)))
+       lhs
+       (propertize
+        " " 'display
+        `(space :align-to
+                (- right
+                   (,(+ right (tessera--header-line-width rhs))))))
+       rhs
+       (propertize " " 'display `(space :width (,right)))))))
+
+(defun tessera--header-line-display ()
+  "Return a literal header variable for the window being redisplayed."
+  (setq tessera--header-line-string
+        (condition-case error-data
+            (tessera--header-line-render (selected-window))
+          (error
+           (propertize " Header error"
+                       'face 'error
+                       'help-echo
+                       (error-message-string error-data)))))
+  'tessera--header-line-string)
+
+(defun tessera--header-line-prepare (&optional _window)
+  "Cache changed data and claim the header before redisplay."
+  (when tessera--header-line-view
+    (if tessera-header-line-enabled
+        (progn
+          (unless (eq header-line-format tessera--header-line-format)
+            (setq tessera--header-line-native
+                  (tessera--save-settings '(header-line-format)))
+            (setq-local header-line-format
+                        tessera--header-line-format))
+          (when tessera--header-line-dirty
+            (setq tessera--header-line-state
+                  (funcall tessera--header-line-reader)
+                  tessera--header-line-dirty nil)))
+      (when (eq header-line-format tessera--header-line-format)
+        (tessera--restore-settings tessera--header-line-native)))))
+
+(defun tessera-header-line-refresh ()
+  "Recompute the current active view's header data and redisplay it.
+Use after changing a custom provider's data or header options."
+  (interactive)
+  (when tessera--header-line-view
+    (setq tessera--header-line-dirty t)
+    (tessera--header-line-prepare)
+    (force-mode-line-update)))
+
+(defun tessera--header-line-changed (&rest _ignored)
+  "Mark cached header data stale after a native buffer change."
+  (when tessera--header-line-view
+    (setq tessera--header-line-dirty t)))
+
+(defun tessera--header-line-tick ()
+  "Refresh relative times in visible registered buffers."
+  (dolist (buffer tessera--header-line-buffers)
+    (when (and (buffer-live-p buffer) (get-buffer-window buffer t))
+      (with-current-buffer buffer
+        (when tessera-header-line-enabled
+          (force-mode-line-update))))))
+
+(defun tessera--header-line-enable (view reader providers)
+  "Attach VIEW's header using READER and PROVIDERS.
+READER returns cached data.  PROVIDERS maps the four ordered region
+names to option symbols holding functions or nil."
+  (unless tessera--header-line-view
+    (setq tessera--header-line-native
+          (tessera--save-settings '(header-line-format)))
+    (push (current-buffer) tessera--header-line-buffers)
+    (add-hook 'after-change-functions
+              #'tessera--header-line-changed nil t)
+    (add-hook 'pre-redisplay-functions
+              #'tessera--header-line-prepare t t)
+    (add-hook 'kill-buffer-hook #'tessera--header-line-disable nil t)
+    (add-hook 'change-major-mode-hook
+              #'tessera--header-line-disable nil t))
+  (setq tessera--header-line-view view
+        tessera--header-line-reader reader
+        tessera--header-line-providers providers)
+  (unless (timerp tessera--header-line-timer)
+    (setq tessera--header-line-timer
+          (run-at-time t 60 #'tessera--header-line-tick)))
+  (tessera-header-line-refresh))
+
+(defun tessera--header-line-disable ()
+  "Release this buffer's header and its shared resources."
+  (when tessera--header-line-view
+    (when (eq header-line-format tessera--header-line-format)
+      (tessera--restore-settings tessera--header-line-native))
+    (remove-hook 'after-change-functions
+                 #'tessera--header-line-changed t)
+    (remove-hook 'pre-redisplay-functions
+                 #'tessera--header-line-prepare t)
+    (remove-hook 'kill-buffer-hook #'tessera--header-line-disable t)
+    (remove-hook 'change-major-mode-hook
+                 #'tessera--header-line-disable t)
+    (setq tessera--header-line-buffers
+          (delq (current-buffer) tessera--header-line-buffers)
+          tessera--header-line-view nil
+          tessera--header-line-reader nil
+          tessera--header-line-providers nil
+          tessera--header-line-state nil
+          tessera--header-line-native nil
+          tessera--header-line-dirty nil)
+    (unless tessera--header-line-buffers
+      (when (timerp tessera--header-line-timer)
+        (cancel-timer tessera--header-line-timer))
+      (setq tessera--header-line-timer nil))
+    (force-mode-line-update)))
 
 (provide 'tessera)
 ;;; tessera.el ends here

@@ -1285,6 +1285,7 @@ native mark discovery and in-place updates."
    (when-let* ((window (get-buffer-window (current-buffer))))
      (window-body-width window))
    gnus-show-threads custom-enabled-themes
+   (copy-tree face-remapping-alist)
    gnus-summary-highlight gnus-summary-default-score
    gnus-summary-default-high-score gnus-summary-default-low-score
    gnus-summary-use-undownloaded-faces
@@ -1744,6 +1745,7 @@ Preserve point, narrowing, and month folds while row widths change."
 (defun tessera-gnus-summary--prepare ()
   "Attach entry layouts after Gnus has generated a summary."
   (when tessera-gnus-summary--active
+    (tessera--header-line-changed)
     (tessera-gnus-summary--prune-content-cache)
     (tessera-entry-clear-current)
     (tessera-entry-clear-layout)
@@ -1800,6 +1802,7 @@ Preserve point, narrowing, and month folds while row widths change."
 
 (defun tessera-gnus-summary--restore-native-state ()
   "Restore native state in the current Gnus summary buffer."
+  (tessera--header-line-disable)
   (setq tessera-gnus-summary--active nil)
   (remove-hook 'gnus-summary-update-hook
                #'tessera-gnus-summary--update-line t)
@@ -1856,6 +1859,7 @@ Preserve point, narrowing, and month folds while row widths change."
             (add-hook 'change-major-mode-hook
                       #'tessera-gnus-summary--disable nil t)
             (tessera-gnus-summary--refresh)
+            (tessera-gnus-summary--header-line-enable)
             (setq completed t))
         (unless completed
           (condition-case nil
@@ -1914,6 +1918,159 @@ Nil requests a full refresh, including glyphs and sorting."
                  tessera-gnus-summary--appearance
                  (tessera-gnus-summary--appearance))
            (tessera-entry-highlight-current)))))))
+
+;;;; Header line providers
+
+(defcustom tessera-gnus-summary-header-line-action-function
+  #'tessera-gnus-summary-header-line-action
+  "Function rendering the action header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-gnus-summary)
+
+(defcustom tessera-gnus-summary-header-line-info-function
+  #'tessera-gnus-summary-header-line-info
+  "Function rendering the info header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-gnus-summary)
+
+(defcustom tessera-gnus-summary-header-line-extra-function
+  nil
+  "Function rendering the extra header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-gnus-summary)
+
+(defcustom tessera-gnus-summary-header-line-statistics-function
+  #'tessera-gnus-summary-header-line-statistics
+  "Function rendering the statistics header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-gnus-summary)
+
+(defcustom tessera-gnus-summary-header-line-next-update-function
+  nil
+  "Function returning the next update time, or nil when unknown.
+The function receives a `tessera-header-line-context'.  It must
+return an absolute Emacs time value or nil, without scheduling work."
+  :type '(choice (const nil) function)
+  :group 'tessera-gnus-summary)
+
+(defun tessera-gnus-summary--header-line-enable ()
+  "Attach the four-region header to this native view."
+  (tessera--header-line-enable
+   'gnus-summary #'tessera-gnus-summary--header-line-state
+   '((action . tessera-gnus-summary-header-line-action-function)
+     (info . tessera-gnus-summary-header-line-info-function)
+     (extra . tessera-gnus-summary-header-line-extra-function)
+     (statistics
+      . tessera-gnus-summary-header-line-statistics-function))))
+
+(defun tessera-gnus-summary-header-line-statistics (context)
+  "Return this view's cached statistics for CONTEXT."
+  (tessera-header-line-statistics context))
+
+(defface tessera-gnus-summary-header-line-group-face
+  '((t :weight bold :slant italic))
+  "Face for the source group name in the summary header."
+  :group 'tessera-gnus-summary)
+
+(defvar tessera-gnus-summary--update-times
+  (make-hash-table :test #'equal)
+  "Observed scan states, keyed by full Gnus group name.")
+
+(defun tessera-gnus-summary--header-line-state ()
+  "Collect real summary entries and the loaded header population."
+  (let ((shown (make-hash-table :test #'eql))
+        (loaded (make-hash-table :test #'eql))
+        (unread 0))
+    (dolist (header gnus-newsgroup-headers)
+      (when (mail-header-p header)
+        (puthash (mail-header-number header) t loaded)))
+    (dolist (data gnus-newsgroup-data)
+      (when (and (mail-header-p (gnus-data-header data))
+                 (not (gethash (gnus-data-number data) shown)))
+        (puthash (gnus-data-number data) t shown)
+        (puthash (gnus-data-number data) t loaded)
+        (unless (gnus-read-mark-p (gnus-data-mark data))
+          (cl-incf unread))))
+    (list :shown (hash-table-count shown)
+          :unread unread
+          :loaded (hash-table-count loaded)
+          :group gnus-newsgroup-name
+          :scope (concat "All real summary articles, including "
+                         "folded and off-screen articles; excludes "
+                         "pseudo "
+                         "thread roots and headings.")
+          :glyph-defaults 'tessera-gnus-summary--glyph-defaults
+          :glyph-overrides 'tessera-gnus-summary-glyphs)))
+
+(defun tessera-gnus-summary-header-line-info (context)
+  "Return the summary's source group name for CONTEXT."
+  (let ((group (or (plist-get
+                    (tessera-header-line-context-state context)
+                    :group) "—")))
+    (tessera-header-line-field
+     context 'info "Group" group
+     (concat "Current summary source: " group
+             "\nVirtual or search groups may combine sources.")
+     'tessera-gnus-summary-header-line-group-face)))
+
+(defun tessera-gnus-summary-header-line-action (context)
+  "Return the current group's rescan action for CONTEXT."
+  (let* ((group (plist-get
+                 (tessera-header-line-context-state context) :group))
+         (status (gethash group tessera-gnus-summary--update-times)))
+    (tessera-header-line-update
+     context (plist-get status :last)
+     (when tessera-gnus-summary-header-line-next-update-function
+       (funcall tessera-gnus-summary-header-line-next-update-function
+                context))
+     (plist-get status :running) #'gnus-summary-rescan-group
+     "Rescan this group.  Last time records a completed group rescan."
+     (plist-get status :failed))))
+
+(defun tessera-gnus-summary--observe-rescan (function &rest args)
+  "Observe FUNCTION with ARGS when it requests a group rescan."
+  (if (not (nth 1 args))
+      (apply function args)
+    (let* ((group gnus-newsgroup-name)
+           (status
+            (copy-sequence
+             (gethash group tessera-gnus-summary--update-times)))
+           completed)
+      (puthash group (plist-put status :running t)
+               tessera-gnus-summary--update-times)
+      (force-mode-line-update t)
+      (unwind-protect
+          (prog1 (apply function args) (setq completed t))
+        (setq status (plist-put status :running nil)
+              status (plist-put status :failed (not completed)))
+        (when completed
+          (setq status (plist-put status :last (current-time))))
+        (puthash group status tessera-gnus-summary--update-times)
+        (force-mode-line-update t)))))
+
+(defun tessera-gnus-summary--header-line-track (enable)
+  "Observe native rescans when ENABLE is non-nil."
+  (if enable
+      (advice-add 'gnus-summary-reselect-current-group :around
+                  #'tessera-gnus-summary--observe-rescan)
+    (advice-remove 'gnus-summary-reselect-current-group
+                   #'tessera-gnus-summary--observe-rescan)))
 
 (provide 'tessera-gnus-summary)
 ;;; tessera-gnus-summary.el ends here

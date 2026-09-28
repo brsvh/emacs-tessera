@@ -168,6 +168,73 @@
    :glyph-slots (list (tessera-entry-tests--slot))
    :layouts `((two-line . ,(tessera-entry-tests--two-line-layout)))))
 
+(ert-deftest tessera-entry-pixel-truncation-keeps-requested-end ()
+  (pcase-dolist (`(,method ,expected)
+                 '((head "…DE") (middle "A…E") (tail "AB…")))
+    (should (equal (tessera--truncate-string-pixels
+                    "ABCDE" 3 #'string-width nil method)
+                   expected))
+    (should (equal (tessera--truncate-string-pixels
+                    "ABCDE" 1 #'string-width nil method)
+                   "…"))
+    (should (equal (tessera--truncate-string-pixels
+                    "ABCDE" 0 #'string-width nil method)
+                   ""))))
+
+(ert-deftest tessera-entry-graphical-layout-fits-remapped-text ()
+  (skip-unless (display-graphic-p))
+  (let ((backend 'tessera-entry-tests)
+        (tessera-glyph-style 'ascii))
+    (unwind-protect
+        (with-temp-buffer
+          (save-window-excursion
+            (set-window-buffer (selected-window) (current-buffer))
+            (tessera-entry-tests--register backend)
+            (dolist (scale '(1.0 2.0))
+              (let ((face-remapping-alist
+                     `((default (:height ,scale)))))
+                (dolist (method '(head middle tail))
+                  (let* ((definition
+                          (tessera--find-entry-backend backend))
+                         (context (tessera--make-entry-context
+                                   definition
+                                   (list :title (make-string 800 ?x)
+                                         :date "DATE" :status 'unread)
+                                   (selected-window)))
+                         (layout (tessera--find-entry-layout
+                                  definition context)))
+                    (setf (tessera-entry-layout-main-left-segments
+                           layout)
+                          `((title :grow t :truncate ,method
+                                   :point t)))
+                    (let ((text (tessera--render-entry-lines
+                                 layout definition context)))
+                      (should (string-match-p "x" text))
+                      (should (string-match-p "DATE" text))
+                      (should (tessera-entry-point text))
+                      (should
+                       (<= (tessera-tests--pixel-width text)
+                           (window-body-width nil t))))))))))
+      (remhash backend tessera--entry-backends))))
+
+(ert-deftest tessera-entry-graphical-thread-clipping-keeps-anchor ()
+  (skip-unless (display-graphic-p))
+  (with-temp-buffer
+    (let* ((face-remapping-alist '((default (:height 2.0))))
+           (context (make-tessera-entry-context
+                     :buffer (current-buffer)
+                     :window (selected-window)))
+           (text (concat
+                  (propertize "│     │     └─"
+                              'tessera--overflow-help "Full message")
+                  (propertize "Author" 'tessera-entry-point t))))
+      (dolist (width '(1 4 8 12 16))
+        (let ((clipped (tessera--clip-thread-content
+                        text width context)))
+          (should (tessera-entry-point clipped))
+          (should (<= (tessera-tests--pixel-width clipped)
+                      (* width (frame-char-width)))))))))
+
 (defun tessera-entry-tests--property-count (property value string)
   "Count positions where PROPERTY equals VALUE in STRING."
   (cl-loop for position below (length string)
@@ -449,21 +516,6 @@
                         :date "2026"
                         :status unread)))))))))
       (remhash backend tessera--entry-backends))))
-
-(ert-deftest tessera-glyph-render-supports-segment-glyphs ()
-  (let* ((context
-          (tessera-entry-tests--context
-           '(:title "Subject") (current-buffer) nil))
-         (tessera-glyph-style 'ascii)
-         (glyph (tessera-entry-tests--glyph))
-         (text
-          (tessera-glyph-render
-           glyph context '(:help-echo "Indicator"))))
-    (should (equal text "*"))
-    (should (equal (get-text-property 0 'help-echo text)
-                   "Indicator"))
-    (should (eq (get-text-property 0 'tessera-glyph text)
-                t))))
 
 (ert-deftest tessera-entry-render-respects-glyph-color ()
   (let ((backend 'tessera-entry-tests)

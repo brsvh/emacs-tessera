@@ -561,9 +561,18 @@ Maximum active linked-page transfers for one request, initially
 as one.  Different source buffers have independent request limits.
 @end defopt
 
-  Eligibility, timeout, and concurrency are captured when a request is
-built.  Options can have global or buffer-local values; changing them
-does not reconfigure active requests.  Completing transfers in another
+@defopt tessera-x-elfeed-fetch-max-bytes
+Maximum linked response body size to decode and parse, initially
+@code{2097152} bytes (2 MiB).  Larger bodies fall back to stored feed
+content before decoding or HTML parsing.  The value is a nonnegative
+integer, or @code{nil} for no limit.  This check takes place after the
+response arrives; it does not bound the HTTP transfer or its buffer.
+@end defopt
+
+  Eligibility, timeout, concurrency, and the parsing size limit are
+captured when a request is built.  Options can have global or
+buffer-local values; changing them does not reconfigure active requests.
+Completing transfers in another
 order does not reorder the snapshot.  Character budgets limit the
 rendered result, not the HTTP transfers.
 

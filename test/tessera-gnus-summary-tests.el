@@ -536,6 +536,26 @@
         (should (= syncs 1))
         (should-not tessera-gnus-summary--dirty)))))
 
+(ert-deftest tessera-gnus-refreshes-after-font-remapping ()
+  (with-temp-buffer
+    (let* ((face-remapping-alist
+            (copy-tree '((default (:height 1.0)))))
+           (tessera-gnus-summary--active t)
+           (tessera-gnus-summary--dirty nil)
+           (tessera-gnus-summary--appearance
+            (tessera-gnus-summary--appearance))
+           (syncs 0))
+      (cl-letf (((symbol-function 'tessera-gnus-summary--sync-buffer)
+                 (lambda (force)
+                   (should force)
+                   (cl-incf syncs))))
+        (tessera-gnus-summary--post-command)
+        (should (zerop syncs))
+        (setf (plist-get (cadar face-remapping-alist) :height) 2.0)
+        (tessera-gnus-summary--post-command)
+        (tessera-gnus-summary--post-command)
+        (should (= syncs 1))))))
+
 (ert-deftest tessera-gnus-content-cache-prunes-removed-articles ()
   (with-temp-buffer
     (let* ((header (tessera-gnus-tests--header))

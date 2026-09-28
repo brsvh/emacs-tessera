@@ -12,6 +12,27 @@
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-headers)
 
+(ert-deftest tessera-mu4e-refreshes-after-font-remapping ()
+  (with-temp-buffer
+    (let* ((face-remapping-alist
+            (copy-tree '((default (:height 1.0)))))
+           (tessera-mu4e-headers--active t)
+           (tessera-mu4e-headers--dirty nil)
+           (tessera-mu4e-headers--appearance
+            (tessera-mu4e-headers--appearance))
+           (syncs 0))
+      (cl-letf (((symbol-function 'tessera-mu4e-headers--sync)
+                 (lambda (native force)
+                   (should-not native)
+                   (should force)
+                   (cl-incf syncs))))
+        (tessera-mu4e-headers--refresh)
+        (should (zerop syncs))
+        (setf (plist-get (cadar face-remapping-alist) :height) 2.0)
+        (tessera-mu4e-headers--refresh)
+        (tessera-mu4e-headers--refresh)
+        (should (= syncs 1))))))
+
 (ert-deftest tessera-mu4e-undated-rows-keep-native-identity ()
   (dolist (date '(nil invalid (0 0 0) (0 0)))
     (let ((mu4e-headers-mode-hook nil)

@@ -91,6 +91,20 @@ name, such as ~Tessera~.
 Shared display settings apply to all three adapters.  See the [[file:doc/tessera.texi][Tessera manual]] for
 complete options and extension interfaces.
 
+*** Header Lines
+
+The three native views share a header with an update action, query or source
+information, optional extra information, and statistics.  Hover for details and
+click the update action to invoke the native command.  Elfeed shows displayed
+entries versus query results; Gnus shows displayed articles versus loaded
+headers.  Folded and off-screen entries remain in the displayed counts.
+
+Each view provides four header region functions and a next-update time
+provider.  Shared faces, padding, and glyph options control their appearance.
+Set ~tessera-header-line-enabled~ to ~nil~ to retain native headers while
+keeping Tessera entry layouts.  See the Header Lines and Header Providers
+chapters of the [[file:doc/tessera.texi][Tessera manual]] for details.
+
 *** Entry Layouts and Spacing
 
 Adapters initially use two visual lines per entry.  To select a compact layout,

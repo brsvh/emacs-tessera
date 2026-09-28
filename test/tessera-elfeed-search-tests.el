@@ -280,24 +280,28 @@ Return the entries, also recording them as native search results."
       (tessera-elfeed-search--set-glyphs
        'tessera-elfeed-search-glyphs original))))
 
-(ert-deftest tessera-elfeed-search-hidden-enclosure-omits-segment ()
-  (let* ((entry
-          (tessera-elfeed-search-tests--entry
-           nil '(("https://example.invalid/a" "text/plain" 10))))
-         (context (tessera-elfeed-search--context entry nil nil))
-         (tessera-elfeed-search-glyphs '((enclosure :hidden t))))
-    (should-not (tessera-elfeed-search--enclosure context))
-    (should-not
-     (tessera--render-segment
-      '(enclosure :optional t)
-      (gethash 'elfeed-search tessera--entry-backends) context))))
-
-(ert-deftest tessera-elfeed-search-omits-missing-enclosure ()
-  (let* ((entry (tessera-elfeed-search-tests--entry))
-         (context
-          (tessera-elfeed-search--context
-           entry (current-buffer) nil)))
-    (should-not (tessera-elfeed-search--enclosure context))))
+(ert-deftest tessera-elfeed-search-enclosure-visibility ()
+  (dolist (present '(nil t))
+    (dolist (hidden '(nil t))
+      (let* ((entry
+              (tessera-elfeed-search-tests--entry
+               nil (when present
+                     '(("https://example.invalid/a"
+                        "text/plain" 10)))))
+             (context (tessera-elfeed-search--context entry nil nil))
+             (tessera-elfeed-search-glyphs
+              (list (list 'enclosure :hidden hidden)))
+             (visible (and present (not hidden))))
+        (should (eq (not (null
+                          (tessera-elfeed-search--enclosure context)))
+                    visible))
+        (should (eq (not (null
+                          (tessera--render-segment
+                           '(enclosure :optional t)
+                           (gethash 'elfeed-search
+                                    tessera--entry-backends)
+                           context)))
+                    visible))))))
 
 (ert-deftest tessera-elfeed-search-restores-setting-locality ()
   (dolist (local '(nil t))
