@@ -532,6 +532,12 @@ stylesheet.  ~make -C doc clean~ removes these generated manuals.
 The ERT runner covers all three packages.  Tessera tests require Elfeed and
 mu4e libraries; Elfeed X tests need only Elfeed and its dependencies.
 
+Tests mirror the package directories under ~lisp/~: ~test/tessera/~,
+~test/tessera-x/~, and ~test/elfeed-x/~.  Each directory contains its package's
+test suites and support files.  Shared core support files stay in
+~test/tessera/~ and are also available to Tessera X tests.  The batch entry
+points ~run-tests.el~ and ~run-x-tests.el~ remain directly under ~test/~.
+
 *** Source Tests
 
 From the checkout root, run runtime tests for all packages in separate
@@ -552,7 +558,8 @@ libraries are not already available, provide their directories explicitly:
 make test EMACS_LOAD_PATH="/path/to/elfeed /path/to/mu4e"
 #+end_src
 
-The runner adds the checkout's package directories to ~load-path~.  It exits with
+The runner adds the checkout's package and test directories to ~load-path~.
+It loads suites only from the selected package's test directory and exits with
 a nonzero status if a test fails.
 
 *** Installed Package Tests

@@ -5,6 +5,7 @@
 ;; Batch entry point.  Elfeed and mu4e must be on `load-path'.
 ;; Set TESSERA_TEST_PACKAGE_DIRS to test installed bytecode.
 ;; TESSERA_TEST_PACKAGE selects tessera, tessera-x, or elfeed-x.
+;; Each package's tests live in its matching subdirectory here.
 
 ;;; Code:
 
@@ -49,6 +50,16 @@
         (error "Expected library %s, loaded %s" expected file)))))
 
 (let* ((directory (file-name-directory load-file-name))
+       (packages
+        (pcase tessera-tests--package
+          ("tessera-x" '("tessera" "tessera-x"))
+          (_ (list tessera-tests--package))))
+       (test-directory
+        (expand-file-name tessera-tests--package directory))
+       (test-directories
+        (mapcar (lambda (package)
+                  (expand-file-name package directory))
+                packages))
        (package-path (getenv "TESSERA_TEST_PACKAGE_DIRS"))
        (library-directories
         (if package-path
@@ -57,16 +68,14 @@
           (mapcar
            (lambda (package)
              (expand-file-name (concat "../lisp/" package) directory))
-           (pcase tessera-tests--package
-             ("elfeed-x" '("elfeed-x"))
-             ("tessera-x" '("tessera" "tessera-x"))
-             (_ '("tessera"))))))
+           packages)))
        (tessera-tests--expected-libraries nil)
        (load-prefer-newer (not package-path))
        (load-no-native t)
        (native-comp-jit-compilation nil)
        (load-path
-        (append library-directories (list directory) load-path)))
+        (append library-directories test-directories
+                (list directory) load-path)))
   (unless library-directories
     (error "No Tessera library directories selected"))
   (let ((suffix (if package-path ".elc" ".el")))
@@ -108,14 +117,7 @@
              (if package-path "bytecode" "source")
              (string-join library-directories ", "))
     (dolist (file (directory-files
-                   directory t
-                   "\\`\\(?:tessera-.*\\|elfeed-x\\)-tests\\.el\\'"))
-      (let ((name (file-name-base file)))
-        (when (pcase tessera-tests--package
-                ("elfeed-x" (equal name "elfeed-x-tests"))
-                ("tessera-x" (equal name "tessera-x-tests"))
-                (_ (and (string-prefix-p "tessera-" name)
-                        (not (equal name "tessera-x-tests")))))
-          (require (intern name) file))))
+                   test-directory t "-tests\\.el\\'"))
+      (require (intern (file-name-base file)) file))
     (ert-run-tests-batch-and-exit)))
 ;;; run-tests.el ends here
