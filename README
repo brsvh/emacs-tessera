@@ -225,7 +225,7 @@ Enable the Search adapter:
 
 #+begin_src emacs-lisp
 (require 'tessera-elfeed)
-(tessera-elfeed-mode 1)
+(tessera-elfeed-mode +1)
 #+end_src
 
 Rows show titles, feeds, tags, dates, and read or enclosure indicators.  Use ~M-x
@@ -258,7 +258,7 @@ Enable the Headers adapter:
 
 #+begin_src emacs-lisp
 (require 'tessera-mu4e)
-(tessera-mu4e-mode 1)
+(tessera-mu4e-mode +1)
 #+end_src
 
 Rows show subjects, contacts, labels, dates, message flags, and pending
@@ -440,9 +440,9 @@ Elfeed X provides independent global modes.  Enable only the features you want:
 
 #+begin_src emacs-lisp
 (require 'elfeed-x)
-(elfeed-x-update-mode 1)
+(elfeed-x-auto-update-mode +1)
 (require 'elfeed-x-search)
-(elfeed-x-search-follow-mode 1)
+(elfeed-x-search-follow-mode +1)
 #+end_src
 
 The update schedule starts on entry into Elfeed, or when enabled with an
@@ -470,7 +470,7 @@ renderer and binds ~%~ to the upstream renderer toggle:
     (elfeed-webkit-enable)
     (keymap-set elfeed-show-mode-map "%" #'elfeed-webkit-toggle)
     (require 'elfeed-x-webkit)
-    (elfeed-x-webkit-mode 1)))
+    (elfeed-x-webkit-mode +1)))
 #+end_src
 
 The fitting mode resizes widgets to their actual article windows after

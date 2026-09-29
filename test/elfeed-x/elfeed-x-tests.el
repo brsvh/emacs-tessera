@@ -17,7 +17,7 @@
 
 (defvar elfeed-x-tests--initial-state
   (list (featurep 'elfeed) (featurep 'elfeed-webkit)
-        (featurep 'tessera) elfeed-x-update-mode
+        (featurep 'tessera) elfeed-x-auto-update-mode
         elfeed-x-search-follow-mode elfeed-x-webkit-mode
         (elfeed-x-update-timer)
         (advice-member-p #'elfeed-x--start-update-timer 'elfeed)
@@ -36,25 +36,25 @@
   "Run BODY with an isolated schedule and an existing Search buffer."
   (declare (indent 0) (debug t))
   `(let ((elfeed-x--update-timer nil)
-         (elfeed-x-update-mode nil)
+         (elfeed-x-auto-update-mode nil)
          (elfeed-x-update-interval 900))
      (with-temp-buffer
        (setq major-mode 'elfeed-search-mode)
        (unwind-protect
            (progn ,@body)
-         (elfeed-x-update-mode -1)))))
+         (elfeed-x-auto-update-mode -1)))))
 
 (ert-deftest elfeed-x-schedule-waits-for-entry ()
   (let ((elfeed-x--update-timer nil)
-        (elfeed-x-update-mode nil)
+        (elfeed-x-auto-update-mode nil)
         (elfeed-entry-point #'ignore))
     (unwind-protect
         (progn
-          (elfeed-x-update-mode 1)
+          (elfeed-x-auto-update-mode 1)
           (should-not (elfeed-x-update-timer))
           (elfeed)
           (should (timerp (elfeed-x-update-timer))))
-      (elfeed-x-update-mode -1))))
+      (elfeed-x-auto-update-mode -1))))
 
 (ert-deftest elfeed-x-schedule-preserves-timer-and-cleans-up ()
   (elfeed-x-tests--with-schedule
@@ -62,17 +62,17 @@
           (before (current-time)))
       (unwind-protect
           (progn
-            (elfeed-x-update-mode 1)
+            (elfeed-x-auto-update-mode 1)
             (let ((timer (elfeed-x-update-timer))
                   (next (elfeed-x-next-update-time)))
               (should (time-less-p before next))
               (should (< (float-time (time-subtract next before))
                          901))
-              (elfeed-x-update-mode 1)
+              (elfeed-x-auto-update-mode 1)
               (elfeed-x--start-update-timer)
               (should (eq timer (elfeed-x-update-timer)))
               (should (equal next (elfeed-x-next-update-time)))
-              (elfeed-x-update-mode -1)
+              (elfeed-x-auto-update-mode -1)
               (should-not (memq timer timer-list))
               (should-not (elfeed-x-next-update-time))
               (should (memq other timer-list))
@@ -83,7 +83,7 @@
 
 (ert-deftest elfeed-x-schedule-recovers-cancelled-timer ()
   (elfeed-x-tests--with-schedule
-    (elfeed-x-update-mode 1)
+    (elfeed-x-auto-update-mode 1)
     (let ((timer (elfeed-x-update-timer)))
       (cancel-timer timer)
       (should-not (elfeed-x-update-timer))
@@ -96,7 +96,7 @@
   (elfeed-x-tests--with-schedule
     (setopt elfeed-x-update-interval 600)
     (should-not (elfeed-x-update-timer))
-    (elfeed-x-update-mode 1)
+    (elfeed-x-auto-update-mode 1)
     (let ((timer (elfeed-x-update-timer)))
       (setopt elfeed-x-update-interval 300)
       (should-not (memq timer timer-list))
@@ -116,14 +116,14 @@
                  (lambda ()
                    (cl-incf calls)
                    (elfeed-x--update))))
-        (elfeed-x-update-mode 1)
+        (elfeed-x-auto-update-mode 1)
         (elfeed-x--update)
         (should (zerop calls))
         (setq queue 0)
         (elfeed-x--update)
         (should (= calls 1))
         (should-not elfeed-x--updating)
-        (elfeed-x-update-mode -1)
+        (elfeed-x-auto-update-mode -1)
         (elfeed-x--update)
         (should (= calls 1))))))
 
@@ -133,7 +133,7 @@
                (lambda () 0))
               ((symbol-function 'elfeed-update)
                (lambda () (error "Fetch failed"))))
-      (elfeed-x-update-mode 1)
+      (elfeed-x-auto-update-mode 1)
       (should-error (elfeed-x--update))
       (should-not elfeed-x--updating)
       (should (elfeed-x-next-update-time)))))

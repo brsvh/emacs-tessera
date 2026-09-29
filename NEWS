@@ -14,8 +14,8 @@ It does not depend on Tessera.  Its features have independent global minor
 modes; loading their libraries does not activate them.
 
 ** Scheduled updates avoid duplicate timers and overlapping retrieval.
-'elfeed-x-update-mode' starts a schedule on entry into Elfeed, or when enabled
-with an existing Elfeed buffer.  The first attempt waits 900 seconds by
+'elfeed-x-auto-update-mode' starts a schedule on entry into Elfeed, or when
+enabled with an existing Elfeed buffer.  The first attempt waits 900 seconds by
 default.  Subsequent attempts use the same interval and skip busy queues.
 Customize 'elfeed-x-update-interval' to restart an active schedule with a new
 interval.  Disabling the mode cancels its timer without cancelling retrieval.

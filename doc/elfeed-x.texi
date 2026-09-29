@@ -79,7 +79,7 @@ these forms in your initialization file:
 
 @lisp
 (require 'elfeed-x)
-(elfeed-x-update-mode 1)
+(elfeed-x-auto-update-mode 1)
 (require 'elfeed-x-search)
 (elfeed-x-search-follow-mode 1)
 @end lisp
@@ -113,7 +113,7 @@ The next attempt follows the normal interval.
 keep their native behavior.  Elfeed X neither cancels retrieval already
 in progress nor manages timers created by other configurations.
 
-@deffn Command elfeed-x-update-mode &optional arg
+@deffn Command elfeed-x-auto-update-mode &optional arg
 Enable or disable scheduled updates globally.  Enabling starts the timer
 after the next @code{elfeed} command.  If a Search, article, or Tree
 buffer already exists, enabling starts the timer immediately.  The
@@ -269,8 +269,8 @@ other configurations.
 @defun elfeed-x-update-timer
 Return the active timer object owned by Elfeed X, or @code{nil} when no
 such timer is registered.  A cancelled timer is reported as @code{nil}.
-Treat the returned object as read-only; use @code{elfeed-x-update-mode}
-to control its lifecycle.
+Treat the returned object as read-only; use
+@code{elfeed-x-auto-update-mode} to control its lifecycle.
 @end defun
 
 @defun elfeed-x-next-update-time

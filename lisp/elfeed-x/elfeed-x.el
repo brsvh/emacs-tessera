@@ -27,8 +27,8 @@
 ;;; Commentary:
 
 ;; Elfeed X provides extra features for Elfeed.  The `x' means extra.
-;; Enable `elfeed-x-update-mode' to schedule feed updates after entry
-;; into Elfeed.  Read the schedule with `elfeed-x-next-update-time'.
+;; Enable `elfeed-x-auto-update-mode' to schedule feed updates after
+;; entry into Elfeed.  Read it with `elfeed-x-next-update-time'.
 ;; See `elfeed-x-search' for continuous reading and `elfeed-x-webkit'
 ;; for fitting WebKit widgets to article windows.
 ;; Loading these libraries does not activate their modes.
@@ -47,12 +47,12 @@
   :prefix "elfeed-x-")
 
 (defvar elfeed-x--update-timer nil
-  "Timer owned by `elfeed-x-update-mode'.")
+  "Timer owned by `elfeed-x-auto-update-mode'.")
 
 (defvar elfeed-x--updating nil
   "Whether a scheduled update is dispatching its requests.")
 
-(defvar elfeed-x-update-mode nil)
+(defvar elfeed-x-auto-update-mode nil)
 
 (defun elfeed-x-update-timer ()
   "Return the active Elfeed X update timer, or nil.
@@ -98,7 +98,7 @@ the value before entering Elfeed does not start a timer."
 
 (defun elfeed-x--update ()
   "Update feeds unless Elfeed is already retrieving or dispatching."
-  (when (and elfeed-x-update-mode
+  (when (and elfeed-x-auto-update-mode
              (not elfeed-x--updating)
              (zerop (elfeed-queue-count-total)))
     (let ((elfeed-x--updating t))
@@ -106,7 +106,7 @@ the value before entering Elfeed does not start a timer."
 
 (defun elfeed-x--start-update-timer (&rest _)
   "Start the enabled update schedule without duplicating a timer."
-  (when (and elfeed-x-update-mode (not (elfeed-x-update-timer)))
+  (when (and elfeed-x-auto-update-mode (not (elfeed-x-update-timer)))
     (unless (and (numberp elfeed-x-update-interval)
                  (> elfeed-x-update-interval 0))
       (user-error "Elfeed X update interval must be positive"))
@@ -117,7 +117,7 @@ the value before entering Elfeed does not start a timer."
                        #'elfeed-x--update))))
 
 ;;;###autoload
-(define-minor-mode elfeed-x-update-mode
+(define-minor-mode elfeed-x-auto-update-mode
   "Toggle scheduled Elfeed updates globally.
 Start the schedule after the next `elfeed' command, or immediately
 if an Elfeed search, article, or tree buffer already exists.
@@ -125,7 +125,7 @@ Repeated enabling preserves an active schedule.  Disabling cancels
 the timer without interrupting ongoing retrieval."
   :global t
   :group 'elfeed-x
-  (if elfeed-x-update-mode
+  (if elfeed-x-auto-update-mode
       (let (completed)
         (unwind-protect
             (progn
@@ -141,7 +141,7 @@ the timer without interrupting ongoing retrieval."
                 (elfeed-x--start-update-timer))
               (setq completed t))
           (unless completed
-            (elfeed-x-update-mode -1))))
+            (elfeed-x-auto-update-mode -1))))
     (advice-remove 'elfeed #'elfeed-x--start-update-timer)
     (elfeed-x--stop-update-timer)))
 
