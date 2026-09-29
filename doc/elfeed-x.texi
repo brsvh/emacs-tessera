@@ -1,0 +1,313 @@
+\input texinfo
+
+@c Copyright (C) 2026 Bingshan Chang.
+@setfilename elfeed-x.info
+@settitle Elfeed X
+@documentencoding UTF-8
+@set txicodequoteundirected
+@set txicodequotebacktick
+@documentlanguage en
+@set VERSION 0.1.0
+@syncodeindex vr fn
+
+@copying
+This manual describes elfeed-x version @value{VERSION}.
+
+Copyright @copyright{} 2026 Bingshan Chang.
+
+@quotation
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3 or
+any later version published by the Free Software Foundation; with no
+Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.  A
+copy of the license is included in the section entitled ``GNU Free
+Documentation License''.
+@end quotation
+@end copying
+
+@dircategory Emacs
+@direntry
+* Elfeed X: (elfeed-x). Extra features for Elfeed.
+@end direntry
+
+@titlepage
+@title Elfeed X
+@subtitle For version @value{VERSION}
+@author Bingshan Chang
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Elfeed X
+
+  Scheduled updates, continuous reading, and WebKit window fitting.
+
+@insertcopying
+@end ifnottex
+
+@menu
+* Getting Started::     Requirements and enabling extra features.
+* Scheduled Updates::   Starting, stopping, and changing the schedule.
+* Continuous Reading::  Following Search in an article window.
+* WebKit Windows::      Fitting widgets while focus remains in Search.
+* Schedule Readers: Reading the Schedule. Timer and time interfaces.
+* Copying::             The GNU Free Documentation License.
+* Concept Index::       Topics covered in this manual.
+* Symbol Index::        Commands, options, and interfaces.
+@end menu
+
+@node Getting Started
+@chapter Getting Started
+@cindex extra features
+@cindex requirements
+
+  Elfeed X adds optional features to Elfeed.  The @samp{x} means
+@dfn{extra}.  The package requires Emacs 30.1 or later and Elfeed 4.0.1
+or later.  Configure your subscriptions in Elfeed before enabling
+scheduled updates.  Tessera is optional; Elfeed X does not depend on
+its display adapters or experimental features.
+
+  The features have independent global minor modes.  Loading a library
+exposes its settings without starting timers, loading Elfeed, or
+activating hooks.  For scheduled updates and continuous reading, put
+these forms in your initialization file:
+
+@lisp
+(require 'elfeed-x)
+(elfeed-x-update-mode 1)
+(require 'elfeed-x-search)
+(elfeed-x-search-follow-mode 1)
+@end lisp
+
+  Then enter Elfeed with @kbd{M-x elfeed}.  The schedule starts after
+entry; the first update attempt occurs 15 minutes later.  Open an
+article in another window to use continuous reading.  See
+@ref{Scheduled Updates} and @ref{Continuous Reading} for their controls.
+WebKit support is configured separately (@pxref{WebKit Windows}).
+
+  To disable a feature, call its mode function with @code{-1} or toggle
+it with @kbd{M-x}.  From Lisp, a positive argument enables the mode;
+zero or a negative argument disables it.  Repeated enabling does not
+duplicate hooks or timers.  The modes apply to existing and future
+matching buffers.  Use @kbd{M-x customize-group @key{RET} elfeed-x}
+to find the package's settings.
+
+@node Scheduled Updates
+@chapter Scheduled Updates
+@cindex scheduled updates
+@cindex overlapping updates
+
+  Elfeed X maintains one repeating timer for updating all subscriptions.
+Each @dfn{update attempt} checks Elfeed's retrieval queue and calls
+@code{elfeed-update} only when the queue is empty.  Pending and active
+requests both prevent another scheduled update.  A busy attempt is
+skipped; it does not queue another full update for immediate execution.
+The next attempt follows the normal interval.
+
+  Scheduled updates run Elfeed's normal update hooks.  Manual updates
+keep their native behavior.  Elfeed X neither cancels retrieval already
+in progress nor manages timers created by other configurations.
+
+@deffn Command elfeed-x-update-mode &optional arg
+Enable or disable scheduled updates globally.  Enabling starts the timer
+after the next @code{elfeed} command.  If a Search, article, or Tree
+buffer already exists, enabling starts the timer immediately.  The
+first attempt waits for @code{elfeed-x-update-interval} seconds in both
+cases.  Closing Elfeed windows does not stop the timer.
+
+Disabling cancels the owned timer and removes automatic startup.
+Ongoing retrieval continues.  Repeated enabling preserves an active
+timer and its next attempt time.  If the timer was cancelled externally,
+enter Elfeed again or enable this mode again to create a new schedule.
+@end deffn
+
+@defopt elfeed-x-update-interval
+This positive number specifies the interval in seconds between update
+attempts and the initial delay.  Its default is @code{900}, or 15
+minutes.  Integer and floating-point values are accepted.
+
+Changing the option through Customize or @code{setopt} restarts an
+active timer, measuring the new delay from that change.  If no timer is
+active, changing the option does not start one.  Non-positive or
+non-numeric values are rejected.  Use Customize or @code{setopt} instead
+of @code{setq} to update an active schedule.
+@end defopt
+
+  For example, use a half-hour interval:
+
+@lisp
+(require 'elfeed-x)
+(setopt elfeed-x-update-interval 1800)
+@end lisp
+
+  An error during a scheduled update is reported by Emacs's timer
+machinery.  The repeating timer remains scheduled.  Its next attempt
+still checks the native queue.  To display the planned time in another
+interface, use the readers described in @ref{Reading the Schedule}.
+
+@node Continuous Reading
+@chapter Continuous Reading
+@cindex continuous reading
+@cindex article windows
+@kindex n @r{(Elfeed Search)}
+@kindex p @r{(Elfeed Search)}
+
+  Continuous reading updates an already open article window when you
+move through Search results.  With the default bindings, @kbd{n}
+(@code{next-line}) and @kbd{p} (@code{previous-line}) move point and
+display the entry at its new position.  Focus stays in Search.  Merely
+moving through Search never opens an article window.
+
+@deffn Command elfeed-x-search-follow-mode &optional arg
+Enable or disable continuous reading in all Search buffers.  After a
+configured navigation command, display the entry at point in the first
+non-dedicated article window in cyclic window order after the selected
+window, on the selected frame.  Windows on other frames are not used.
+
+Mark the displayed entry as read, preserving Search point and the
+selected window.  Empty rows and an entry already displayed in that
+window do not cause rendering.  Disabling removes the navigation hooks
+from existing and future Search buffers.
+@end deffn
+
+  Elfeed X identifies article buffers by their major mode, so renamed
+buffers and @code{elfeed-show-unique-buffers} are supported.  It uses
+Elfeed's article renderer even if a feed has an external
+@code{:show-entry} handler; navigation does not launch that handler.
+This affects automatic following only.  Explicit native display commands
+retain their usual behavior.
+
+@defopt elfeed-x-search-follow-commands
+This list contains command symbols that trigger following after they
+run.  The default is @code{(next-line previous-line)}.  Recognition uses
+the executed command, not the last typed character, so rebinding those
+commands preserves following.  Add a custom navigation command to this
+list if it should also trigger following.  Changes take effect on the
+next command.
+@end defopt
+
+  Choose your window layout with Elfeed's
+@code{elfeed-show-entry-switch}.  For example, this user configuration
+opens articles below Search and retains focus there:
+
+@lisp
+(with-eval-after-load 'elfeed-show
+  (setopt elfeed-show-entry-switch
+          (lambda (buffer)
+            (display-buffer
+             buffer
+             '((display-buffer-reuse-window
+                display-buffer-below-selected))))))
+@end lisp
+
+  Open an article explicitly to establish that layout.  Subsequent
+following reuses the existing article window without calling the
+configured window switch function.  It does not change your global
+@code{elfeed-search-remain-on-entry} or window settings.
+
+@node WebKit Windows
+@chapter WebKit Windows
+@cindex WebKit
+@cindex widget dimensions
+
+  The optional @code{elfeed-webkit} package renders articles with an
+embedded browser.  Its renderer can initially size a widget using the
+selected Search window.  When the article occupies a different window,
+Elfeed X can fit the widget to the article's actual window after
+rendering, without moving focus.
+
+@deffn Command elfeed-x-webkit-mode &optional arg
+Enable or disable article widget fitting globally.  Enabling installs
+an @code{elfeed-show-update-hook} function and fits existing visible
+article widgets.  After rendering, fit the current article's widget to
+a window displaying its buffer, preferring the selected frame and then
+other visible frames.  Hidden articles and buffers without widgets are
+ignored.  If a buffer appears in several windows, one window determines
+its widget dimensions.
+
+This mode does not enable a renderer or install key bindings.  Without
+xwidget support it has no effect.  Disabling removes the hook; it does
+not switch renderers or undo the last widget size.  Fitting occurs after
+rendering, not automatically after every window size change.
+@end deffn
+
+  Install @code{elfeed-webkit} separately and use an Emacs built with
+xwidget support.  The following user configuration enables WebKit when
+available and binds @kbd{%} to @code{elfeed-webkit-toggle} in article
+buffers:
+
+@lisp
+(with-eval-after-load 'elfeed-show
+  (when (and (featurep 'xwidget-internal)
+             (require 'elfeed-webkit nil t))
+    (elfeed-webkit-enable)
+    (keymap-set elfeed-show-mode-map "%" #'elfeed-webkit-toggle)
+    (require 'elfeed-x-webkit)
+    (elfeed-x-webkit-mode 1)))
+@end lisp
+
+  The upstream toggle changes Elfeed's global renderer selection; it is
+not limited to the current article.  Elfeed's ordinary renderer remains
+available through that toggle.  Without xwidget support or the optional
+package, this example leaves ordinary rendering in place.
+
+@node Reading the Schedule
+@chapter Reading the Schedule
+@cindex next update time
+@cindex timer readers
+
+  Programs can inspect Elfeed X's schedule without changing it.  These
+functions require only @code{elfeed-x}; they do not load Elfeed or start
+a timer.  They report this package's timer, not arbitrary timers from
+other configurations.
+
+@defun elfeed-x-update-timer
+Return the active timer object owned by Elfeed X, or @code{nil} when no
+such timer is registered.  A cancelled timer is reported as @code{nil}.
+Treat the returned object as read-only; use @code{elfeed-x-update-mode}
+to control its lifecycle.
+@end defun
+
+@defun elfeed-x-next-update-time
+Return the timer's next scheduled time as an Emacs time value, or
+@code{nil} without an active timer.  This is the next planned attempt,
+not a guarantee of retrieval: the attempt may be delayed by a busy
+Emacs or skipped because Elfeed is already fetching feeds.
+@end defun
+
+  For example, when using Tessera's Elfeed header, supply a function
+that accepts its rendering context and returns the scheduled time:
+
+@lisp
+(require 'elfeed-x)
+
+(defun my-elfeed-next-update-time (_context)
+  "Return the next planned Elfeed X update time."
+  (elfeed-x-next-update-time))
+
+(with-eval-after-load 'tessera-elfeed-search
+  (setopt tessera-elfeed-search-header-line-next-update-function
+          #'my-elfeed-next-update-time))
+@end lisp
+
+  This integration is optional.  For the header provider contract,
+see @ref{Header Providers,,, tessera, Tessera}.
+
+@node Copying
+@appendix GNU Free Documentation License
+@include fdl.texi
+
+@node Concept Index
+@unnumbered Concept Index
+@printindex cp
+
+@node Symbol Index
+@unnumbered Symbol Index
+@printindex fn
+
+@bye

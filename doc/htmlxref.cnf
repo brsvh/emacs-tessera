@@ -1,4 +1,5 @@
 # Relative links between independently built, single-file manuals.
+elfeed-x        mono elfeed-x.html
 tessera          mono tessera.html
 tessera-x        mono tessera-x.html
 gnus            node https://www.gnu.org/software/emacs/manual/html_node/gnus/

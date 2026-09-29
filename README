@@ -21,6 +21,9 @@ keep using their native commands to read, search, mark, and navigate entries.
 The ~tessera~ package contains all display adapters.  The ~tessera-x~ package
 extends it with experimental features; ~x~ means experimental.
 
+The independent ~elfeed-x~ package adds scheduled updates, continuous reading,
+and optional WebKit window fitting to Elfeed.  Its ~x~ means extra.
+
 ** Getting Started
 
 *** Install
@@ -30,6 +33,11 @@ Install ~tessera~ for display features; it requires Alert.  Install ~tessera-x~
 for experiments; it depends on ~tessera~ and inherits its Alert dependency.
 Experimental commands do not require enabling display modes.  They
 require Gnus, mu4e 1.14.3 or later, or Elfeed 4.0.1 or later at runtime.
+
+Install ~elfeed-x~ for extra Elfeed features; it requires Elfeed 4.0.1 or later
+and does not depend on Tessera.  From a checkout, add ~lisp/elfeed-x/~ to
+~load-path~.  WebKit rendering additionally needs ~elfeed-webkit~ and an Emacs
+built with xwidget support.
 
 For a source checkout, add the core directory to ~load-path~:
 
@@ -57,6 +65,7 @@ you want from that package set, for example:
 #+begin_src nix
 (pkgs.emacsPackagesFor pkgs.emacs).emacsWithPackages (
   epkgs: with epkgs; [
+    elfeed-x
     tessera
     tessera-x
   ]
@@ -425,6 +434,53 @@ To supply a fixed maildir scope, replace the path in this example:
         #'my-tessera-today-query)
 #+end_src
 
+** elfeed-x
+
+Elfeed X provides independent global modes.  Enable only the features you want:
+
+#+begin_src emacs-lisp
+(require 'elfeed-x)
+(elfeed-x-update-mode 1)
+(require 'elfeed-x-search)
+(elfeed-x-search-follow-mode 1)
+#+end_src
+
+The update schedule starts on entry into Elfeed, or when enabled with an
+existing Elfeed buffer.  It waits 900 seconds before the first attempt and
+between attempts, skipping attempts while retrieval is pending or active.
+Customize ~elfeed-x-update-interval~ to change the interval.  Disabling the mode
+cancels its timer without interrupting retrieval.
+
+Continuous reading follows native ~n~ and ~p~ navigation when an article window
+already exists on the selected frame.  It keeps focus in Search and marks the
+displayed entry as read.  Configure your layout with Elfeed's native window
+settings.  Use ~elfeed-x-search-follow-commands~ for custom navigation commands.
+
+~elfeed-x-update-timer~ and ~elfeed-x-next-update-time~ read the active timer and
+its next planned attempt.  Both return nil when no timer is active.  The
+[[file:doc/elfeed-x.texi][Elfeed X manual]] includes a Tessera header integration example.
+
+With optional ~elfeed-webkit~ installed, this user configuration enables its
+renderer and binds ~%~ to the upstream renderer toggle:
+
+#+begin_src emacs-lisp
+(with-eval-after-load 'elfeed-show
+  (when (and (featurep 'xwidget-internal)
+             (require 'elfeed-webkit nil t))
+    (elfeed-webkit-enable)
+    (keymap-set elfeed-show-mode-map "%" #'elfeed-webkit-toggle)
+    (require 'elfeed-x-webkit)
+    (elfeed-x-webkit-mode 1)))
+#+end_src
+
+The fitting mode resizes widgets to their actual article windows after
+rendering.  The upstream toggle changes the global renderer selection.
+
+The ~elfeed-x~ feature owns scheduling and its readers; ~elfeed-x-search~ owns
+Search following; ~elfeed-x-webkit~ owns widget fitting.  Loading these features
+does not enable their modes or require native clients.  See the
+[[file:doc/elfeed-x.texi][Elfeed X manual]] for lifecycle, window selection, and interface contracts.
+
 ** Build
 
 Run these commands from the checkout root.  Use Emacs, GNU Make, GNU tar, and
@@ -473,12 +529,12 @@ stylesheet.  ~make -C doc clean~ removes these generated manuals.
 
 ** Test
 
-The ERT runner covers both packages.  Make Elfeed and mu4e libraries
-available even when you normally use only one backend.
+The ERT runner covers all three packages.  Tessera tests require Elfeed and
+mu4e libraries; Elfeed X tests need only Elfeed and its dependencies.
 
 *** Source Tests
 
-From the checkout root, run runtime tests for both packages in separate
+From the checkout root, run runtime tests for all packages in separate
 Emacs processes:
 
 #+begin_src sh
@@ -486,7 +542,8 @@ make test
 #+end_src
 
 Select one package with ~make test PACKAGE=tessera~ or
-~make test PACKAGE=tessera-x~.  Core tests do not load Tessera X.
+~make test PACKAGE=tessera-x~.  Use ~make test PACKAGE=elfeed-x~ for the extra
+Elfeed features.  Core tests do not load Tessera X or Elfeed X.
 
 The target uses ~EMACS~ (default: ~emacs~) with ~-Q --batch~.  If external
 libraries are not already available, provide their directories explicitly:

@@ -4,7 +4,7 @@
 
 ;; Batch entry point.  Elfeed and mu4e must be on `load-path'.
 ;; Set TESSERA_TEST_PACKAGE_DIRS to test installed bytecode.
-;; TESSERA_TEST_PACKAGE selects tessera (default) or tessera-x.
+;; TESSERA_TEST_PACKAGE selects tessera, tessera-x, or elfeed-x.
 
 ;;; Code:
 
@@ -19,18 +19,21 @@
   (or (getenv "TESSERA_TEST_PACKAGE") "tessera")
   "Package whose runtime regressions will run in this process.")
 
-(unless (member tessera-tests--package '("tessera" "tessera-x"))
+(unless (member tessera-tests--package
+                '("tessera" "tessera-x" "elfeed-x"))
   (error "Unknown test package: %s" tessera-tests--package))
 
 (defvar tessera-tests--libraries
-  (append
-   '("tessera"
-     "tessera-gnus" "tessera-gnus-article" "tessera-gnus-summary"
-     "tessera-mu4e" "tessera-mu4e-thread" "tessera-mu4e-headers"
-     "tessera-elfeed" "tessera-elfeed-search")
-   (when (equal tessera-tests--package "tessera-x")
-     '("tessera-x" "tessera-x-gnus"
-       "tessera-x-mu4e" "tessera-x-elfeed")))
+  (if (equal tessera-tests--package "elfeed-x")
+      '("elfeed-x" "elfeed-x-search" "elfeed-x-webkit")
+    (append
+     '("tessera"
+       "tessera-gnus" "tessera-gnus-article" "tessera-gnus-summary"
+       "tessera-mu4e" "tessera-mu4e-thread" "tessera-mu4e-headers"
+       "tessera-elfeed" "tessera-elfeed-search")
+     (when (equal tessera-tests--package "tessera-x")
+       '("tessera-x" "tessera-x-gnus"
+         "tessera-x-mu4e" "tessera-x-elfeed"))))
   "Production libraries expected for the selected test package.")
 
 (defvar tessera-tests--expected-libraries nil
@@ -54,9 +57,10 @@
           (mapcar
            (lambda (package)
              (expand-file-name (concat "../lisp/" package) directory))
-           (if (equal tessera-tests--package "tessera-x")
-               '("tessera" "tessera-x")
-             '("tessera")))))
+           (pcase tessera-tests--package
+             ("elfeed-x" '("elfeed-x"))
+             ("tessera-x" '("tessera" "tessera-x"))
+             (_ '("tessera"))))))
        (tessera-tests--expected-libraries nil)
        (load-prefer-newer (not package-path))
        (load-no-native t)
@@ -103,12 +107,15 @@
     (message "Testing %s %s from %s" tessera-tests--package
              (if package-path "bytecode" "source")
              (string-join library-directories ", "))
-    (dolist (file (directory-files directory t
-                                   "\\`tessera-.*-tests\\.el\\'"))
+    (dolist (file (directory-files
+                   directory t
+                   "\\`\\(?:tessera-.*\\|elfeed-x\\)-tests\\.el\\'"))
       (let ((name (file-name-base file)))
-        (when (if (equal tessera-tests--package "tessera-x")
-                  (equal name "tessera-x-tests")
-                (not (equal name "tessera-x-tests")))
+        (when (pcase tessera-tests--package
+                ("elfeed-x" (equal name "elfeed-x-tests"))
+                ("tessera-x" (equal name "tessera-x-tests"))
+                (_ (and (string-prefix-p "tessera-" name)
+                        (not (equal name "tessera-x-tests")))))
           (require (intern name) file))))
     (ert-run-tests-batch-and-exit)))
 ;;; run-tests.el ends here

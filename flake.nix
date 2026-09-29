@@ -97,6 +97,21 @@
                   };
 
                 scope = finalAttrs: _: {
+                  elfeed-x = finalAttrs.callPackage emacs-tessera {
+                    inherit
+                      projectRoot
+                      ;
+
+                    description = "Extra features for Elfeed";
+
+                    packageRequires = with finalAttrs; [
+                      elfeed
+                    ];
+
+                    pname = "elfeed-x";
+                    version = "0.1.0";
+                  };
+
                   tessera = finalAttrs.callPackage emacs-tessera {
                     inherit
                       projectRoot
