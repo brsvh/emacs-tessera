@@ -11,6 +11,8 @@
 (require 'tessera-gnus-article)
 (require 'tessera-gnus-test-support)
 
+;;;; MIME observations
+
 (ert-deftest
     tessera-gnus-article-opaque-content-retains-outer-signature ()
   (with-temp-buffer
@@ -152,6 +154,8 @@
                   (when handles (mm-destroy-parts handles)))))))
       (tessera-gnus-article--track-content nil))))
 
+;;;; Observation lifecycle
+
 (ert-deftest
     tessera-gnus-article-tracks-disposition-only-when-enabled ()
   (let ((function #'tessera-gnus-article--remember-disposition))
@@ -162,6 +166,8 @@
           (should (advice-member-p function 'mm-dissect-multipart)))
       (tessera-gnus-article--track-content nil))
     (should-not (advice-member-p function 'mm-dissect-multipart))))
+
+;;;; Summary synchronization
 
 (ert-deftest tessera-gnus-article-update-preserves-summary-point ()
   (with-temp-buffer

@@ -38,6 +38,8 @@
 (require 'editorconfig-tools nil t)
 (require 'macroexp)
 
+;;;; Error reporting
+
 (define-error 'elfmt-error "Emacs Lisp formatting error")
 
 (defun elfmt--signal (format-string &rest args)
@@ -50,29 +52,7 @@
   (princ (format "elfmt: %s\n" message)
          'external-debugging-output))
 
-(defun elfmt--script-invocation-p ()
-  "Return non-nil when this file is the active `--script' target."
-  (let ((script-args
-         (or (member "-scriptload" command-line-args)
-             (member "--script" command-line-args))))
-    (and (cadr script-args)
-         (stringp load-file-name)
-         (file-equal-p load-file-name (cadr script-args)))))
-
-(defun elfmt--command-line-files ()
-  "Return file names passed after the script on the command line."
-  (if (equal (car command-line-args-left) "--")
-      (cdr command-line-args-left)
-    command-line-args-left))
-
-(defun elfmt--validate-files (files)
-  "Validate FILES before formatting and return them."
-  (unless files
-    (elfmt--signal "expected at least one file argument"))
-  (dolist (file files)
-    (unless (file-regular-p file)
-      (elfmt--signal "%s is not a regular file" file)))
-  files)
+;;;; EditorConfig and buffer setup
 
 (defun elfmt--configure-editorconfig ()
   "Configure EditorConfig integration for noninteractive formatting."
@@ -117,6 +97,8 @@
   (unless (derived-mode-p 'emacs-lisp-mode 'lisp-data-mode)
     (elfmt--signal "%s is not a supported Lisp file (major mode: %S)"
                    file major-mode)))
+
+;;;; Source indentation
 
 (defun elfmt--definition-indent-spec (form)
   "Return a safe indentation declaration from definition FORM."
@@ -214,6 +196,8 @@
           (elfmt--normalize-indentation))
       (elfmt--restore-indent-specs saved-properties))))
 
+;;;; Width validation and file formatting
+
 (defun elfmt--check-line-width ()
   "Reject lines beyond EditorConfig's limit, except the first line."
   (let* ((setting (gethash 'max_line_length
@@ -257,6 +241,32 @@
       (error
        (elfmt--signal "failed to format %s: %s"
                       file-name (error-message-string err))))))
+
+;;;; Command-line entry point
+
+(defun elfmt--script-invocation-p ()
+  "Return non-nil when this file is the active `--script' target."
+  (let ((script-args
+         (or (member "-scriptload" command-line-args)
+             (member "--script" command-line-args))))
+    (and (cadr script-args)
+         (stringp load-file-name)
+         (file-equal-p load-file-name (cadr script-args)))))
+
+(defun elfmt--command-line-files ()
+  "Return file names passed after the script on the command line."
+  (if (equal (car command-line-args-left) "--")
+      (cdr command-line-args-left)
+    command-line-args-left))
+
+(defun elfmt--validate-files (files)
+  "Validate FILES before formatting and return them."
+  (unless files
+    (elfmt--signal "expected at least one file argument"))
+  (dolist (file files)
+    (unless (file-regular-p file)
+      (elfmt--signal "%s is not a regular file" file)))
+  files)
 
 (defun elfmt--run (files)
   "Format FILES in a process-local, noninteractive environment."

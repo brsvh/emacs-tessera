@@ -163,7 +163,36 @@ successful verification.  Never infer trust from a result string."
             (setq result (plist-put result key 'unknown)))))
       result)))
 
-;;;; Prepared article lifecycle
+;;;; Prepared article updates
+
+(defun tessera-gnus-article--queue-update ()
+  "Coalesce native part-display events into one MIME observation."
+  (when (derived-mode-p 'gnus-article-mode)
+    (add-hook 'post-command-hook
+              #'tessera-gnus-article--updated t t)))
+
+(defun tessera-gnus-article--updated (&rest _arguments)
+  "Observe the displayed article and refresh its summary entry."
+  (remove-hook 'post-command-hook
+               #'tessera-gnus-article--updated t)
+  ;; Gnus also runs its article preparation hook in the summary.
+  (if (derived-mode-p 'gnus-summary-mode)
+      (when (get-buffer gnus-article-buffer)
+        (with-current-buffer gnus-article-buffer
+          (tessera-gnus-article--updated)))
+    (when (and (derived-mode-p 'gnus-article-mode)
+               gnus-summary-buffer
+               (buffer-live-p (get-buffer gnus-summary-buffer)))
+      (let ((handles gnus-article-mime-handles))
+        (with-current-buffer gnus-summary-buffer
+          (when (and tessera-gnus-summary--active
+                     gnus-current-headers
+                     (tessera-gnus-summary--observe-content
+                      gnus-current-headers handles))
+            (tessera-gnus-summary--refresh-content
+             (mail-header-number gnus-current-headers))))))))
+
+;;;; Observation lifecycle
 
 (defun tessera-gnus-article--track-content (enable)
   "Observe native MIME lifecycle events when ENABLE is non-nil."
@@ -193,33 +222,6 @@ successful verification.  Never infer trust from a result string."
                   #'tessera-gnus-article--updated)
     (advice-remove 'gnus-mime-security-verify-or-decrypt
                    #'tessera-gnus-article--updated)))
-
-(defun tessera-gnus-article--queue-update ()
-  "Coalesce native part-display events into one MIME observation."
-  (when (derived-mode-p 'gnus-article-mode)
-    (add-hook 'post-command-hook
-              #'tessera-gnus-article--updated t t)))
-
-(defun tessera-gnus-article--updated (&rest _arguments)
-  "Observe the displayed article and refresh its summary entry."
-  (remove-hook 'post-command-hook
-               #'tessera-gnus-article--updated t)
-  ;; Gnus also runs its article preparation hook in the summary.
-  (if (derived-mode-p 'gnus-summary-mode)
-      (when (get-buffer gnus-article-buffer)
-        (with-current-buffer gnus-article-buffer
-          (tessera-gnus-article--updated)))
-    (when (and (derived-mode-p 'gnus-article-mode)
-               gnus-summary-buffer
-               (buffer-live-p (get-buffer gnus-summary-buffer)))
-      (let ((handles gnus-article-mime-handles))
-        (with-current-buffer gnus-summary-buffer
-          (when (and tessera-gnus-summary--active
-                     gnus-current-headers
-                     (tessera-gnus-summary--observe-content
-                      gnus-current-headers handles))
-            (tessera-gnus-summary--refresh-content
-             (mail-header-number gnus-current-headers))))))))
 
 (provide 'tessera-gnus-article)
 ;;; tessera-gnus-article.el ends here

@@ -31,13 +31,6 @@
 
 (require 'tessera)
 
-(defgroup tessera-gnus nil
-  "Tessera interfaces for Gnus."
-  :group 'tessera
-  :prefix "tessera-gnus-")
-
-;;;; Adapter lifecycle
-
 (declare-function tessera-gnus-summary--header-line-track
                   "tessera-gnus-summary")
 
@@ -58,6 +51,18 @@
 (declare-function tessera-gnus-article--updated
                   "tessera-gnus-article")
 
+(declare-function tessera-gnus-summary--glyphs-changed
+                  "tessera-gnus-summary")
+(declare-function tessera-gnus-summary--months-changed
+                  "tessera-gnus-summary")
+
+(defgroup tessera-gnus nil
+  "Tessera interfaces for Gnus."
+  :group 'tessera
+  :prefix "tessera-gnus-")
+
+;;;; Adapter lifecycle
+
 (defvar tessera-gnus--installed nil
   "Whether the global Gnus integration is fully installed.")
 
@@ -71,11 +76,6 @@
   (tessera-gnus-summary--header-line-track t)
   (tessera-gnus-summary--register)
   (tessera-gnus-summary--enable))
-
-(declare-function tessera-gnus-summary--glyphs-changed
-                  "tessera-gnus-summary")
-(declare-function tessera-gnus-summary--months-changed
-                  "tessera-gnus-summary")
 
 (defun tessera-gnus--glyphs-changed (option)
   "Forward changed glyph OPTION to an already loaded adapter."

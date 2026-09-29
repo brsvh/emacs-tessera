@@ -10,6 +10,8 @@
 (require 'tessera-gnus-summary)
 (require 'tessera-gnus-test-support)
 
+;;;; Native face selection
+
 (ert-deftest tessera-gnus-faces-use-native-rules-and-thresholds ()
   (let ((header (make-full-mail-header 1))
         (marks (string gnus-unread-mark ?\s ?\s ?\s))
@@ -57,32 +59,7 @@
                        (tessera-gnus-summary--native-face
                         header marks index))))))))))
 
-(ert-deftest tessera-gnus-batch-faces-follow-native-list-changes ()
-  (tessera-gnus-summary--register)
-  (let ((gnus-show-threads nil)
-        (gnus-summary-default-score 0)
-        (gnus-summary-default-high-score 10)
-        (gnus-summary-default-low-score -10)
-        (gnus-summary-use-undownloaded-faces t)
-        (gnus-newsgroup-scored (list (cons 1 20)))
-        (gnus-newsgroup-undownloaded '(1))
-        (gnus-newsgroup-cached nil))
-    (with-temp-buffer
-      (tessera-tests--gnus-rows '(0 0))
-      (tessera-gnus-summary--sync-buffer t)
-      (should (eq (plist-get
-                   (cdr (get-text-property
-                         (point-min) 'tessera-gnus-summary-entry))
-                   :native-face)
-                  'gnus-summary-high-undownloaded))
-      (setcdr (car gnus-newsgroup-scored) -20)
-      (setq gnus-newsgroup-cached '(1))
-      (tessera-gnus-summary--sync-buffer)
-      (should (eq (plist-get
-                   (cdr (get-text-property
-                         (point-min) 'tessera-gnus-summary-entry))
-                   :native-face)
-                  'gnus-summary-low-unread)))))
+;;;; Article and thread state
 
 (ert-deftest tessera-gnus-faces-keep-state-on-thread-children ()
   (let* ((header (make-full-mail-header
@@ -212,6 +189,35 @@
           (should (eq face
                       (if read 'tessera-gnus-summary-date-face
                         'tessera-gnus-summary-unread-date-face))))))))
+
+;;;; Face synchronization
+
+(ert-deftest tessera-gnus-batch-faces-follow-native-list-changes ()
+  (tessera-gnus-summary--register)
+  (let ((gnus-show-threads nil)
+        (gnus-summary-default-score 0)
+        (gnus-summary-default-high-score 10)
+        (gnus-summary-default-low-score -10)
+        (gnus-summary-use-undownloaded-faces t)
+        (gnus-newsgroup-scored (list (cons 1 20)))
+        (gnus-newsgroup-undownloaded '(1))
+        (gnus-newsgroup-cached nil))
+    (with-temp-buffer
+      (tessera-tests--gnus-rows '(0 0))
+      (tessera-gnus-summary--sync-buffer t)
+      (should (eq (plist-get
+                   (cdr (get-text-property
+                         (point-min) 'tessera-gnus-summary-entry))
+                   :native-face)
+                  'gnus-summary-high-undownloaded))
+      (setcdr (car gnus-newsgroup-scored) -20)
+      (setq gnus-newsgroup-cached '(1))
+      (tessera-gnus-summary--sync-buffer)
+      (should (eq (plist-get
+                   (cdr (get-text-property
+                         (point-min) 'tessera-gnus-summary-entry))
+                   :native-face)
+                  'gnus-summary-low-unread)))))
 
 (ert-deftest tessera-gnus-faces-score-changes-refresh-without-marks ()
   (with-temp-buffer

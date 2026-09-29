@@ -16,6 +16,8 @@
 (require 'mu4e-update)
 (require 'tessera-mu4e-headers)
 
+;;;; Fixtures
+
 (defvar tessera-header-tests--action nil)
 (defvar tessera-header-tests--info nil)
 (defvar tessera-header-tests--extra nil)
@@ -47,6 +49,8 @@
    :state state
    :now (seconds-to-time 100000)))
 
+;;;; Fields and statistics
+
 (ert-deftest tessera-header-duration-boundaries ()
   (cl-loop for seconds in '(0 59 60 119 300 3599 3600 7200 259200)
            for expected in '("<1 minute" "<1 minute" "1 minute"
@@ -55,55 +59,104 @@
            do (should (equal (tessera-header-line-duration seconds)
                              expected))))
 
-(ert-deftest tessera-header-restore-locality-and-native-replacement ()
-  (dolist (local '(nil t))
-    (tessera-header-tests--with-buffer
-      (let ((original header-line-format)
-            (tessera-header-line-enabled t))
-        (when local (setq-local header-line-format '("Native")))
-        (tessera-header-tests--enable #'ignore)
-        (tessera-header-tests--enable #'ignore)
-        (should (eq header-line-format tessera--header-line-format))
-        (tessera--header-line-disable)
-        (should (eq (local-variable-p 'header-line-format) local))
-        (should (equal header-line-format
-                       (if local '("Native") original)))
-        (tessera-header-tests--enable #'ignore)
-        (setq-local header-line-format '("New native search"))
-        (tessera--header-line-prepare)
-        (tessera--header-line-disable)
-        (should (equal header-line-format '("New native search")))))))
+(ert-deftest tessera-header-update-next-unknown-and-overdue ()
+  (let ((context (tessera-header-tests--context))
+        (tessera-header-line-update-time 'auto))
+    (should (string-prefix-p
+             "Update: —" (tessera-header-line-update
+                          context nil nil nil #'ignore "Scope")))
+    (should (string-prefix-p
+             "Next Update: <1 minute"
+             (tessera-header-line-update
+              context nil (seconds-to-time 100030) nil #'ignore "")))
+    (should (string-prefix-p
+             "Next Update: due"
+             (tessera-header-line-update
+              context nil (seconds-to-time 99999) nil #'ignore "")))
+    (let ((tessera-header-line-update-time 'last))
+      (should (string-prefix-p
+               "Update: 1 minute ago"
+               (tessera-header-line-update
+                context (seconds-to-time 99940)
+                (seconds-to-time 100030) nil #'ignore ""))))))
 
-(ert-deftest tessera-header-toggle-and-kill-release-resources ()
-  (let ((tessera--header-line-buffers nil)
-        (tessera--header-line-timer nil))
+(ert-deftest tessera-header-providers-retain-properties-and-help ()
+  (let* ((context (tessera-header-tests--context))
+         (keymap (make-sparse-keymap))
+         (source (concat
+                  (propertize "A" 'face 'bold 'help-echo "Detail"
+                              'keymap keymap)
+                  "B"))
+         (text (tessera--header-line-region 'info source context)))
+    (should (eq (get-text-property 0 'keymap text) keymap))
+    (should (equal (get-text-property 0 'help-echo text) "Detail"))
+    (should (equal (get-text-property 1 'help-echo text) "AB"))
+    (should (get-text-property 1 'mouse-face text))
+    (should-not (get-text-property 1 'help-echo source))
+    (should-not (tessera--header-line-region 'info nil context))
+    (should-error
+     (tessera--header-line-region 'info "a\nb" context))))
+
+(ert-deftest tessera-header-fields-use-inert-spaces ()
+  (let ((tessera-header-tests--action
+         (lambda (_) (tessera-header-line-button "Update" #'ignore)))
+        (tessera-header-tests--info
+         (lambda (_) "Query: 100%  complete"))
+        (tessera-header-tests--extra (lambda (_) "Work"))
+        (tessera-header-tests--statistics (lambda (_) "10 / 20")))
     (tessera-header-tests--with-buffer
-      (setq-local header-line-format "Native")
-      (setq-local tessera-header-line-enabled t)
       (tessera-header-tests--enable #'ignore)
-      (should (timerp tessera--header-line-timer))
-      (setq-local tessera-header-line-enabled nil)
-      (tessera--header-line-prepare)
-      (should (equal header-line-format "Native"))
-      (setq-local tessera-header-line-enabled t)
-      (tessera--header-line-prepare)
-      (should (eq header-line-format tessera--header-line-format)))
-    (should-not tessera--header-line-buffers)
-    (should-not tessera--header-line-timer)))
+      (let* ((text (tessera--header-line-render (selected-window)))
+             (left-gap (string-match " Query" text))
+             (right-gap (string-match " 10 / 20" text)))
+        (should left-gap)
+        (should right-gap)
+        (should-not (string-match-p "│" text))
+        (should (string-match-p "Update Query: 100%  complete" text))
+        (should (string-match-p "Work 10 / 20" text))
+        (dolist (gap (list left-gap right-gap))
+          (should-not (get-text-property gap 'keymap text))
+          (should-not (get-text-property gap 'mouse-face text)))))))
 
-(ert-deftest tessera-header-redisplay-reuses-statistics ()
-  (let ((calls 0))
-    (tessera-header-tests--with-buffer
-      (tessera-header-tests--enable
-       (lambda () (cl-incf calls) (list :shown (buffer-size))))
-      (dotimes (_ 4)
-        (tessera--header-line-prepare)
-        (tessera--header-line-display))
-      (should (= calls 1))
-      (insert "one row")
-      (tessera--header-line-prepare)
-      (should (= calls 2))
-      (should (= (plist-get tessera--header-line-state :shown) 7)))))
+(ert-deftest tessera-header-statistics-have-separate-hover-targets ()
+  (let* ((context (tessera-header-tests--context
+                   '(:shown 500 :matched 1284 :unread 37 :feeds 14)))
+         (text (tessera--header-line-region
+                'statistics (tessera-header-line-statistics context)
+                context))
+         (previous nil))
+    (cl-loop
+     for value in '("37" "500" "1284" "14")
+     for label in '("Unread:" "Displayed:" "Query results:" "Feeds:")
+     do
+     (let* ((index (string-match value text))
+            (end (+ index (length value)))
+            (hover (get-text-property index 'mouse-face text)))
+       (should (string-prefix-p
+                label (get-text-property index 'help-echo text)))
+       (should (memq 'tessera-header-line-hover-face hover))
+       (should-not (eq hover previous))
+       (cl-loop for position from index below end
+                do (should (eq (get-text-property
+                                position 'mouse-face text) hover))
+                do (should (equal (get-text-property
+                                   position 'help-echo text)
+                                  (get-text-property
+                                   index 'help-echo text))))
+       (should-not (eq (get-text-property end 'mouse-face text)
+                       hover))
+       (setq previous hover)))
+    (let ((slash (string-match "/" text)))
+      (should (string-match-p "500/1284" text))
+      (should-not (string-match-p "  " text))
+      (should (equal (get-text-property slash 'help-echo text) ""))
+      (should (equal (get-text-property slash 'mouse-face text)
+                     '(:inherit nil))))
+    (should (eq (face-attribute 'tessera-header-line-hover-face
+                                :inherit nil)
+                'tessera-entry-hover-face))))
+
+;;;; Composition and width
 
 (ert-deftest tessera-header-reuses-widths-within-one-render ()
   (let ((tessera-header-tests--action (lambda (_) "Same"))
@@ -136,23 +189,6 @@
                (format-mode-line header-line-format 'header-line
                                  (selected-window)
                                  (current-buffer)))))))
-
-(ert-deftest tessera-header-providers-retain-properties-and-help ()
-  (let* ((context (tessera-header-tests--context))
-         (keymap (make-sparse-keymap))
-         (source (concat
-                  (propertize "A" 'face 'bold 'help-echo "Detail"
-                              'keymap keymap)
-                  "B"))
-         (text (tessera--header-line-region 'info source context)))
-    (should (eq (get-text-property 0 'keymap text) keymap))
-    (should (equal (get-text-property 0 'help-echo text) "Detail"))
-    (should (equal (get-text-property 1 'help-echo text) "AB"))
-    (should (get-text-property 1 'mouse-face text))
-    (should-not (get-text-property 1 'help-echo source))
-    (should-not (tessera--header-line-region 'info nil context))
-    (should-error
-     (tessera--header-line-region 'info "a\nb" context))))
 
 (ert-deftest tessera-header-fit-measures-styled-suffix ()
   (let ((text (propertize "abcdef" 'face '(:height 3.0)
@@ -213,26 +249,7 @@
       (should (equal (tessera--header-line-fit text 7) "AB…"))
       (should (equal (tessera--header-line-fit text 13) "ABCD…")))))
 
-(ert-deftest tessera-header-fields-use-inert-spaces ()
-  (let ((tessera-header-tests--action
-         (lambda (_) (tessera-header-line-button "Update" #'ignore)))
-        (tessera-header-tests--info
-         (lambda (_) "Query: 100%  complete"))
-        (tessera-header-tests--extra (lambda (_) "Work"))
-        (tessera-header-tests--statistics (lambda (_) "10 / 20")))
-    (tessera-header-tests--with-buffer
-      (tessera-header-tests--enable #'ignore)
-      (let* ((text (tessera--header-line-render (selected-window)))
-             (left-gap (string-match " Query" text))
-             (right-gap (string-match " 10 / 20" text)))
-        (should left-gap)
-        (should right-gap)
-        (should-not (string-match-p "│" text))
-        (should (string-match-p "Update Query: 100%  complete" text))
-        (should (string-match-p "Work 10 / 20" text))
-        (dolist (gap (list left-gap right-gap))
-          (should-not (get-text-property gap 'keymap text))
-          (should-not (get-text-property gap 'mouse-face text)))))))
+;;;; Mouse interaction
 
 (ert-deftest tessera-header-click-runs-in-event-window ()
   (tessera-header-tests--with-buffer
@@ -254,64 +271,23 @@
         (should (equal called (list buffer target)))
         (should (eq (selected-window) original))))))
 
-(ert-deftest tessera-header-statistics-have-separate-hover-targets ()
-  (let* ((context (tessera-header-tests--context
-                   '(:shown 500 :matched 1284 :unread 37 :feeds 14)))
-         (text (tessera--header-line-region
-                'statistics (tessera-header-line-statistics context)
-                context))
-         (previous nil))
-    (cl-loop
-     for value in '("37" "500" "1284" "14")
-     for label in '("Unread:" "Displayed:" "Query results:" "Feeds:")
-     do
-     (let* ((index (string-match value text))
-            (end (+ index (length value)))
-            (hover (get-text-property index 'mouse-face text)))
-       (should (string-prefix-p
-                label (get-text-property index 'help-echo text)))
-       (should (memq 'tessera-header-line-hover-face hover))
-       (should-not (eq hover previous))
-       (cl-loop for position from index below end
-                do (should (eq (get-text-property
-                                position 'mouse-face text) hover))
-                do (should (equal (get-text-property
-                                   position 'help-echo text)
-                                  (get-text-property
-                                   index 'help-echo text))))
-       (should-not (eq (get-text-property end 'mouse-face text)
-                       hover))
-       (setq previous hover)))
-    (let ((slash (string-match "/" text)))
-      (should (string-match-p "500/1284" text))
-      (should-not (string-match-p "  " text))
-      (should (equal (get-text-property slash 'help-echo text) ""))
-      (should (equal (get-text-property slash 'mouse-face text)
-                     '(:inherit nil))))
-    (should (eq (face-attribute 'tessera-header-line-hover-face
-                                :inherit nil)
-                'tessera-entry-hover-face))))
+;;;; Cached state
 
-(ert-deftest tessera-header-update-next-unknown-and-overdue ()
-  (let ((context (tessera-header-tests--context))
-        (tessera-header-line-update-time 'auto))
-    (should (string-prefix-p
-             "Update: —" (tessera-header-line-update
-                          context nil nil nil #'ignore "Scope")))
-    (should (string-prefix-p
-             "Next Update: <1 minute"
-             (tessera-header-line-update
-              context nil (seconds-to-time 100030) nil #'ignore "")))
-    (should (string-prefix-p
-             "Next Update: due"
-             (tessera-header-line-update
-              context nil (seconds-to-time 99999) nil #'ignore "")))
-    (let ((tessera-header-line-update-time 'last))
-      (should (string-prefix-p
-               "Update: 1 minute ago"
-               (tessera-header-line-update
-                context (seconds-to-time 99940)
-                (seconds-to-time 100030) nil #'ignore ""))))))
+(ert-deftest tessera-header-redisplay-reuses-statistics ()
+  (let ((calls 0))
+    (tessera-header-tests--with-buffer
+      (tessera-header-tests--enable
+       (lambda () (cl-incf calls) (list :shown (buffer-size))))
+      (dotimes (_ 4)
+        (tessera--header-line-prepare)
+        (tessera--header-line-display))
+      (should (= calls 1))
+      (insert "one row")
+      (tessera--header-line-prepare)
+      (should (= calls 2))
+      (should (= (plist-get tessera--header-line-state :shown) 7)))))
+
+;;;; Elfeed state and update observation
 
 (ert-deftest tessera-header-elfeed-counts-inserted-set ()
   (let* ((first (elfeed-entry--create :id '("a" . "1")
@@ -332,138 +308,6 @@
         (should (= (plist-get state :unread) 1))
         (should (= (plist-get state :feeds) 2))
         (should (= (plist-get state :matched) 3))))))
-
-(ert-deftest tessera-header-gnus-limits-do-not-change-loaded-count ()
-  (let* ((one (make-full-mail-header 1))
-         (two (make-full-mail-header 2))
-         (three (make-full-mail-header 3))
-         (gnus-newsgroup-headers (list one two three))
-         (gnus-newsgroup-data
-          (list (gnus-data-make 1 gnus-unread-mark 1 one 0)
-                (gnus-data-make 2 gnus-read-mark 8 two 0)
-                (gnus-data-make 0 gnus-unread-mark 1 '(missing) 0)))
-         (gnus-newsgroup-name "test.group")
-         (state (tessera-gnus-summary--header-line-state)))
-    (should (= (plist-get state :shown) 2))
-    (should (= (plist-get state :unread) 1))
-    (should (= (plist-get state :loaded) 3))
-    (let* ((tessera-glyph-style 'ascii)
-           (text (tessera-header-line-statistics
-                  (tessera-header-tests--context state)))
-           (index (string-match "2/3" text)))
-      (should index)
-      (should (string-match-p
-               "Loaded article headers"
-               (get-text-property (+ index 2) 'help-echo text))))))
-
-(ert-deftest tessera-header-mu4e-count-excludes-footer ()
-  (let* ((message '(:docid 17 :flags (unread)))
-         (mu4e~headers-docid-pre "\376"))
-    (tessera-header-tests--with-buffer
-      (insert (propertize "\37617 Message\n" 'msg message
-                          'invisible t)
-              (propertize "Repeated properties\nEnd\n" 'msg message))
-      (let ((state (tessera-mu4e-headers--header-line-state)))
-        (should (= (plist-get state :shown) 1))
-        (should (= (plist-get state :unread) 1))))))
-
-(ert-deftest tessera-header-mu4e-query-belongs-to-buffer ()
-  (let ((mu4e--search-last-query "subject:other-buffer"))
-    (dolist (query '("maildir:/Inbox" "subject:100%"))
-      (tessera-header-tests--with-buffer
-        (setq-local list-buffers-directory query)
-        (let* ((state (tessera-mu4e-headers--header-line-state))
-               (text (tessera-mu4e-headers-header-line-info
-                      (tessera-header-tests--context state))))
-          (should (equal (plist-get state :query) query))
-          (should (equal text (concat "Query: " query)))
-          (should (equal (get-text-property 0 'help-echo text)
-                         (concat "Search query:\n" query))))))))
-
-(ert-deftest tessera-header-mu4e-events-keep-unaffected-counts ()
-  (let ((mu4e-update-pre-hook nil)
-        (mu4e-index-updated-hook nil)
-        (mu4e-context-changed-hook nil)
-        (mu4e-message-changed-hook nil)
-        (mu4e-headers-found-hook nil)
-        (tessera--header-line-buffers nil)
-        (tessera--header-line-timer nil)
-        (reads (make-hash-table :test #'eq))
-        first second notified)
-    (tessera-header-tests--with-buffer
-      (setq first (current-buffer))
-      (tessera-header-tests--with-buffer
-        (setq second (current-buffer))
-        (dolist (buffer (list first second))
-          (with-current-buffer buffer
-            (setq major-mode 'mu4e-headers-mode)
-            (setq-local tessera-mu4e-headers--active t)
-            (tessera--header-line-enable
-             'mu4e-headers
-             (lambda ()
-               (cl-incf (gethash (current-buffer) reads 0))
-               (tessera-mu4e-headers--header-line-state))
-             nil)))
-        (tessera-mu4e-headers--header-line-track t)
-        (cl-letf (((symbol-function 'buffer-list)
-                   (lambda (&rest _) (ert-fail "Global scan")))
-                  ((symbol-function 'force-mode-line-update)
-                   (lambda (&rest _)
-                     (cl-pushnew (current-buffer) notified))))
-          (run-hooks 'mu4e-update-pre-hook 'mu4e-index-updated-hook
-                     'mu4e-context-changed-hook)
-          (should (= (length notified) 2))
-          (dolist (buffer (list first second))
-            (with-current-buffer buffer
-              (tessera--header-line-prepare)
-              (should (= (gethash buffer reads) 1))))
-          (setq notified nil)
-          (with-current-buffer first
-            (insert (propertize
-                     (concat mu4e~headers-docid-pre "17 Message\n")
-                     'msg '(:docid 17 :flags (unread))))
-            (run-hooks 'mu4e-message-changed-hook
-                       'mu4e-headers-found-hook))
-          (should (equal notified (list first)))
-          (dolist (buffer (list first second))
-            (with-current-buffer buffer
-              (tessera--header-line-prepare)
-              (should (= (gethash buffer reads)
-                         (if (eq buffer first) 2 1)))
-              (should (= (plist-get tessera--header-line-state :shown)
-                         (if (eq buffer first) 1 0))))))))))
-
-(ert-deftest tessera-header-mu4e-uses-native-index-timestamp ()
-  (let ((mu4e-index-update-status
-         (list :tstamp (seconds-to-time 99940)))
-        (mu4e--server-indexing nil)
-        (mu4e--update-buffer nil)
-        (tessera-header-line-update-time 'last))
-    (should (string-prefix-p
-             "Update: 1 minute ago"
-             (tessera-mu4e-headers-header-line-action
-              (tessera-header-tests--context))))))
-
-(ert-deftest tessera-header-gnus-records-only-completed-rescans ()
-  (let ((tessera-gnus-summary--update-times
-         (make-hash-table :test #'equal))
-        (gnus-newsgroup-name "test.group"))
-    (tessera-gnus-summary--observe-rescan #'ignore nil nil)
-    (should-not (gethash "test.group"
-                         tessera-gnus-summary--update-times))
-    (tessera-gnus-summary--observe-rescan #'ignore nil t)
-    (let ((last (plist-get
-                 (gethash "test.group"
-                          tessera-gnus-summary--update-times) :last)))
-      (should last)
-      (should-error
-       (tessera-gnus-summary--observe-rescan
-        (lambda (&rest _) (error "Scan failed")) nil t))
-      (let ((state (gethash "test.group"
-                            tessera-gnus-summary--update-times)))
-        (should (plist-get state :failed))
-        (should-not (plist-get state :running))
-        (should (equal (plist-get state :last) last))))))
 
 (ert-deftest tessera-header-elfeed-observes-background-completion ()
   (let ((tessera-elfeed-search--requests nil)
@@ -583,6 +427,180 @@
       (should (= native-errors (if valid 0 1)))
       (should-not tessera-elfeed-search--requests)
       (should tessera-elfeed-search--last-update))))
+
+;;;; Gnus state and update observation
+
+(ert-deftest tessera-header-gnus-limits-do-not-change-loaded-count ()
+  (let* ((one (make-full-mail-header 1))
+         (two (make-full-mail-header 2))
+         (three (make-full-mail-header 3))
+         (gnus-newsgroup-headers (list one two three))
+         (gnus-newsgroup-data
+          (list (gnus-data-make 1 gnus-unread-mark 1 one 0)
+                (gnus-data-make 2 gnus-read-mark 8 two 0)
+                (gnus-data-make 0 gnus-unread-mark 1 '(missing) 0)))
+         (gnus-newsgroup-name "test.group")
+         (state (tessera-gnus-summary--header-line-state)))
+    (should (= (plist-get state :shown) 2))
+    (should (= (plist-get state :unread) 1))
+    (should (= (plist-get state :loaded) 3))
+    (let* ((tessera-glyph-style 'ascii)
+           (text (tessera-header-line-statistics
+                  (tessera-header-tests--context state)))
+           (index (string-match "2/3" text)))
+      (should index)
+      (should (string-match-p
+               "Loaded article headers"
+               (get-text-property (+ index 2) 'help-echo text))))))
+
+(ert-deftest tessera-header-gnus-records-only-completed-rescans ()
+  (let ((tessera-gnus-summary--update-times
+         (make-hash-table :test #'equal))
+        (gnus-newsgroup-name "test.group"))
+    (tessera-gnus-summary--observe-rescan #'ignore nil nil)
+    (should-not (gethash "test.group"
+                         tessera-gnus-summary--update-times))
+    (tessera-gnus-summary--observe-rescan #'ignore nil t)
+    (let ((last (plist-get
+                 (gethash "test.group"
+                          tessera-gnus-summary--update-times) :last)))
+      (should last)
+      (should-error
+       (tessera-gnus-summary--observe-rescan
+        (lambda (&rest _) (error "Scan failed")) nil t))
+      (let ((state (gethash "test.group"
+                            tessera-gnus-summary--update-times)))
+        (should (plist-get state :failed))
+        (should-not (plist-get state :running))
+        (should (equal (plist-get state :last) last))))))
+
+;;;; Mu4e state and update observation
+
+(ert-deftest tessera-header-mu4e-count-excludes-footer ()
+  (let* ((message '(:docid 17 :flags (unread)))
+         (mu4e~headers-docid-pre "\376"))
+    (tessera-header-tests--with-buffer
+      (insert (propertize "\37617 Message\n" 'msg message
+                          'invisible t)
+              (propertize "Repeated properties\nEnd\n" 'msg message))
+      (let ((state (tessera-mu4e-headers--header-line-state)))
+        (should (= (plist-get state :shown) 1))
+        (should (= (plist-get state :unread) 1))))))
+
+(ert-deftest tessera-header-mu4e-query-belongs-to-buffer ()
+  (let ((mu4e--search-last-query "subject:other-buffer"))
+    (dolist (query '("maildir:/Inbox" "subject:100%"))
+      (tessera-header-tests--with-buffer
+        (setq-local list-buffers-directory query)
+        (let* ((state (tessera-mu4e-headers--header-line-state))
+               (text (tessera-mu4e-headers-header-line-info
+                      (tessera-header-tests--context state))))
+          (should (equal (plist-get state :query) query))
+          (should (equal text (concat "Query: " query)))
+          (should (equal (get-text-property 0 'help-echo text)
+                         (concat "Search query:\n" query))))))))
+
+(ert-deftest tessera-header-mu4e-events-keep-unaffected-counts ()
+  (let ((mu4e-update-pre-hook nil)
+        (mu4e-index-updated-hook nil)
+        (mu4e-context-changed-hook nil)
+        (mu4e-message-changed-hook nil)
+        (mu4e-headers-found-hook nil)
+        (tessera--header-line-buffers nil)
+        (tessera--header-line-timer nil)
+        (reads (make-hash-table :test #'eq))
+        first second notified)
+    (tessera-header-tests--with-buffer
+      (setq first (current-buffer))
+      (tessera-header-tests--with-buffer
+        (setq second (current-buffer))
+        (dolist (buffer (list first second))
+          (with-current-buffer buffer
+            (setq major-mode 'mu4e-headers-mode)
+            (setq-local tessera-mu4e-headers--active t)
+            (tessera--header-line-enable
+             'mu4e-headers
+             (lambda ()
+               (cl-incf (gethash (current-buffer) reads 0))
+               (tessera-mu4e-headers--header-line-state))
+             nil)))
+        (tessera-mu4e-headers--header-line-track t)
+        (cl-letf (((symbol-function 'buffer-list)
+                   (lambda (&rest _) (ert-fail "Global scan")))
+                  ((symbol-function 'force-mode-line-update)
+                   (lambda (&rest _)
+                     (cl-pushnew (current-buffer) notified))))
+          (run-hooks 'mu4e-update-pre-hook 'mu4e-index-updated-hook
+                     'mu4e-context-changed-hook)
+          (should (= (length notified) 2))
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (tessera--header-line-prepare)
+              (should (= (gethash buffer reads) 1))))
+          (setq notified nil)
+          (with-current-buffer first
+            (insert (propertize
+                     (concat mu4e~headers-docid-pre "17 Message\n")
+                     'msg '(:docid 17 :flags (unread))))
+            (run-hooks 'mu4e-message-changed-hook
+                       'mu4e-headers-found-hook))
+          (should (equal notified (list first)))
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (tessera--header-line-prepare)
+              (should (= (gethash buffer reads)
+                         (if (eq buffer first) 2 1)))
+              (should (= (plist-get tessera--header-line-state :shown)
+                         (if (eq buffer first) 1 0))))))))))
+
+(ert-deftest tessera-header-mu4e-uses-native-index-timestamp ()
+  (let ((mu4e-index-update-status
+         (list :tstamp (seconds-to-time 99940)))
+        (mu4e--server-indexing nil)
+        (mu4e--update-buffer nil)
+        (tessera-header-line-update-time 'last))
+    (should (string-prefix-p
+             "Update: 1 minute ago"
+             (tessera-mu4e-headers-header-line-action
+              (tessera-header-tests--context))))))
+
+;;;; Buffer lifecycle
+
+(ert-deftest tessera-header-restore-locality-and-native-replacement ()
+  (dolist (local '(nil t))
+    (tessera-header-tests--with-buffer
+      (let ((original header-line-format)
+            (tessera-header-line-enabled t))
+        (when local (setq-local header-line-format '("Native")))
+        (tessera-header-tests--enable #'ignore)
+        (tessera-header-tests--enable #'ignore)
+        (should (eq header-line-format tessera--header-line-format))
+        (tessera--header-line-disable)
+        (should (eq (local-variable-p 'header-line-format) local))
+        (should (equal header-line-format
+                       (if local '("Native") original)))
+        (tessera-header-tests--enable #'ignore)
+        (setq-local header-line-format '("New native search"))
+        (tessera--header-line-prepare)
+        (tessera--header-line-disable)
+        (should (equal header-line-format '("New native search")))))))
+
+(ert-deftest tessera-header-toggle-and-kill-release-resources ()
+  (let ((tessera--header-line-buffers nil)
+        (tessera--header-line-timer nil))
+    (tessera-header-tests--with-buffer
+      (setq-local header-line-format "Native")
+      (setq-local tessera-header-line-enabled t)
+      (tessera-header-tests--enable #'ignore)
+      (should (timerp tessera--header-line-timer))
+      (setq-local tessera-header-line-enabled nil)
+      (tessera--header-line-prepare)
+      (should (equal header-line-format "Native"))
+      (setq-local tessera-header-line-enabled t)
+      (tessera--header-line-prepare)
+      (should (eq header-line-format tessera--header-line-format)))
+    (should-not tessera--header-line-buffers)
+    (should-not tessera--header-line-timer)))
 
 (provide 'tessera-header-line-tests)
 ;;; tessera-header-line-tests.el ends here

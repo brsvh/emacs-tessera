@@ -21,71 +21,7 @@
 
 (defvar gnus-registry-db)
 
-(ert-deftest tessera-x-loads-without-native-clients ()
-  (with-temp-buffer
-    (let ((status
-           (call-process
-            (expand-file-name invocation-name invocation-directory)
-            nil (current-buffer) nil "-Q" "--batch"
-            "-l" (locate-library "run-x-tests")
-            (file-name-directory
-             (symbol-file 'tessera-x-context-start 'defun))
-            (file-name-directory
-             (symbol-file 'tessera-entry-render 'defun)))))
-      (ert-info ((buffer-string))
-        (should (equal status 0))))))
-
-(ert-deftest tessera-x-gnus-labels-retain-native-metadata ()
-  (let ((header (make-full-mail-header
-                 1 "Subject" "Sender" "" "<id>" "" 0 0 nil
-                 '((x-gm-labels . "(shared \"Gmail\")")
-                   (Keywords . "shared, News,  ")
-                   (TO . "Recipient <to@example.invalid>"))))
-        (gnus-registry-db t))
-    (cl-letf (((symbol-function 'gnus-registry-get-id-key)
-               (lambda (_id _key) '(shared " Registry\nlabel "))))
-      (let ((metadata (tessera-x-item-metadata
-                       (tessera-x-gnus--item header "group"))))
-        (should (equal (cdr (assoc "Labels" metadata))
-                       "shared,Registry label,Gmail,News"))
-        (should (equal (cdr (assoc "To" metadata))
-                       "Recipient <to@example.invalid>")))
-      (dolist (value '("#1=(x . #1#)" "(x . y)" "((nested))"))
-        (setcdr (assq 'x-gm-labels (mail-header-extra header)) value)
-        (let ((metadata (tessera-x-item-metadata
-                         (tessera-x-gnus--item header "group"))))
-          (should (equal (cdr (assoc "Labels" metadata))
-                         "shared,Registry label,News")))))))
-
-(ert-deftest tessera-x-mu4e-labels-share-native-normalization ()
-  (let* ((message (list :labels (list "Work" "Later" "Work")
-                        :tags (list "Later" "News")))
-         (saved (copy-tree message))
-         (labels (tessera-mu4e-headers-labels message))
-         (metadata (tessera-x-item-metadata
-                    (tessera-x-mu4e--item message))))
-    (should (equal labels '("Work" "Later" "News")))
-    (should (equal (cdr (assoc "Labels" metadata)) "Work,Later,News"))
-    (setcar labels "Changed")
-    (should (equal message saved))))
-
-(ert-deftest tessera-x-options-belong-to-their-feature ()
-  (dolist (entry '((tessera-x-gnus
-                    body-policy subthread-scope)
-                   (tessera-x-mu4e
-                    subthread-scope today-query-function)
-                   (tessera-x-elfeed
-                    fetch-linked-content fetch-minimum-characters
-                    fetch-timeout fetch-concurrency fetch-max-bytes)))
-    (let ((prefix (symbol-name (car entry))))
-      (dolist (suffix (cdr entry))
-        (let ((option
-               (intern (concat prefix "-" (symbol-name suffix)))))
-          (should (get option 'standard-value))
-          (should
-           (equal prefix
-                  (file-name-base (symbol-file option 'defvar))))
-          (should (assq option (get (car entry) 'custom-group))))))))
+;;;; Context fixtures
 
 (defun tessera-x-tests--item (id &optional references)
   "Create a context record with ID and REFERENCES."
@@ -108,6 +44,42 @@
                     (buffer-local-value
                      'tessera-x-current-context buffer))
            (kill-buffer buffer))))))
+
+;;;; Loading and option ownership
+
+(ert-deftest tessera-x-loads-without-native-clients ()
+  (with-temp-buffer
+    (let ((status
+           (call-process
+            (expand-file-name invocation-name invocation-directory)
+            nil (current-buffer) nil "-Q" "--batch"
+            "-l" (locate-library "run-x-tests")
+            (file-name-directory
+             (symbol-file 'tessera-x-context-start 'defun))
+            (file-name-directory
+             (symbol-file 'tessera-entry-render 'defun)))))
+      (ert-info ((buffer-string))
+        (should (equal status 0))))))
+
+(ert-deftest tessera-x-options-belong-to-their-feature ()
+  (dolist (entry '((tessera-x-gnus
+                    body-policy subthread-scope)
+                   (tessera-x-mu4e
+                    subthread-scope today-query-function)
+                   (tessera-x-elfeed
+                    fetch-linked-content fetch-minimum-characters
+                    fetch-timeout fetch-concurrency fetch-max-bytes)))
+    (let ((prefix (symbol-name (car entry))))
+      (dolist (suffix (cdr entry))
+        (let ((option
+               (intern (concat prefix "-" (symbol-name suffix)))))
+          (should (get option 'standard-value))
+          (should
+           (equal prefix
+                  (file-name-base (symbol-file option 'defvar))))
+          (should (assq option (get (car entry) 'custom-group))))))))
+
+;;;; Native dates
 
 (ert-deftest tessera-x-native-dates-preserve-unknown-and-epoch ()
   (tessera-x-tests--with-snapshots
@@ -149,6 +121,8 @@
                     nil t)))))
             (should (equal (plist-get message :date) date))
             (should (equal (elfeed-entry-date entry) date))))))))
+
+;;;; Context ownership and publication
 
 (ert-deftest tessera-x-snapshots-isolate-sources-and-pending-work ()
   (tessera-x-tests--with-snapshots
@@ -636,6 +610,8 @@
           (should buffer-read-only)
           (should-not (text-properties-at (point-min))))))))
 
+;;;; MIME decoding and attachments
+
 (ert-deftest tessera-x-mime-preserves-unicode-quotes-and-attachments
     ()
   (let ((item (tessera-x-tests--item "mime")))
@@ -1068,6 +1044,8 @@
     (should (string-match-p "not decrypted"
                             (tessera-x-item-body item)))))
 
+;;;; Message identity and subthreads
+
 (ert-deftest tessera-x-message-ids-preserve-reference-boundaries ()
   (let* ((root (tessera-x-tests--item "root@example"))
          (child (tessera-x-tests--item
@@ -1105,76 +1083,29 @@
     (should (= (length (tessera-x-group-threads items)) 5))
     (should (equal (tessera-x-item-group other) "Full subject"))))
 
-(ert-deftest tessera-x-mu4e-native-selection-includes-folded-rows ()
-  (let ((mu4e-headers-mode-hook nil)
-        (mu4e-headers-fields '((:subject)))
-        (mu4e-search-threads t)
-        (mu4e-search-hide-enabled nil))
-    (with-temp-buffer
-      (mu4e-headers-mode)
-      (let ((inhibit-read-only t)
-            (source (current-buffer)))
-        (cl-letf (((symbol-function 'mu4e-get-headers-buffer)
-                   (lambda (&rest _) source)))
-          (dotimes (index 5)
-            (mu4e~headers-insert-header
-             (list :docid (1+ index)
-                   :subject "Full subject"
-                   :message-id (unless (= index 2)
-                                 (format "%d" (1+ index)))
-                   :meta (list :level (nth index '(0 1 0 1 2))
-                               :root (memq index '(0 2)))
-                   :date '(27000 0)
-                   :flags '(unread))
-             (point-max))))
-        (goto-char (point-min))
-        (let ((overlay (make-overlay (point-min) (point-max))))
-          (overlay-put overlay 'invisible t))
-        (puthash 2 '(flag . nil) mu4e--mark-map)
-        (puthash 4 '(flag . nil) mu4e--mark-map)
-        (let ((all (tessera-x-mu4e--items))
-              (factory (symbol-function 'tessera-x-mu4e--item))
-              (count 0) items)
-          (cl-letf (((symbol-function 'tessera-x-mu4e--item)
-                     (lambda (message)
-                       (cl-incf count)
-                       (funcall factory message))))
-            (setq items (tessera-x-mu4e--items t)))
-          (should (= (length all) 5))
-          (should (= count 2))
-          (should (equal (mapcar #'tessera-x-item-id items) '(2 4)))
-          (should (equal items (list (nth 1 all) (nth 3 all))))
-          (should (equal (mapcar #'tessera-x-item-parent items)
-                         '("1" 3)))
-          (should-not (tessera-x-item-references (cadr items))))
-        (should (equal (gethash 2 mu4e--mark-map) '(flag)))
-        (should (= (point) (point-min)))
-        (save-restriction
-          (narrow-to-region (line-beginning-position 3)
-                            (line-beginning-position 4))
-          (let ((start (point-min))
-                (end (point-max))
-                (position (point))
-                (items (tessera-x-mu4e--items t)))
-            (should (= (length (tessera-x-mu4e--items)) 5))
-            (should (equal (mapcar #'tessera-x-item-id items) '(2 4)))
-            (should (equal (mapcar #'tessera-x-item-parent items)
-                           '("1" 3)))
-            (should (= (point-min) start))
-            (should (= (point-max) end))
-            (should (= (point) position))))
-        (goto-char (point-min))
-        (clrhash mu4e--mark-map)
-        (should (equal (mapcar #'tessera-x-item-id
-                               (tessera-x-mu4e--items t)) '(1)))
-        (let ((transient-mark-mode t))
-          (forward-line 2)
-          (push-mark (line-end-position 2) t t)
-          (let ((before (point)) (mark-before (mark)))
-            (should (equal (mapcar #'tessera-x-item-id
-                                   (tessera-x-mu4e--items t)) '(3 4)))
-            (should (= (point) before))
-            (should (= (mark) mark-before))))))))
+;;;; Gnus metadata, selection, and Agent content
+
+(ert-deftest tessera-x-gnus-labels-retain-native-metadata ()
+  (let ((header (make-full-mail-header
+                 1 "Subject" "Sender" "" "<id>" "" 0 0 nil
+                 '((x-gm-labels . "(shared \"Gmail\")")
+                   (Keywords . "shared, News,  ")
+                   (TO . "Recipient <to@example.invalid>"))))
+        (gnus-registry-db t))
+    (cl-letf (((symbol-function 'gnus-registry-get-id-key)
+               (lambda (_id _key) '(shared " Registry\nlabel "))))
+      (let ((metadata (tessera-x-item-metadata
+                       (tessera-x-gnus--item header "group"))))
+        (should (equal (cdr (assoc "Labels" metadata))
+                       "shared,Registry label,Gmail,News"))
+        (should (equal (cdr (assoc "To" metadata))
+                       "Recipient <to@example.invalid>")))
+      (dolist (value '("#1=(x . #1#)" "(x . y)" "((nested))"))
+        (setcdr (assq 'x-gm-labels (mail-header-extra header)) value)
+        (let ((metadata (tessera-x-item-metadata
+                         (tessera-x-gnus--item header "group"))))
+          (should (equal (cdr (assoc "Labels" metadata))
+                         "shared,Registry label,News")))))))
 
 (ert-deftest tessera-x-gnus-download-marks-respect-narrowing ()
   (with-temp-buffer
@@ -1340,274 +1271,152 @@
                      (nthcdr 2 all))))
     (should (= (point) (point-min)))))
 
-(ert-deftest tessera-x-elfeed-timeout-and-late-callback-finish-once ()
-  (tessera-x-tests--with-snapshots
+(ert-deftest tessera-x-gnus-overview-filters-dates-and-keeps-headers
+    ()
+  (let* ((file (make-temp-file "tessera-overview-"))
+         (bounds (tessera-x-today-bounds))
+         (start (car bounds))
+         (end (cdr bounds))
+         (read-labels
+          (symbol-function 'tessera-gnus-summary-label-data))
+         (parse-date (symbol-function 'date-to-time))
+         (label-count 0)
+         (date-count 0)
+         (gnus-agent t))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (cl-loop
+             for date in (list (time-subtract start 1) start end)
+             for number from 1
+             do
+             (nnheader-insert-nov
+              (make-full-mail-header
+               number "日本語 review" "Full Name <full@test.invalid>"
+               (format-time-string "%a, %d %b %Y %T %z" date)
+               (format "<%d@test.invalid>" number)
+               "<root@test.invalid>" 100 5 nil
+               '((Keywords . "design,review"))))))
+          (cl-letf
+              (((symbol-function 'tessera-x-gnus--agent-file)
+                (lambda (&rest _) file))
+               ((symbol-function 'gnus-find-method-for-group)
+                (lambda (_) '(nnmaildir "fixture")))
+               ((symbol-function 'gnus-agent-method-p)
+                (lambda (_) t))
+               ((symbol-function 'tessera-gnus-summary-label-data)
+                (lambda (header)
+                  (cl-incf label-count)
+                  (funcall read-labels header)))
+               ((symbol-function 'date-to-time)
+                (lambda (date)
+                  (cl-incf date-count)
+                  (funcall parse-date date))))
+            (let ((items
+                   (tessera-x-gnus--overview '("group") bounds)))
+              (should (= (length items) 1))
+              (should (= label-count 1))
+              (should (= date-count 3))
+              (should (equal (tessera-x-item-id (car items))
+                             '("group" . 2)))
+              (should (equal (tessera-x-item-subject (car items))
+                             "日本語 review"))
+              (should (equal
+                       (cdr
+                        (assoc "Labels"
+                               (tessera-x-item-metadata (car items))))
+                       "design,review")))
+            (setq label-count 0 date-count 0)
+            (should (= (length (tessera-x-gnus--overview '("group")))
+                       3))
+            (should (= label-count 3))
+            (should (= date-count 3))))
+      (delete-file file))))
+
+;;;; Mu4e metadata, selection, and query lifecycle
+
+(ert-deftest tessera-x-mu4e-labels-share-native-normalization ()
+  (let* ((message (list :labels (list "Work" "Later" "Work")
+                        :tags (list "Later" "News")))
+         (saved (copy-tree message))
+         (labels (tessera-mu4e-headers-labels message))
+         (metadata (tessera-x-item-metadata
+                    (tessera-x-mu4e--item message))))
+    (should (equal labels '("Work" "Later" "News")))
+    (should (equal (cdr (assoc "Labels" metadata)) "Work,Later,News"))
+    (setcar labels "Changed")
+    (should (equal message saved))))
+
+(ert-deftest tessera-x-mu4e-native-selection-includes-folded-rows ()
+  (let ((mu4e-headers-mode-hook nil)
+        (mu4e-headers-fields '((:subject)))
+        (mu4e-search-threads t)
+        (mu4e-search-hide-enabled nil))
     (with-temp-buffer
-      (let* ((item (tessera-x-tests--item "feed"))
-             (context
-              (tessera-x-context-start 'elfeed "test" (list item)))
-             (request
-              (make-tessera-x-elfeed--request :context context))
-             (fetch (make-tessera-x-elfeed--fetch
-                     :request request
-                     :item item))
-             (calls 0)
-             (tessera-x-context-ready-hook
-              (list (lambda (_) (cl-incf calls)))))
-        (setf (tessera-x-elfeed--request-active request) (list fetch))
-        (tessera-x-elfeed--timeout fetch)
-        (should (= calls 1))
-        (should (string-match-p "HTTP timeout"
-                                (tessera-x-item-note item)))
-        (let ((response (generate-new-buffer " *Late HTTP*")))
-          (unwind-protect
-              (progn
-                (with-current-buffer response
-                  (insert "Late response must not replace the body")
-                  (tessera-x-elfeed--response nil fetch))
-                (should-not (buffer-live-p response)))
-            (when (buffer-live-p response) (kill-buffer response))))
-        (should (= calls 1))
-        (should (= (length (tessera-x-item-body item)) 1000))))))
-
-(ert-deftest tessera-x-elfeed-redirects-release-all-transfers ()
-  (pcase-dolist (`(,cancel ,reclaim)
-                 '((nil nil) (t nil) (nil t) (t t)))
-    (tessera-x-tests--with-snapshots
-      (with-temp-buffer
-        (let* ((item (tessera-x-tests--item "redirect"))
-               (context (tessera-x-context-start
-                         'elfeed "redirect" (list item)))
-               (request
-                (make-tessera-x-elfeed--request :context context))
-               (url-dead-buffer-list nil)
-               (buffers (cl-loop repeat 3 collect
-                                 (generate-new-buffer " *Redirect*")))
-               (process (make-pipe-process
-                         :name "tessera-redirect"
-                         :noquery t
-                         :buffer (car (last buffers))))
-               (fetch (make-tessera-x-elfeed--fetch
-                       :request request
-                       :item item
-                       :buffer (car buffers))))
-          (unwind-protect
-              (progn
-                (cl-loop for (buffer next) on buffers
-                         do (with-current-buffer buffer
-                              (setq-local
-                               url-redirect-buffer next
-                               url-callback-function
-                               #'tessera-x-elfeed--response
-                               url-callback-arguments
-                               (list nil fetch))))
-                (when reclaim
-                  (url-mark-buffer-as-dead (car buffers))
-                  (url-gc-dead-buffers)
-                  (should-not (buffer-live-p (car buffers))))
-                (setf (tessera-x-elfeed--request-active request)
-                      (list fetch))
-                (push (apply-partially
-                       #'tessera-x-elfeed--cancel request)
-                      (tessera-x-context-cleanup context))
-                (if cancel
-                    (tessera-x-cancel-context)
-                  (tessera-x-elfeed--timeout fetch))
-                (should (eq (tessera-x-context-state context)
-                            (if cancel 'cancelled 'ready)))
-                (should-not (tessera-x-elfeed--request-active
-                             request))
-                (should-not (cl-some #'buffer-live-p buffers))
-                (should-not (process-live-p process))
-                (tessera-x-elfeed--stop-fetch fetch))
-            (when (process-live-p process) (delete-process process))
-            (dolist (buffer buffers)
-              (when (buffer-live-p buffer)
-                (kill-buffer buffer)))))))))
-
-(ert-deftest tessera-x-elfeed-cleanup-continues-after-buffer-hook ()
-  (tessera-x-tests--with-snapshots
-    (dolist (condition '(error quit))
-      (dolist (cancel '(nil t))
-        (with-temp-buffer
-          (let* ((context (tessera-x-context-start
-                           'elfeed "Test" nil))
-                 (request (make-tessera-x-elfeed--request
-                           :context context))
-                 (buffers (cl-loop repeat 2 collect
-                                   (generate-new-buffer " *HTTP*")))
-                 (processes
-                  (mapcar (lambda (buffer)
-                            (make-pipe-process
-                             :name "tessera-cleanup"
-                             :buffer buffer
-                             :noquery t)) buffers))
-                 (fetches
-                  (mapcar
-                   (lambda (buffer)
-                     (make-tessera-x-elfeed--fetch
-                      :request request
-                      :item (tessera-x-tests--item "feed")
-                      :buffer buffer
-                      :timer (run-at-time 60 nil #'ignore))) buffers))
-                 (timers (mapcar #'tessera-x-elfeed--fetch-timer
-                                 fetches)))
-            (unwind-protect
-                (progn
-                  (with-current-buffer (car buffers)
-                    (add-hook 'kill-buffer-hook
-                              (lambda () (signal condition nil))
-                              nil t))
-                  (setf (tessera-x-elfeed--request-active request)
-                        fetches)
-                  (push (apply-partially
-                         #'tessera-x-elfeed--cancel request)
-                        (tessera-x-context-cleanup context))
-                  (if cancel
-                      (tessera-x-cancel-context)
-                    (mapc #'tessera-x-elfeed--timeout fetches))
-                  (should (eq (tessera-x-context-state context)
-                              (if cancel 'cancelled 'ready)))
-                  (should-not tessera-x--pending-context)
-                  (should-not (tessera-x-elfeed--request-active
-                               request))
-                  (should-not (cl-some #'process-live-p processes))
-                  (should-not (cl-intersection timers timer-list))
-                  ;; Honor a failing hook, but release other buffers.
-                  (should (buffer-live-p (car buffers)))
-                  (should-not (buffer-live-p (cadr buffers))))
-              (dolist (buffer buffers)
-                (when (buffer-live-p buffer)
-                  (with-current-buffer buffer
-                    (setq kill-buffer-hook nil))
-                  (kill-buffer buffer)))
-              (mapc #'cancel-timer timers))))))))
-
-(ert-deftest tessera-x-elfeed-stop-keeps-unrelated-transfers ()
-  (with-temp-buffer
-    (let* ((other (make-tessera-x-elfeed--fetch))
-           (fetch (make-tessera-x-elfeed--fetch))
-           (buffer (current-buffer)))
-      (setq-local url-callback-function #'tessera-x-elfeed--response
-                  url-callback-arguments (list nil other))
-      (tessera-x-elfeed--stop-fetch fetch)
-      (should (buffer-live-p buffer)))))
-
-(ert-deftest tessera-x-elfeed-quit-cancels-transfers ()
-  (dolist (stage '(startup response))
-    (tessera-x-tests--with-snapshots
-      (with-temp-buffer
-        (let* ((previous (tessera-x-context-start 'elfeed "Old" nil))
-               (items (cl-loop repeat 3 collect
-                               (tessera-x-tests--item "feed")))
-               (calls 0)
-               buffers fetches timers)
-          (tessera-x-context-finish previous)
-          (let* ((context
-                  (tessera-x-context-start 'elfeed "New" items))
-                 (request (make-tessera-x-elfeed--request
-                           :context context
-                           :queue (copy-sequence items)
-                           :limit 2
-                           :timeout 60)))
-            (push (apply-partially #'tessera-x-elfeed--cancel request)
-                  (tessera-x-context-cleanup context))
-            (unwind-protect
-                (progn
-                  (cl-letf (((symbol-function 'url-retrieve)
-                             (lambda (_url callback arguments &rest _)
-                               (cl-incf calls)
-                               (push (car arguments) fetches)
-                               (push (generate-new-buffer " *HTTP*")
-                                     buffers)
-                               (with-current-buffer (car buffers)
-                                 (setq-local
-                                  url-callback-function callback
-                                  url-callback-arguments
-                                  (cons nil arguments)))
-                               (when (= calls 2)
-                                 (push (tessera-x-elfeed--fetch-timer
-                                        (cadr fetches)) timers)
-                                 (when (eq stage 'startup)
-                                   (signal 'quit nil)))
-                               (car buffers)))
-                            ((symbol-function 'tessera-x-html-text)
-                             (lambda (_) (signal 'quit nil))))
-                    (should
-                     (eq (condition-case err
-                             (progn
-                               (tessera-x-elfeed--dispatch request)
-                               (setq timers
-                                     (mapcar
-                                      #'tessera-x-elfeed--fetch-timer
-                                      fetches))
-                               (with-current-buffer (car buffers)
-                                 (insert "Content-Type: text/html"
-                                         "\n\n")
-                                 (setq-local
-                                  url-http-response-status 200
-                                  url-http-end-of-headers
-                                  (point-marker))
-                                 (insert "<p>Response body</p>")
-                                 (tessera-x-elfeed--response
-                                  nil (car fetches))))
-                           (quit (car err)))
-                         'quit)))
-                  (should (= calls 2))
-                  (should (eq (tessera-x-context-state context)
-                              'cancelled))
-                  (should-not tessera-x--pending-context)
-                  (should-not (tessera-x-context-cleanup context))
-                  (should-not
-                   (tessera-x-elfeed--request-active request))
-                  (should-not
-                   (tessera-x-elfeed--request-queue request))
-                  (should-not (tessera-x-elfeed--request-dispatching
-                               request))
-                  (should (cl-every #'tessera-x-elfeed--fetch-done
-                                    fetches))
-                  (should-not (cl-some #'buffer-live-p buffers))
-                  (should (= (length timers)
-                             (if (eq stage 'startup) 1 2)))
-                  (should (cl-every #'timerp timers))
-                  (should-not (cl-intersection timers timer-list))
-                  (should (eq tessera-x-current-context previous))
-                  (should (buffer-live-p
-                           (tessera-x-context-buffer previous)))
-                  (dolist (fetch fetches)
-                    (tessera-x-elfeed--timeout fetch)
-                    (let ((late (generate-new-buffer " *Late HTTP*")))
-                      (unwind-protect
-                          (with-current-buffer late
-                            (tessera-x-elfeed--response nil fetch)
-                            (should-not (buffer-live-p late)))
-                        (when (buffer-live-p late)
-                          (kill-buffer late)))))
-                  (should (eq tessera-x-current-context previous))
-                  (should (eq (tessera-x-context-state context)
-                              'cancelled)))
-              (tessera-x-cancel-context)
-              (mapc #'cancel-timer timers)
-              (dolist (buffer buffers)
-                (when (buffer-live-p buffer)
-                  (kill-buffer buffer))))))))))
-
-(ert-deftest tessera-x-elfeed-startup-failures-dont-recurse ()
-  (tessera-x-tests--with-snapshots
-    (with-temp-buffer
-      (let* ((items (cl-loop repeat 1000 collect
-                             (tessera-x-tests--item "feed")))
-             (context
-              (tessera-x-context-start 'elfeed "failure" items))
-             (request (make-tessera-x-elfeed--request
-                       :context context
-                       :queue (copy-sequence items))))
-        (cl-letf (((symbol-function 'url-retrieve)
-                   (lambda (&rest _) (error "Offline"))))
-          (tessera-x-elfeed--dispatch request))
-        (should (eq (tessera-x-context-state context) 'ready))
-        (should (string-match-p
-                 "Offline" (tessera-x-item-note (car items))))))))
+      (mu4e-headers-mode)
+      (let ((inhibit-read-only t)
+            (source (current-buffer)))
+        (cl-letf (((symbol-function 'mu4e-get-headers-buffer)
+                   (lambda (&rest _) source)))
+          (dotimes (index 5)
+            (mu4e~headers-insert-header
+             (list :docid (1+ index)
+                   :subject "Full subject"
+                   :message-id (unless (= index 2)
+                                 (format "%d" (1+ index)))
+                   :meta (list :level (nth index '(0 1 0 1 2))
+                               :root (memq index '(0 2)))
+                   :date '(27000 0)
+                   :flags '(unread))
+             (point-max))))
+        (goto-char (point-min))
+        (let ((overlay (make-overlay (point-min) (point-max))))
+          (overlay-put overlay 'invisible t))
+        (puthash 2 '(flag . nil) mu4e--mark-map)
+        (puthash 4 '(flag . nil) mu4e--mark-map)
+        (let ((all (tessera-x-mu4e--items))
+              (factory (symbol-function 'tessera-x-mu4e--item))
+              (count 0) items)
+          (cl-letf (((symbol-function 'tessera-x-mu4e--item)
+                     (lambda (message)
+                       (cl-incf count)
+                       (funcall factory message))))
+            (setq items (tessera-x-mu4e--items t)))
+          (should (= (length all) 5))
+          (should (= count 2))
+          (should (equal (mapcar #'tessera-x-item-id items) '(2 4)))
+          (should (equal items (list (nth 1 all) (nth 3 all))))
+          (should (equal (mapcar #'tessera-x-item-parent items)
+                         '("1" 3)))
+          (should-not (tessera-x-item-references (cadr items))))
+        (should (equal (gethash 2 mu4e--mark-map) '(flag)))
+        (should (= (point) (point-min)))
+        (save-restriction
+          (narrow-to-region (line-beginning-position 3)
+                            (line-beginning-position 4))
+          (let ((start (point-min))
+                (end (point-max))
+                (position (point))
+                (items (tessera-x-mu4e--items t)))
+            (should (= (length (tessera-x-mu4e--items)) 5))
+            (should (equal (mapcar #'tessera-x-item-id items) '(2 4)))
+            (should (equal (mapcar #'tessera-x-item-parent items)
+                           '("1" 3)))
+            (should (= (point-min) start))
+            (should (= (point-max) end))
+            (should (= (point) position))))
+        (goto-char (point-min))
+        (clrhash mu4e--mark-map)
+        (should (equal (mapcar #'tessera-x-item-id
+                               (tessera-x-mu4e--items t)) '(1)))
+        (let ((transient-mark-mode t))
+          (forward-line 2)
+          (push-mark (line-end-position 2) t t)
+          (let ((before (point)) (mark-before (mark)))
+            (should (equal (mapcar #'tessera-x-item-id
+                                   (tessera-x-mu4e--items t)) '(3 4)))
+            (should (= (point) before))
+            (should (= (mark) mark-before))))))))
 
 (ert-deftest tessera-x-mu-today-query-belongs-to-current-headers ()
   (let ((mu4e-headers-mode-hook nil)
@@ -1892,6 +1701,8 @@
                        (buffer-string)))))
         (delete-directory directory t)))))
 
+;;;; Elfeed linked content decoding
+
 (defun tessera-x-tests--http-response
     (headers body check &optional limit)
   "Run CHECK on an HTTP item and its stored body after parsing.
@@ -2068,6 +1879,8 @@ LIMIT bounds body parsing.  Assert completion and resource cleanup."
             'iso-latin-1)))))
     (should (= (length sizes) 2))
     (should (apply #'= sizes))))
+
+;;;; Elfeed database selection
 
 (defmacro tessera-x-tests--with-elfeed-db (records &rest body)
   "Run BODY with a private database of (ID DATE TAGS) RECORDS."
@@ -2250,67 +2063,276 @@ LIMIT bounds body parsing.  Assert completion and resource cleanup."
                     (should
                      (eq (elfeed-entry-date entry) date))))))))))))
 
-(ert-deftest tessera-x-gnus-overview-filters-dates-and-keeps-headers
-    ()
-  (let* ((file (make-temp-file "tessera-overview-"))
-         (bounds (tessera-x-today-bounds))
-         (start (car bounds))
-         (end (cdr bounds))
-         (read-labels
-          (symbol-function 'tessera-gnus-summary-label-data))
-         (parse-date (symbol-function 'date-to-time))
-         (label-count 0)
-         (date-count 0)
-         (gnus-agent t))
-    (unwind-protect
-        (progn
-          (with-temp-file file
-            (cl-loop
-             for date in (list (time-subtract start 1) start end)
-             for number from 1
-             do
-             (nnheader-insert-nov
-              (make-full-mail-header
-               number "日本語 review" "Full Name <full@test.invalid>"
-               (format-time-string "%a, %d %b %Y %T %z" date)
-               (format "<%d@test.invalid>" number)
-               "<root@test.invalid>" 100 5 nil
-               '((Keywords . "design,review"))))))
-          (cl-letf
-              (((symbol-function 'tessera-x-gnus--agent-file)
-                (lambda (&rest _) file))
-               ((symbol-function 'gnus-find-method-for-group)
-                (lambda (_) '(nnmaildir "fixture")))
-               ((symbol-function 'gnus-agent-method-p)
-                (lambda (_) t))
-               ((symbol-function 'tessera-gnus-summary-label-data)
-                (lambda (header)
-                  (cl-incf label-count)
-                  (funcall read-labels header)))
-               ((symbol-function 'date-to-time)
-                (lambda (date)
-                  (cl-incf date-count)
-                  (funcall parse-date date))))
-            (let ((items
-                   (tessera-x-gnus--overview '("group") bounds)))
-              (should (= (length items) 1))
-              (should (= label-count 1))
-              (should (= date-count 3))
-              (should (equal (tessera-x-item-id (car items))
-                             '("group" . 2)))
-              (should (equal (tessera-x-item-subject (car items))
-                             "日本語 review"))
-              (should (equal
-                       (cdr
-                        (assoc "Labels"
-                               (tessera-x-item-metadata (car items))))
-                       "design,review")))
-            (setq label-count 0 date-count 0)
-            (should (= (length (tessera-x-gnus--overview '("group")))
-                       3))
-            (should (= label-count 3))
-            (should (= date-count 3))))
-      (delete-file file))))
+;;;; Elfeed fetch lifecycle
+
+(ert-deftest tessera-x-elfeed-timeout-and-late-callback-finish-once ()
+  (tessera-x-tests--with-snapshots
+    (with-temp-buffer
+      (let* ((item (tessera-x-tests--item "feed"))
+             (context
+              (tessera-x-context-start 'elfeed "test" (list item)))
+             (request
+              (make-tessera-x-elfeed--request :context context))
+             (fetch (make-tessera-x-elfeed--fetch
+                     :request request
+                     :item item))
+             (calls 0)
+             (tessera-x-context-ready-hook
+              (list (lambda (_) (cl-incf calls)))))
+        (setf (tessera-x-elfeed--request-active request) (list fetch))
+        (tessera-x-elfeed--timeout fetch)
+        (should (= calls 1))
+        (should (string-match-p "HTTP timeout"
+                                (tessera-x-item-note item)))
+        (let ((response (generate-new-buffer " *Late HTTP*")))
+          (unwind-protect
+              (progn
+                (with-current-buffer response
+                  (insert "Late response must not replace the body")
+                  (tessera-x-elfeed--response nil fetch))
+                (should-not (buffer-live-p response)))
+            (when (buffer-live-p response) (kill-buffer response))))
+        (should (= calls 1))
+        (should (= (length (tessera-x-item-body item)) 1000))))))
+
+(ert-deftest tessera-x-elfeed-redirects-release-all-transfers ()
+  (pcase-dolist (`(,cancel ,reclaim)
+                 '((nil nil) (t nil) (nil t) (t t)))
+    (tessera-x-tests--with-snapshots
+      (with-temp-buffer
+        (let* ((item (tessera-x-tests--item "redirect"))
+               (context (tessera-x-context-start
+                         'elfeed "redirect" (list item)))
+               (request
+                (make-tessera-x-elfeed--request :context context))
+               (url-dead-buffer-list nil)
+               (buffers (cl-loop repeat 3 collect
+                                 (generate-new-buffer " *Redirect*")))
+               (process (make-pipe-process
+                         :name "tessera-redirect"
+                         :noquery t
+                         :buffer (car (last buffers))))
+               (fetch (make-tessera-x-elfeed--fetch
+                       :request request
+                       :item item
+                       :buffer (car buffers))))
+          (unwind-protect
+              (progn
+                (cl-loop for (buffer next) on buffers
+                         do (with-current-buffer buffer
+                              (setq-local
+                               url-redirect-buffer next
+                               url-callback-function
+                               #'tessera-x-elfeed--response
+                               url-callback-arguments
+                               (list nil fetch))))
+                (when reclaim
+                  (url-mark-buffer-as-dead (car buffers))
+                  (url-gc-dead-buffers)
+                  (should-not (buffer-live-p (car buffers))))
+                (setf (tessera-x-elfeed--request-active request)
+                      (list fetch))
+                (push (apply-partially
+                       #'tessera-x-elfeed--cancel request)
+                      (tessera-x-context-cleanup context))
+                (if cancel
+                    (tessera-x-cancel-context)
+                  (tessera-x-elfeed--timeout fetch))
+                (should (eq (tessera-x-context-state context)
+                            (if cancel 'cancelled 'ready)))
+                (should-not (tessera-x-elfeed--request-active
+                             request))
+                (should-not (cl-some #'buffer-live-p buffers))
+                (should-not (process-live-p process))
+                (tessera-x-elfeed--stop-fetch fetch))
+            (when (process-live-p process) (delete-process process))
+            (dolist (buffer buffers)
+              (when (buffer-live-p buffer)
+                (kill-buffer buffer)))))))))
+
+(ert-deftest tessera-x-elfeed-cleanup-continues-after-buffer-hook ()
+  (tessera-x-tests--with-snapshots
+    (dolist (condition '(error quit))
+      (dolist (cancel '(nil t))
+        (with-temp-buffer
+          (let* ((context (tessera-x-context-start
+                           'elfeed "Test" nil))
+                 (request (make-tessera-x-elfeed--request
+                           :context context))
+                 (buffers (cl-loop repeat 2 collect
+                                   (generate-new-buffer " *HTTP*")))
+                 (processes
+                  (mapcar (lambda (buffer)
+                            (make-pipe-process
+                             :name "tessera-cleanup"
+                             :buffer buffer
+                             :noquery t)) buffers))
+                 (fetches
+                  (mapcar
+                   (lambda (buffer)
+                     (make-tessera-x-elfeed--fetch
+                      :request request
+                      :item (tessera-x-tests--item "feed")
+                      :buffer buffer
+                      :timer (run-at-time 60 nil #'ignore))) buffers))
+                 (timers (mapcar #'tessera-x-elfeed--fetch-timer
+                                 fetches)))
+            (unwind-protect
+                (progn
+                  (with-current-buffer (car buffers)
+                    (add-hook 'kill-buffer-hook
+                              (lambda () (signal condition nil))
+                              nil t))
+                  (setf (tessera-x-elfeed--request-active request)
+                        fetches)
+                  (push (apply-partially
+                         #'tessera-x-elfeed--cancel request)
+                        (tessera-x-context-cleanup context))
+                  (if cancel
+                      (tessera-x-cancel-context)
+                    (mapc #'tessera-x-elfeed--timeout fetches))
+                  (should (eq (tessera-x-context-state context)
+                              (if cancel 'cancelled 'ready)))
+                  (should-not tessera-x--pending-context)
+                  (should-not (tessera-x-elfeed--request-active
+                               request))
+                  (should-not (cl-some #'process-live-p processes))
+                  (should-not (cl-intersection timers timer-list))
+                  ;; Honor a failing hook, but release other buffers.
+                  (should (buffer-live-p (car buffers)))
+                  (should-not (buffer-live-p (cadr buffers))))
+              (dolist (buffer buffers)
+                (when (buffer-live-p buffer)
+                  (with-current-buffer buffer
+                    (setq kill-buffer-hook nil))
+                  (kill-buffer buffer)))
+              (mapc #'cancel-timer timers))))))))
+
+(ert-deftest tessera-x-elfeed-stop-keeps-unrelated-transfers ()
+  (with-temp-buffer
+    (let* ((other (make-tessera-x-elfeed--fetch))
+           (fetch (make-tessera-x-elfeed--fetch))
+           (buffer (current-buffer)))
+      (setq-local url-callback-function #'tessera-x-elfeed--response
+                  url-callback-arguments (list nil other))
+      (tessera-x-elfeed--stop-fetch fetch)
+      (should (buffer-live-p buffer)))))
+
+(ert-deftest tessera-x-elfeed-quit-cancels-transfers ()
+  (dolist (stage '(startup response))
+    (tessera-x-tests--with-snapshots
+      (with-temp-buffer
+        (let* ((previous (tessera-x-context-start 'elfeed "Old" nil))
+               (items (cl-loop repeat 3 collect
+                               (tessera-x-tests--item "feed")))
+               (calls 0)
+               buffers fetches timers)
+          (tessera-x-context-finish previous)
+          (let* ((context
+                  (tessera-x-context-start 'elfeed "New" items))
+                 (request (make-tessera-x-elfeed--request
+                           :context context
+                           :queue (copy-sequence items)
+                           :limit 2
+                           :timeout 60)))
+            (push (apply-partially #'tessera-x-elfeed--cancel request)
+                  (tessera-x-context-cleanup context))
+            (unwind-protect
+                (progn
+                  (cl-letf (((symbol-function 'url-retrieve)
+                             (lambda (_url callback arguments &rest _)
+                               (cl-incf calls)
+                               (push (car arguments) fetches)
+                               (push (generate-new-buffer " *HTTP*")
+                                     buffers)
+                               (with-current-buffer (car buffers)
+                                 (setq-local
+                                  url-callback-function callback
+                                  url-callback-arguments
+                                  (cons nil arguments)))
+                               (when (= calls 2)
+                                 (push (tessera-x-elfeed--fetch-timer
+                                        (cadr fetches)) timers)
+                                 (when (eq stage 'startup)
+                                   (signal 'quit nil)))
+                               (car buffers)))
+                            ((symbol-function 'tessera-x-html-text)
+                             (lambda (_) (signal 'quit nil))))
+                    (should
+                     (eq (condition-case err
+                             (progn
+                               (tessera-x-elfeed--dispatch request)
+                               (setq timers
+                                     (mapcar
+                                      #'tessera-x-elfeed--fetch-timer
+                                      fetches))
+                               (with-current-buffer (car buffers)
+                                 (insert "Content-Type: text/html"
+                                         "\n\n")
+                                 (setq-local
+                                  url-http-response-status 200
+                                  url-http-end-of-headers
+                                  (point-marker))
+                                 (insert "<p>Response body</p>")
+                                 (tessera-x-elfeed--response
+                                  nil (car fetches))))
+                           (quit (car err)))
+                         'quit)))
+                  (should (= calls 2))
+                  (should (eq (tessera-x-context-state context)
+                              'cancelled))
+                  (should-not tessera-x--pending-context)
+                  (should-not (tessera-x-context-cleanup context))
+                  (should-not
+                   (tessera-x-elfeed--request-active request))
+                  (should-not
+                   (tessera-x-elfeed--request-queue request))
+                  (should-not (tessera-x-elfeed--request-dispatching
+                               request))
+                  (should (cl-every #'tessera-x-elfeed--fetch-done
+                                    fetches))
+                  (should-not (cl-some #'buffer-live-p buffers))
+                  (should (= (length timers)
+                             (if (eq stage 'startup) 1 2)))
+                  (should (cl-every #'timerp timers))
+                  (should-not (cl-intersection timers timer-list))
+                  (should (eq tessera-x-current-context previous))
+                  (should (buffer-live-p
+                           (tessera-x-context-buffer previous)))
+                  (dolist (fetch fetches)
+                    (tessera-x-elfeed--timeout fetch)
+                    (let ((late (generate-new-buffer " *Late HTTP*")))
+                      (unwind-protect
+                          (with-current-buffer late
+                            (tessera-x-elfeed--response nil fetch)
+                            (should-not (buffer-live-p late)))
+                        (when (buffer-live-p late)
+                          (kill-buffer late)))))
+                  (should (eq tessera-x-current-context previous))
+                  (should (eq (tessera-x-context-state context)
+                              'cancelled)))
+              (tessera-x-cancel-context)
+              (mapc #'cancel-timer timers)
+              (dolist (buffer buffers)
+                (when (buffer-live-p buffer)
+                  (kill-buffer buffer))))))))))
+
+(ert-deftest tessera-x-elfeed-startup-failures-dont-recurse ()
+  (tessera-x-tests--with-snapshots
+    (with-temp-buffer
+      (let* ((items (cl-loop repeat 1000 collect
+                             (tessera-x-tests--item "feed")))
+             (context
+              (tessera-x-context-start 'elfeed "failure" items))
+             (request (make-tessera-x-elfeed--request
+                       :context context
+                       :queue (copy-sequence items))))
+        (cl-letf (((symbol-function 'url-retrieve)
+                   (lambda (&rest _) (error "Offline"))))
+          (tessera-x-elfeed--dispatch request))
+        (should (eq (tessera-x-context-state context) 'ready))
+        (should (string-match-p
+                 "Offline" (tessera-x-item-note (car items))))))))
 
 (provide 'tessera-x-tests)
 ;;; tessera-x-tests.el ends here

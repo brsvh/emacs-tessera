@@ -12,6 +12,8 @@
 (require 'tessera-mu4e-headers)
 (require 'tessera-elfeed-search)
 
+;;;; Options and validation
+
 (ert-deftest tessera-glyph-options-belong-to-their-view ()
   (dolist (view '(tessera-gnus-summary tessera-mu4e-headers
                                        tessera-elfeed-search))
@@ -99,6 +101,8 @@
       (should (widget-apply widget :match value)))
     (should-not
      (widget-apply widget :match '((missing :ascii "?"))))))
+
+;;;; Appearance and rendering
 
 (ert-deftest tessera-glyph-render-validates-arguments ()
   (let ((glyph (make-tessera-glyph :ascii "x"))
@@ -189,6 +193,22 @@
       (should-not (text-property-not-all
                    0 (length text) 'face nil text)))))
 
+(ert-deftest tessera-glyph-render-supports-segment-glyphs ()
+  (let* ((context
+          (make-tessera-entry-context :buffer (current-buffer)))
+         (tessera-glyph-style 'ascii)
+         (glyph (make-tessera-glyph :ascii "*"))
+         (text
+          (tessera-glyph-render
+           glyph context '(:help-echo "Indicator"))))
+    (should (equal text "*"))
+    (should (equal (get-text-property 0 'help-echo text)
+                   "Indicator"))
+    (should (eq (get-text-property 0 'tessera-glyph text)
+                t))))
+
+;;;; Slots and thread geometry
+
 (ert-deftest tessera-glyph-options-do-not-change-native-priority ()
   (let* ((tessera-mu4e-headers-glyphs
           '((status-unread
@@ -272,6 +292,8 @@
          (clipped (tessera--clip-thread-content text 1)))
     (should (equal clipped "."))
     (should (= (tessera-entry-point clipped) 0))))
+
+;;;; Change callbacks and adapter lifecycle
 
 (ert-deftest tessera-glyph-callbacks-follow-mode-lifecycle ()
   (let ((tessera--glyph-change-functions nil)
@@ -386,20 +408,6 @@
                (expand-file-name invocation-name invocation-directory)
                nil t nil "-Q" "--batch" "--eval"
                (prin1-to-string form)))))))
-
-(ert-deftest tessera-glyph-render-supports-segment-glyphs ()
-  (let* ((context
-          (make-tessera-entry-context :buffer (current-buffer)))
-         (tessera-glyph-style 'ascii)
-         (glyph (make-tessera-glyph :ascii "*"))
-         (text
-          (tessera-glyph-render
-           glyph context '(:help-echo "Indicator"))))
-    (should (equal text "*"))
-    (should (equal (get-text-property 0 'help-echo text)
-                   "Indicator"))
-    (should (eq (get-text-property 0 'tessera-glyph text)
-                t))))
 
 (provide 'tessera-glyph-tests)
 ;;; tessera-glyph-tests.el ends here

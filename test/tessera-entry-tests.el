@@ -18,36 +18,11 @@
 (require 'tessera-test-support)
 (require 'tessera)
 
+;;;; Fixtures and inspection helpers
+
 (define-derived-mode tessera-entry-tests-mode fundamental-mode
   "Tessera-Test"
   "Major mode used to test buffer traversal.")
-
-(ert-deftest tessera-map-mode-buffers-finishes-after-condition ()
-  (dolist (condition '(error quit))
-    (let ((first (generate-new-buffer " *tessera-map-first*"))
-          (second (generate-new-buffer " *tessera-map-second*"))
-          visited condition-data)
-      (unwind-protect
-          (progn
-            (dolist (buffer (list first second))
-              (with-current-buffer buffer
-                (tessera-entry-tests-mode)))
-            (condition-case caught
-                (tessera--map-mode-buffers
-                 'tessera-entry-tests-mode
-                 (lambda ()
-                   (push (current-buffer) visited)
-                   (when (eq (current-buffer) first)
-                     (signal condition '("Traversal failed")))))
-              ((error quit) (setq condition-data caught)))
-            (should
-             (equal condition-data
-                    (list condition "Traversal failed")))
-            (should (= (length visited) 2))
-            (should (memq first visited))
-            (should (memq second visited)))
-        (kill-buffer first)
-        (kill-buffer second)))))
 
 (defun tessera-entry-tests--context (object buffer window)
   "Build a test context for OBJECT in BUFFER and WINDOW."
@@ -168,6 +143,134 @@
    :glyph-slots (list (tessera-entry-tests--slot))
    :layouts `((two-line . ,(tessera-entry-tests--two-line-layout)))))
 
+(defun tessera-entry-tests--property-count (property value string)
+  "Count positions where PROPERTY equals VALUE in STRING."
+  (cl-loop for position below (length string)
+           count (equal (get-text-property position property string)
+                        value)))
+
+(defun tessera-entry-tests--overlay-property-p
+    (property value rendered)
+  "Check installed overlay strings for PROPERTY VALUE in RENDERED."
+  (with-temp-buffer
+    (insert rendered "\n")
+    (tessera-entry-apply-layout (point-min) (1- (point-max)))
+    (cl-some
+     (lambda (overlay)
+       (cl-some
+        (lambda (name)
+          (when-let* ((string (overlay-get overlay name)))
+            (tessera-tests--property-position property value string)))
+        '(before-string after-string)))
+     (overlays-in (point-min) (point-max)))))
+
+;;;; Backend registration
+
+(ert-deftest tessera-entry-register-replaces-atomically ()
+  (let ((backend (make-symbol "tessera-test-backend")))
+    (unwind-protect
+        (progn
+          (tessera-entry-tests--register backend)
+          (let ((original (gethash backend tessera--entry-backends)))
+            (should-error
+             (tessera-entry-register
+              backend
+              :context #'tessera-entry-tests--context
+              :segments
+              '((title . tessera-entry-tests--other-segment))
+              :glyph-slots (list (tessera-entry-tests--slot))
+              :layouts
+              `((single-line . ,(tessera-entry-tests--layout)))))
+            (should (eq (gethash backend tessera--entry-backends)
+                        original)))
+          (should (eq (tessera-entry-tests--register backend)
+                      backend)))
+      (remhash backend tessera--entry-backends))))
+
+(ert-deftest tessera-entry-register-rejects-duplicate-ids ()
+  (let ((backend (make-symbol "tessera-test-backend")))
+    (should-error
+     (tessera-entry-register
+      backend
+      :context #'tessera-entry-tests--context
+      :segments
+      '((title . tessera-entry-tests--segment)
+        (title . tessera-entry-tests--other-segment))
+      :glyph-slots nil
+      :layouts
+      `((single-line
+         . ,(make-tessera-entry-layout
+             :main-left-segments '(title))))))))
+
+(ert-deftest tessera-entry-register-rejects-unknown-references ()
+  (let ((backend (make-symbol "tessera-test-backend")))
+    (should-error
+     (tessera-entry-register
+      backend
+      :context #'tessera-entry-tests--context
+      :segments
+      '((title . tessera-entry-tests--segment))
+      :glyph-slots nil
+      :layouts
+      `((single-line
+         . ,(make-tessera-entry-layout
+             :main-left-segments '(missing))))))))
+
+(ert-deftest tessera-entry-register-rejects-invalid-segment-policy ()
+  (dolist (reference '((title :grow yes)
+                       (title :min-width -1)
+                       (title :max-width -1)
+                       (title :min-width 2 :max-width 1)
+                       (title :truncate side)
+                       (title :priority high)
+                       (title :optional yes)))
+    (should-error
+     (tessera--validate-segment-reference reference '(title)))))
+
+(ert-deftest tessera-entry-register-rejects-invalid-slot-policy ()
+  (dolist (reference '((status :reserve yes)
+                       (status :unknown t)))
+    (should-error
+     (tessera--validate-glyph-slot-reference
+      reference '(status) "Test layout"))))
+
+(ert-deftest tessera-entry-register-rejects-invalid-glyphs ()
+  (let* ((backend (make-symbol "tessera-test-backend"))
+         (slot (tessera-entry-tests--slot))
+         (glyph (plist-get
+                 (cdr (car (tessera-glyph-slot-glyphs slot)))
+                 :glyph)))
+    (setf (tessera-glyph-face glyph) 'unknown)
+    (should-error
+     (tessera-entry-register
+      backend
+      :context #'tessera-entry-tests--context
+      :segments
+      '((title . tessera-entry-tests--segment))
+      :glyph-slots (list slot)
+      :layouts
+      `((single-line
+         . ,(make-tessera-entry-layout
+             :main-glyph-slots '(status)
+             :main-left-segments '(title))))))))
+
+(ert-deftest tessera-entry-validates-glyphs-at-registration ()
+  (let ((backend 'tessera-entry-tests)
+        (tessera-glyph-style 'ascii))
+    (unwind-protect
+        (progn
+          (tessera-entry-tests--register backend)
+          (cl-letf (((symbol-function 'tessera--validate-glyph)
+                     (lambda (&rest _)
+                       (ert-fail "Glyph was revalidated"))))
+            (should (string-match-p
+                     "Title" (tessera-entry-render
+                              backend '( :title "Title"
+                                         :status unread))))))
+      (remhash backend tessera--entry-backends))))
+
+;;;; Measurement and truncation
+
 (ert-deftest tessera-entry-pixel-truncation-keeps-requested-end ()
   (pcase-dolist (`(,method ,expected)
                  '((head "…DE") (middle "A…E") (tail "AB…")))
@@ -264,114 +367,109 @@
           (should (<= (tessera-tests--pixel-width clipped)
                       (* width (frame-char-width)))))))))
 
-(defun tessera-entry-tests--property-count (property value string)
-  "Count positions where PROPERTY equals VALUE in STRING."
-  (cl-loop for position below (length string)
-           count (equal (get-text-property position property string)
-                        value)))
+(ert-deftest tessera-entry-pixel-measurement-uses-source-properties ()
+  (with-temp-buffer
+    (setq-local face-remapping-alist '((default (:height 2.0))))
+    (setq-local char-property-alias-alist '((face font-lock-face)))
+    (setq-local default-text-properties '(help-echo "Source"))
+    (let ((source (current-buffer))
+          work-buffer
+          observed)
+      (with-temp-buffer
+        (cl-letf (((symbol-function 'buffer-text-pixel-size)
+                   (lambda (&rest _)
+                     (setq work-buffer (current-buffer))
+                     (push (list face-remapping-alist
+                                 char-property-alias-alist
+                                 default-text-properties
+                                 (buffer-string))
+                           observed)
+                     '(123 . 20))))
+          (should (= 123 (tessera--string-pixel-width "X" source)))
+          (should (= 123 (tessera--string-pixel-width "Y")))
+          (should (= 0 (tessera--string-pixel-width "")))))
+      (should (= (length observed) 2))
+      (should (equal (car observed) '(nil nil nil "Y")))
+      (should (equal (cadr observed)
+                     '(((default (:height 2.0)))
+                       ((face font-lock-face))
+                       (help-echo "Source") "X")))
+      (with-current-buffer work-buffer
+        (should (zerop (buffer-size))))
+      (cl-letf (((symbol-function 'buffer-text-pixel-size)
+                 (lambda (&rest _) (error "Measurement failed"))))
+        (should-error (tessera--string-pixel-width "Error")))
+      (with-current-buffer work-buffer
+        (should (zerop (buffer-size))))
+      (should (zerop (buffer-size))))))
 
-(ert-deftest tessera-entry-register-replaces-atomically ()
-  (let ((backend (make-symbol "tessera-test-backend")))
+(ert-deftest tessera-entry-aligns-mixed-font-text-by-pixels ()
+  (let ((tessera--entry-backends (make-hash-table :test #'eq))
+        (tessera-safe-gap 1)
+        (tessera-entry-right-padding 1))
+    (dolist (tessera-entry-layout '(single-line two-line))
+      (if (eq tessera-entry-layout 'single-line)
+          (tessera-entry-tests--register 'tessera-entry-tests)
+        (tessera-entry-tests--register-two-line 'tessera-entry-tests))
+      (cl-letf (((symbol-function 'display-graphic-p)
+                 (lambda (&optional _) t))
+                ((symbol-function 'frame-char-width)
+                 (lambda (&optional _) 10))
+                ((symbol-function 'tessera--string-pixel-width)
+                 (lambda (text &optional _buffer)
+                   (if (equal text "日本語,café") 73
+                     (* 10 (string-width text))))))
+        (let ((rendered
+               (tessera-entry-render
+                'tessera-entry-tests
+                '( :title "Subject"
+                   :date "日本語,café"
+                   :author "Author"
+                   :count "12")
+                (selected-window))))
+          (should (tessera-entry-tests--overlay-property-p
+                   'display '(space :align-to (- right (93)))
+                   rendered))
+          (when (eq tessera-entry-layout 'two-line)
+            (should (tessera-entry-tests--overlay-property-p
+                     'display '(space :align-to (- right (40)))
+                     rendered))))))))
+
+(ert-deftest tessera-entry-reserves-glyph-slot-pixel-width ()
+  (let ((backend 'tessera-entry-tests)
+        (tessera-entry-layout 'two-line)
+        (tessera-glyph-style 'ascii)
+        measured)
     (unwind-protect
         (progn
-          (tessera-entry-tests--register backend)
-          (let ((original (gethash backend tessera--entry-backends)))
-            (should-error
-             (tessera-entry-register
-              backend
-              :context #'tessera-entry-tests--context
-              :segments
-              '((title . tessera-entry-tests--other-segment))
-              :glyph-slots (list (tessera-entry-tests--slot))
-              :layouts
-              `((single-line . ,(tessera-entry-tests--layout)))))
-            (should (eq (gethash backend tessera--entry-backends)
-                        original)))
-          (should (eq (tessera-entry-tests--register backend)
-                      backend)))
+          (tessera-entry-tests--register-two-line backend)
+          (cl-letf (((symbol-function 'display-graphic-p)
+                     (lambda (&optional _) t))
+                    ((symbol-function 'frame-char-width)
+                     (lambda (&optional _) 10))
+                    ((symbol-function 'tessera--string-pixel-width)
+                     (lambda (string &optional _buffer)
+                       (push string measured)
+                       (cond ((equal string "*") 17)
+                             ((string-match-p "\\*" string) 30)
+                             (t 41)))))
+            (let ((display
+                   (tessera-entry-render
+                    backend
+                    '( :title "Subject"
+                       :date "2026"
+                       :author "Author"
+                       :count "12"
+                       :status unread))))
+              (should (seq-some
+                       (lambda (text) (string-match-p "\\*" text))
+                       measured))
+              (should
+               (tessera-entry-tests--overlay-property-p
+                'display '(space :width (30)) display)))))
       (remhash backend tessera--entry-backends))))
 
-(ert-deftest tessera-entry-register-rejects-duplicate-ids ()
-  (let ((backend (make-symbol "tessera-test-backend")))
-    (should-error
-     (tessera-entry-register
-      backend
-      :context #'tessera-entry-tests--context
-      :segments
-      '((title . tessera-entry-tests--segment)
-        (title . tessera-entry-tests--other-segment))
-      :glyph-slots nil
-      :layouts
-      `((single-line
-         . ,(make-tessera-entry-layout
-             :main-left-segments '(title))))))))
-
-(ert-deftest tessera-entry-register-rejects-unknown-references ()
-  (let ((backend (make-symbol "tessera-test-backend")))
-    (should-error
-     (tessera-entry-register
-      backend
-      :context #'tessera-entry-tests--context
-      :segments
-      '((title . tessera-entry-tests--segment))
-      :glyph-slots nil
-      :layouts
-      `((single-line
-         . ,(make-tessera-entry-layout
-             :main-left-segments '(missing))))))))
-
-(ert-deftest tessera-entry-register-rejects-invalid-segment-policy ()
-  (dolist (reference '((title :grow yes)
-                       (title :min-width -1)
-                       (title :max-width -1)
-                       (title :min-width 2 :max-width 1)
-                       (title :truncate side)
-                       (title :priority high)
-                       (title :optional yes)))
-    (should-error
-     (tessera--validate-segment-reference reference '(title)))))
-
-(ert-deftest tessera-entry-register-rejects-invalid-slot-policy ()
-  (dolist (reference '((status :reserve yes)
-                       (status :unknown t)))
-    (should-error
-     (tessera--validate-glyph-slot-reference
-      reference '(status) "Test layout"))))
-
-(ert-deftest tessera-entry-register-rejects-invalid-glyphs ()
-  (let* ((backend (make-symbol "tessera-test-backend"))
-         (slot (tessera-entry-tests--slot))
-         (glyph (plist-get
-                 (cdr (car (tessera-glyph-slot-glyphs slot)))
-                 :glyph)))
-    (setf (tessera-glyph-face glyph) 'unknown)
-    (should-error
-     (tessera-entry-register
-      backend
-      :context #'tessera-entry-tests--context
-      :segments
-      '((title . tessera-entry-tests--segment))
-      :glyph-slots (list slot)
-      :layouts
-      `((single-line
-         . ,(make-tessera-entry-layout
-             :main-glyph-slots '(status)
-             :main-left-segments '(title))))))))
-
-(defun tessera-entry-tests--overlay-property-p
-    (property value rendered)
-  "Check installed overlay strings for PROPERTY VALUE in RENDERED."
-  (with-temp-buffer
-    (insert rendered "\n")
-    (tessera-entry-apply-layout (point-min) (1- (point-max)))
-    (cl-some
-     (lambda (overlay)
-       (cl-some
-        (lambda (name)
-          (when-let* ((string (overlay-get overlay name)))
-            (tessera-tests--property-position property value string)))
-        '(before-string after-string)))
-     (overlays-in (point-min) (point-max)))))
+;;;; Entry layouts
 
 (ert-deftest tessera-native-prefix-does-not-mutate-input ()
   (let* ((prefix (propertize "ABCD" 'display ""))
@@ -509,6 +607,197 @@
               (should (string-match-p "HIGH" display)))))
       (remhash backend tessera--entry-backends))))
 
+(ert-deftest tessera-entry-render-keeps-an-empty-slot ()
+  (let ((backend 'tessera-entry-tests))
+    (unwind-protect
+        (progn
+          (tessera-entry-tests--register backend)
+          (let ((display
+                 (tessera-entry-render
+                  backend
+                  '(:title "Subject" :date nil))))
+            (should-not (string-match-p "●" display))
+            (should (tessera-entry-tests--overlay-property-p
+                     'display '(space :width 3) display))
+            (should (tessera-entry-tests--overlay-property-p
+                     'display '(space :align-to (- right 2))
+                     display))))
+      (remhash backend tessera--entry-backends))))
+
+(ert-deftest tessera-entry-render-rejects-invalid-segment-output ()
+  (let ((backend 'tessera-entry-tests))
+    (unwind-protect
+        (progn
+          (tessera-entry-register
+           backend
+           :context #'tessera-entry-tests--context
+           :segments
+           '((title . tessera-entry-tests--invalid-segment))
+           :glyph-slots nil
+           :layouts
+           `((single-line
+              . ,(make-tessera-entry-layout
+                  :main-left-segments '(title)))))
+          (should-error
+           (tessera-entry-render backend '(:title "Subject"))))
+      (remhash backend tessera--entry-backends))))
+
+(ert-deftest tessera-entry-render-builds-two-visual-lines ()
+  (let ((backend 'tessera-entry-tests)
+        (tessera-entry-layout 'two-line)
+        (tessera-glyph-style 'ascii)
+        (tessera-safe-gap 1)
+        (tessera-entry-left-padding 1)
+        (tessera-entry-right-padding 1)
+        (tessera-entry-segment-gap 1)
+        (tessera-flex-gap-min-width 1)
+        (tessera-entry-top-padding 0)
+        (tessera-entry-bottom-padding 0))
+    (unwind-protect
+        (progn
+          (tessera-entry-tests--register-two-line backend)
+          (cl-letf (((symbol-function 'window-body-width)
+                     (lambda (&rest _arguments) 21))
+                    ((symbol-function 'display-graphic-p) #'ignore))
+            (let* ((display
+                    (tessera-entry-render
+                     backend
+                     '( :title "A very long subject"
+                        :date "2026"
+                        :author "Alexandria Example"
+                        :count "12"
+                        :status unread)
+                     (selected-window)))
+                   (break
+                    (tessera-tests--property-position
+                     'display "\n" display))
+                   (title-position (string-match "A very …" display))
+                   (author-position
+                    (string-match "Alexa…mple" display)))
+              (should-not (string-match-p "[\n\r]" display))
+              (should break)
+              (should (= (tessera-entry-tests--property-count
+                          'display "\n" display)
+                         1))
+              (should title-position)
+              (should author-position)
+              (should (< title-position break author-position))
+              (should (equal (get-text-property
+                              title-position 'mouse-face display)
+                             '(tessera-entry-hover-face)))
+              (should (equal (get-text-property
+                              author-position 'mouse-face display)
+                             '(tessera-entry-hover-face)))
+              (should (= (cl-count ?* display) 1))
+              (should (tessera-entry-tests--overlay-property-p
+                       'display '(space :align-to (- right 6))
+                       display))
+              (should (tessera-entry-tests--overlay-property-p
+                       'display '(space :align-to (- right 4))
+                       display)))))
+      (remhash backend tessera--entry-backends))))
+
+(ert-deftest tessera-entry-render-adds-vertical-padding ()
+  (let ((tessera--entry-backends (make-hash-table :test #'eq))
+        (tessera-entry-layout 'two-line)
+        (tessera-entry-top-padding 0.2)
+        (tessera-entry-bottom-padding 0.3))
+    (tessera-entry-tests--register-two-line 'tessera-entry-tests)
+    (let ((rendered
+           (tessera-entry-render
+            'tessera-entry-tests
+            '(:title "Subject" :author "Author" :date "2026"))))
+      (should-not (string-match-p "\n" rendered))
+      (should (= 1 (tessera-entry-tests--property-count
+                    'display "\n" rendered)))
+      (should (tessera-entry-tests--overlay-property-p
+               'face '((:height 0.2) default) rendered))
+      (should (tessera-entry-tests--overlay-property-p
+               'face '((:height 0.3) default) rendered))
+      (with-temp-buffer
+        (insert rendered "\n")
+        (let ((original (buffer-string))
+              (end (1- (point-max))))
+          (tessera-entry-apply-layout (point-min) end)
+          (let ((count
+                 (length (overlays-in (point-min) (point-max)))))
+            (tessera-entry-apply-layout (point-min) end)
+            (should
+             (= count
+                (length (overlays-in (point-min) (point-max))))))
+          (should-not (get-text-property end 'face))
+          (should-not (get-text-property end 'line-height))
+          (should (equal original (buffer-string)))
+          (tessera-entry-clear-layout)
+          (should-not (overlays-in (point-min) (point-max)))
+          (should (equal original (buffer-string))))))))
+
+(ert-deftest tessera-entry-render-budgets-fitted-glyph-width ()
+  (let ((tessera--entry-backends (make-hash-table :test #'eq))
+        (tessera-entry-layout 'single-line)
+        (tessera-glyph-style 'ascii)
+        (tessera-safe-gap 1)
+        (tessera-entry-left-padding 1)
+        (tessera-entry-right-padding 1))
+    (tessera-entry-tests--register 'tessera-entry-tests)
+    (cl-letf (((symbol-function 'display-graphic-p)
+               (lambda (&optional _) t))
+              ((symbol-function 'frame-char-width)
+               (lambda (&optional _) 1))
+              ((symbol-function 'tessera--string-pixel-width)
+               (lambda (text &optional _buffer)
+                 (if (equal text "*")
+                     (ceiling
+                      (* 5 (or (plist-get
+                                (car-safe
+                                 (get-text-property 0 'face text))
+                                :height)
+                               1)))
+                   (string-width text))))
+              ((symbol-function 'window-body-width)
+               (lambda (&rest _) 23)))
+      (let ((rendered
+             (tessera-entry-render
+              'tessera-entry-tests
+              '( :title "A very long subject"
+                 :date "2026"
+                 :status unread)
+              (selected-window))))
+        (should (equal (substring-no-properties rendered)
+                       " *A very lo…2026"))))))
+
+(ert-deftest tessera-entry-thread-clipping-keeps-columns-and-anchor ()
+  (let* ((tree (propertize "│     │     └─"
+                           'tessera--overflow-help "Full message"))
+         (author (propertize "Author" 'tessera-entry-point t))
+         (text (concat tree (tessera--space 1) author)))
+    (dolist (width '(1 4 8 12 16))
+      (let* ((clipped (tessera--clip-thread-content text width))
+             (end (1- (length clipped))))
+        (should (= width (string-width clipped)))
+        (should (string= (substring clipped 0 end)
+                         (substring text 0 end)))
+        (should (eq (aref clipped end) ?…))
+        (should (equal (get-text-property end 'help-echo clipped)
+                       "Full message"))
+        (should (get-text-property end 'mouse-face clipped))
+        (should-not (get-text-property
+                     end 'tessera--layout-space clipped))
+        (should (tessera-entry-point clipped))))
+    (should (eq text (tessera--clip-thread-content text 100)))
+    (should (equal "Ordinary entry"
+                   (tessera--clip-thread-content
+                    "Ordinary entry" 4))))
+  (let* ((text (concat (propertize "界" 'tessera--overflow-help
+                                   "Full")
+                       (propertize "名字" 'tessera-entry-point t)))
+         (clipped (tessera--clip-thread-content text 2)))
+    (should (= 2 (string-width clipped)))
+    (should (get-text-property 0 'tessera--layout-space clipped))
+    (should (= 1 (tessera-entry-point clipped)))))
+
+;;;; Glyphs and pointer interaction
+
 (ert-deftest tessera-entry-render-selects-available-glyph-style ()
   (let ((backend 'tessera-entry-tests))
     (unwind-protect
@@ -633,267 +922,6 @@
                            '(link)))))
       (remhash backend tessera--entry-backends))))
 
-(ert-deftest tessera-entry-render-keeps-an-empty-slot ()
-  (let ((backend 'tessera-entry-tests))
-    (unwind-protect
-        (progn
-          (tessera-entry-tests--register backend)
-          (let ((display
-                 (tessera-entry-render
-                  backend
-                  '(:title "Subject" :date nil))))
-            (should-not (string-match-p "●" display))
-            (should (tessera-entry-tests--overlay-property-p
-                     'display '(space :width 3) display))
-            (should (tessera-entry-tests--overlay-property-p
-                     'display '(space :align-to (- right 2))
-                     display))))
-      (remhash backend tessera--entry-backends))))
-
-(ert-deftest tessera-entry-render-rejects-invalid-segment-output ()
-  (let ((backend 'tessera-entry-tests))
-    (unwind-protect
-        (progn
-          (tessera-entry-register
-           backend
-           :context #'tessera-entry-tests--context
-           :segments
-           '((title . tessera-entry-tests--invalid-segment))
-           :glyph-slots nil
-           :layouts
-           `((single-line
-              . ,(make-tessera-entry-layout
-                  :main-left-segments '(title)))))
-          (should-error
-           (tessera-entry-render backend '(:title "Subject"))))
-      (remhash backend tessera--entry-backends))))
-
-(ert-deftest tessera-entry-render-builds-two-visual-lines ()
-  (let ((backend 'tessera-entry-tests)
-        (tessera-entry-layout 'two-line)
-        (tessera-glyph-style 'ascii)
-        (tessera-safe-gap 1)
-        (tessera-entry-left-padding 1)
-        (tessera-entry-right-padding 1)
-        (tessera-entry-segment-gap 1)
-        (tessera-flex-gap-min-width 1)
-        (tessera-entry-top-padding 0)
-        (tessera-entry-bottom-padding 0))
-    (unwind-protect
-        (progn
-          (tessera-entry-tests--register-two-line backend)
-          (cl-letf (((symbol-function 'window-body-width)
-                     (lambda (&rest _arguments) 21))
-                    ((symbol-function 'display-graphic-p) #'ignore))
-            (let* ((display
-                    (tessera-entry-render
-                     backend
-                     '( :title "A very long subject"
-                        :date "2026"
-                        :author "Alexandria Example"
-                        :count "12"
-                        :status unread)
-                     (selected-window)))
-                   (break
-                    (tessera-tests--property-position
-                     'display "\n" display))
-                   (title-position (string-match "A very …" display))
-                   (author-position
-                    (string-match "Alexa…mple" display)))
-              (should-not (string-match-p "[\n\r]" display))
-              (should break)
-              (should (= (tessera-entry-tests--property-count
-                          'display "\n" display)
-                         1))
-              (should title-position)
-              (should author-position)
-              (should (< title-position break author-position))
-              (should (equal (get-text-property
-                              title-position 'mouse-face display)
-                             '(tessera-entry-hover-face)))
-              (should (equal (get-text-property
-                              author-position 'mouse-face display)
-                             '(tessera-entry-hover-face)))
-              (should (= (cl-count ?* display) 1))
-              (should (tessera-entry-tests--overlay-property-p
-                       'display '(space :align-to (- right 6))
-                       display))
-              (should (tessera-entry-tests--overlay-property-p
-                       'display '(space :align-to (- right 4))
-                       display)))))
-      (remhash backend tessera--entry-backends))))
-
-(ert-deftest tessera-entry-pixel-measurement-uses-source-properties ()
-  (with-temp-buffer
-    (setq-local face-remapping-alist '((default (:height 2.0))))
-    (setq-local char-property-alias-alist '((face font-lock-face)))
-    (setq-local default-text-properties '(help-echo "Source"))
-    (let ((source (current-buffer))
-          work-buffer
-          observed)
-      (with-temp-buffer
-        (cl-letf (((symbol-function 'buffer-text-pixel-size)
-                   (lambda (&rest _)
-                     (setq work-buffer (current-buffer))
-                     (push (list face-remapping-alist
-                                 char-property-alias-alist
-                                 default-text-properties
-                                 (buffer-string))
-                           observed)
-                     '(123 . 20))))
-          (should (= 123 (tessera--string-pixel-width "X" source)))
-          (should (= 123 (tessera--string-pixel-width "Y")))
-          (should (= 0 (tessera--string-pixel-width "")))))
-      (should (= (length observed) 2))
-      (should (equal (car observed) '(nil nil nil "Y")))
-      (should (equal (cadr observed)
-                     '(((default (:height 2.0)))
-                       ((face font-lock-face))
-                       (help-echo "Source") "X")))
-      (with-current-buffer work-buffer
-        (should (zerop (buffer-size))))
-      (cl-letf (((symbol-function 'buffer-text-pixel-size)
-                 (lambda (&rest _) (error "Measurement failed"))))
-        (should-error (tessera--string-pixel-width "Error")))
-      (with-current-buffer work-buffer
-        (should (zerop (buffer-size))))
-      (should (zerop (buffer-size))))))
-
-(ert-deftest tessera-entry-aligns-mixed-font-text-by-pixels ()
-  (let ((tessera--entry-backends (make-hash-table :test #'eq))
-        (tessera-safe-gap 1)
-        (tessera-entry-right-padding 1))
-    (dolist (tessera-entry-layout '(single-line two-line))
-      (if (eq tessera-entry-layout 'single-line)
-          (tessera-entry-tests--register 'tessera-entry-tests)
-        (tessera-entry-tests--register-two-line 'tessera-entry-tests))
-      (cl-letf (((symbol-function 'display-graphic-p)
-                 (lambda (&optional _) t))
-                ((symbol-function 'frame-char-width)
-                 (lambda (&optional _) 10))
-                ((symbol-function 'tessera--string-pixel-width)
-                 (lambda (text &optional _buffer)
-                   (if (equal text "日本語,café") 73
-                     (* 10 (string-width text))))))
-        (let ((rendered
-               (tessera-entry-render
-                'tessera-entry-tests
-                '( :title "Subject"
-                   :date "日本語,café"
-                   :author "Author"
-                   :count "12")
-                (selected-window))))
-          (should (tessera-entry-tests--overlay-property-p
-                   'display '(space :align-to (- right (93)))
-                   rendered))
-          (when (eq tessera-entry-layout 'two-line)
-            (should (tessera-entry-tests--overlay-property-p
-                     'display '(space :align-to (- right (40)))
-                     rendered))))))))
-
-(ert-deftest tessera-entry-reserves-glyph-slot-pixel-width ()
-  (let ((backend 'tessera-entry-tests)
-        (tessera-entry-layout 'two-line)
-        (tessera-glyph-style 'ascii)
-        measured)
-    (unwind-protect
-        (progn
-          (tessera-entry-tests--register-two-line backend)
-          (cl-letf (((symbol-function 'display-graphic-p)
-                     (lambda (&optional _) t))
-                    ((symbol-function 'frame-char-width)
-                     (lambda (&optional _) 10))
-                    ((symbol-function 'tessera--string-pixel-width)
-                     (lambda (string &optional _buffer)
-                       (push string measured)
-                       (cond ((equal string "*") 17)
-                             ((string-match-p "\\*" string) 30)
-                             (t 41)))))
-            (let ((display
-                   (tessera-entry-render
-                    backend
-                    '( :title "Subject"
-                       :date "2026"
-                       :author "Author"
-                       :count "12"
-                       :status unread))))
-              (should (seq-some
-                       (lambda (text) (string-match-p "\\*" text))
-                       measured))
-              (should
-               (tessera-entry-tests--overlay-property-p
-                'display '(space :width (30)) display)))))
-      (remhash backend tessera--entry-backends))))
-
-(ert-deftest tessera-entry-render-adds-vertical-padding ()
-  (let ((tessera--entry-backends (make-hash-table :test #'eq))
-        (tessera-entry-layout 'two-line)
-        (tessera-entry-top-padding 0.2)
-        (tessera-entry-bottom-padding 0.3))
-    (tessera-entry-tests--register-two-line 'tessera-entry-tests)
-    (let ((rendered
-           (tessera-entry-render
-            'tessera-entry-tests
-            '(:title "Subject" :author "Author" :date "2026"))))
-      (should-not (string-match-p "\n" rendered))
-      (should (= 1 (tessera-entry-tests--property-count
-                    'display "\n" rendered)))
-      (should (tessera-entry-tests--overlay-property-p
-               'face '((:height 0.2) default) rendered))
-      (should (tessera-entry-tests--overlay-property-p
-               'face '((:height 0.3) default) rendered))
-      (with-temp-buffer
-        (insert rendered "\n")
-        (let ((original (buffer-string))
-              (end (1- (point-max))))
-          (tessera-entry-apply-layout (point-min) end)
-          (let ((count
-                 (length (overlays-in (point-min) (point-max)))))
-            (tessera-entry-apply-layout (point-min) end)
-            (should
-             (= count
-                (length (overlays-in (point-min) (point-max))))))
-          (should-not (get-text-property end 'face))
-          (should-not (get-text-property end 'line-height))
-          (should (equal original (buffer-string)))
-          (tessera-entry-clear-layout)
-          (should-not (overlays-in (point-min) (point-max)))
-          (should (equal original (buffer-string))))))))
-
-(ert-deftest tessera-entry-render-budgets-fitted-glyph-width ()
-  (let ((tessera--entry-backends (make-hash-table :test #'eq))
-        (tessera-entry-layout 'single-line)
-        (tessera-glyph-style 'ascii)
-        (tessera-safe-gap 1)
-        (tessera-entry-left-padding 1)
-        (tessera-entry-right-padding 1))
-    (tessera-entry-tests--register 'tessera-entry-tests)
-    (cl-letf (((symbol-function 'display-graphic-p)
-               (lambda (&optional _) t))
-              ((symbol-function 'frame-char-width)
-               (lambda (&optional _) 1))
-              ((symbol-function 'tessera--string-pixel-width)
-               (lambda (text &optional _buffer)
-                 (if (equal text "*")
-                     (ceiling
-                      (* 5 (or (plist-get
-                                (car-safe
-                                 (get-text-property 0 'face text))
-                                :height)
-                               1)))
-                   (string-width text))))
-              ((symbol-function 'window-body-width)
-               (lambda (&rest _) 23)))
-      (let ((rendered
-             (tessera-entry-render
-              'tessera-entry-tests
-              '( :title "A very long subject"
-                 :date "2026"
-                 :status unread)
-              (selected-window))))
-        (should (equal (substring-no-properties rendered)
-                       " *A very lo…2026"))))))
-
 (ert-deftest tessera-entry-padding-anchor-excludes-content-hover ()
   (dolist (prefix '(nil "" "ABCD"))
     (dolist (padding '(0 0.05 0.5))
@@ -924,21 +952,78 @@
         (should (equal-including-properties
                  input (substring text start)))))))
 
-(defun tessera-entry-tests--insert-current-fixture ()
-  "Insert two entries and install their overlay layouts."
-  (tessera-entry-tests--register-two-line 'tessera-entry-tests)
-  (dolist (title '("First" "Second"))
-    (let ((start (point)))
-      (insert (tessera-entry-render
-               'tessera-entry-tests
-               (list :title title
-                     :author "Author"
-                     :date "2026"
-                     :count "12"
-                     :status 'unread)))
-      (let ((end (point)))
-        (insert "\n")
-        (tessera-entry-apply-layout start end)))))
+(ert-deftest tessera-entry-layout-spaces-never-change-on-hover ()
+  (let ((tessera--entry-backends (make-hash-table :test #'eq))
+        (tessera-entry-layout 'two-line)
+        (tessera-entry-top-padding 0.2)
+        (tessera-entry-bottom-padding 0.3)
+        (tessera-safe-gap 1)
+        (tessera-entry-left-padding 1)
+        (tessera-entry-segment-gap 1)
+        (tessera-flex-gap-min-width 1)
+        (tessera-glyph-style 'ascii))
+    (with-temp-buffer
+      (tessera-entry-tests--insert-current-fixture)
+      (let ((start (point)))
+        (insert (tessera-entry-render
+                 'tessera-entry-tests
+                 '( :title "Spaced title"
+                    :author "Plain author"
+                    :date "2026"
+                    :count "12")))
+        (let ((end (point)))
+          (insert "\n")
+          (tessera-entry-apply-layout start end)))
+      (goto-char (point-min))
+      (dolist (selected '(nil t nil))
+        (if selected (tessera-entry-highlight-current)
+          (tessera-entry-clear-current))
+        (let (aligned padded)
+          (dolist (overlay (overlays-in (point-min) (point-max)))
+            (when (overlay-get overlay 'tessera-entry-overlay)
+              (dolist (property '(before-string after-string))
+                (when-let* ((text (overlay-get overlay property)))
+                  (dotimes (index (length text))
+                    (let* ((face (get-text-property index 'face text))
+                           (hover
+                            (get-text-property
+                             index 'mouse-face text))
+                           (end (next-single-property-change
+                                 index 'mouse-face text
+                                 (length text))))
+                      ;; Non-nil blocks hover from the anchor text;
+                      ;; no attributes override the space's face.
+                      (should (equal hover '(:inherit nil)))
+                      (should
+                       (cl-loop for position from index below end
+                                always
+                                (equal face
+                                       (get-text-property
+                                        position 'face text))))
+                      (when (get-text-property
+                             index 'line-height text)
+                        (setq padded t))
+                      (when (plist-member
+                             (cdr-safe
+                              (get-text-property index 'display text))
+                             :align-to)
+                        (setq aligned t))))))))
+          (should aligned)
+          (should padded))
+        (search-forward "First")
+        (should (get-text-property (1- (point)) 'mouse-face))
+        (should-not
+         (equal (get-text-property (1- (point)) 'mouse-face)
+                '(:inherit nil)))
+        (search-forward "Spaced title")
+        (let ((hover (get-text-property (1- (point)) 'mouse-face)))
+          (should hover)
+          (should-not (equal hover '(:inherit nil)))
+          (should (eq hover (get-text-property
+                             (- (point) 6) 'mouse-face))))
+        (goto-char (point-min))))))
+
+;;;; Navigation state
 
 (ert-deftest tessera-navigation-restores-buffer-and-windows ()
   (save-window-excursion
@@ -1254,6 +1339,24 @@
         (kill-buffer other)
         (kill-buffer replacement)))))
 
+;;;; Current entry highlighting
+
+(defun tessera-entry-tests--insert-current-fixture ()
+  "Insert two entries and install their overlay layouts."
+  (tessera-entry-tests--register-two-line 'tessera-entry-tests)
+  (dolist (title '("First" "Second"))
+    (let ((start (point)))
+      (insert (tessera-entry-render
+               'tessera-entry-tests
+               (list :title title
+                     :author "Author"
+                     :date "2026"
+                     :count "12"
+                     :status 'unread)))
+      (let ((end (point)))
+        (insert "\n")
+        (tessera-entry-apply-layout start end)))))
+
 (ert-deftest tessera-entry-current-restores-native-properties ()
   (let ((tessera--entry-backends (make-hash-table :test #'eq))
         (tessera-entry-layout 'two-line)
@@ -1334,36 +1437,6 @@
           (should (eq after (overlay-get overlay 'after-string))))
         (should-not (buffer-modified-p))))))
 
-(ert-deftest tessera-entry-thread-clipping-keeps-columns-and-anchor ()
-  (let* ((tree (propertize "│     │     └─"
-                           'tessera--overflow-help "Full message"))
-         (author (propertize "Author" 'tessera-entry-point t))
-         (text (concat tree (tessera--space 1) author)))
-    (dolist (width '(1 4 8 12 16))
-      (let* ((clipped (tessera--clip-thread-content text width))
-             (end (1- (length clipped))))
-        (should (= width (string-width clipped)))
-        (should (string= (substring clipped 0 end)
-                         (substring text 0 end)))
-        (should (eq (aref clipped end) ?…))
-        (should (equal (get-text-property end 'help-echo clipped)
-                       "Full message"))
-        (should (get-text-property end 'mouse-face clipped))
-        (should-not (get-text-property
-                     end 'tessera--layout-space clipped))
-        (should (tessera-entry-point clipped))))
-    (should (eq text (tessera--clip-thread-content text 100)))
-    (should (equal "Ordinary entry"
-                   (tessera--clip-thread-content
-                    "Ordinary entry" 4))))
-  (let* ((text (concat (propertize "界" 'tessera--overflow-help
-                                   "Full")
-                       (propertize "名字" 'tessera-entry-point t)))
-         (clipped (tessera--clip-thread-content text 2)))
-    (should (= 2 (string-width clipped)))
-    (should (get-text-property 0 'tessera--layout-space clipped))
-    (should (= 1 (tessera-entry-point clipped)))))
-
 (ert-deftest tessera-entry-current-excludes-thread-heading ()
   (with-temp-buffer
     (let* ((tessera-entry-top-padding 0.2)
@@ -1418,77 +1491,6 @@
           (should (eq before (overlay-get overlay 'before-string)))
           (should (eq after (overlay-get overlay 'after-string))))))))
 
-(ert-deftest tessera-entry-layout-spaces-never-change-on-hover ()
-  (let ((tessera--entry-backends (make-hash-table :test #'eq))
-        (tessera-entry-layout 'two-line)
-        (tessera-entry-top-padding 0.2)
-        (tessera-entry-bottom-padding 0.3)
-        (tessera-safe-gap 1)
-        (tessera-entry-left-padding 1)
-        (tessera-entry-segment-gap 1)
-        (tessera-flex-gap-min-width 1)
-        (tessera-glyph-style 'ascii))
-    (with-temp-buffer
-      (tessera-entry-tests--insert-current-fixture)
-      (let ((start (point)))
-        (insert (tessera-entry-render
-                 'tessera-entry-tests
-                 '( :title "Spaced title"
-                    :author "Plain author"
-                    :date "2026"
-                    :count "12")))
-        (let ((end (point)))
-          (insert "\n")
-          (tessera-entry-apply-layout start end)))
-      (goto-char (point-min))
-      (dolist (selected '(nil t nil))
-        (if selected (tessera-entry-highlight-current)
-          (tessera-entry-clear-current))
-        (let (aligned padded)
-          (dolist (overlay (overlays-in (point-min) (point-max)))
-            (when (overlay-get overlay 'tessera-entry-overlay)
-              (dolist (property '(before-string after-string))
-                (when-let* ((text (overlay-get overlay property)))
-                  (dotimes (index (length text))
-                    (let* ((face (get-text-property index 'face text))
-                           (hover
-                            (get-text-property
-                             index 'mouse-face text))
-                           (end (next-single-property-change
-                                 index 'mouse-face text
-                                 (length text))))
-                      ;; Non-nil blocks hover from the anchor text;
-                      ;; no attributes override the space's face.
-                      (should (equal hover '(:inherit nil)))
-                      (should
-                       (cl-loop for position from index below end
-                                always
-                                (equal face
-                                       (get-text-property
-                                        position 'face text))))
-                      (when (get-text-property
-                             index 'line-height text)
-                        (setq padded t))
-                      (when (plist-member
-                             (cdr-safe
-                              (get-text-property index 'display text))
-                             :align-to)
-                        (setq aligned t))))))))
-          (should aligned)
-          (should padded))
-        (search-forward "First")
-        (should (get-text-property (1- (point)) 'mouse-face))
-        (should-not
-         (equal (get-text-property (1- (point)) 'mouse-face)
-                '(:inherit nil)))
-        (search-forward "Spaced title")
-        (let ((hover (get-text-property (1- (point)) 'mouse-face)))
-          (should hover)
-          (should-not (equal hover '(:inherit nil)))
-          (should (eq hover (get-text-property
-                             (- (point) 6) 'mouse-face))))
-        (goto-char (point-min))))))
-
 (ert-deftest tessera-entry-current-survives-entry-replacement ()
   (let ((tessera--entry-backends (make-hash-table :test #'eq))
         (tessera-entry-layout 'two-line))
@@ -1529,20 +1531,34 @@
                    (point-min) (point-max)
                    'tessera--current-face nil)))))
 
-(ert-deftest tessera-entry-validates-glyphs-at-registration ()
-  (let ((backend 'tessera-entry-tests)
-        (tessera-glyph-style 'ascii))
-    (unwind-protect
-        (progn
-          (tessera-entry-tests--register backend)
-          (cl-letf (((symbol-function 'tessera--validate-glyph)
-                     (lambda (&rest _)
-                       (ert-fail "Glyph was revalidated"))))
-            (should (string-match-p
-                     "Title" (tessera-entry-render
-                              backend '( :title "Title"
-                                         :status unread))))))
-      (remhash backend tessera--entry-backends))))
+;;;; Buffer lifecycle
+
+(ert-deftest tessera-map-mode-buffers-finishes-after-condition ()
+  (dolist (condition '(error quit))
+    (let ((first (generate-new-buffer " *tessera-map-first*"))
+          (second (generate-new-buffer " *tessera-map-second*"))
+          visited condition-data)
+      (unwind-protect
+          (progn
+            (dolist (buffer (list first second))
+              (with-current-buffer buffer
+                (tessera-entry-tests-mode)))
+            (condition-case caught
+                (tessera--map-mode-buffers
+                 'tessera-entry-tests-mode
+                 (lambda ()
+                   (push (current-buffer) visited)
+                   (when (eq (current-buffer) first)
+                     (signal condition '("Traversal failed")))))
+              ((error quit) (setq condition-data caught)))
+            (should
+             (equal condition-data
+                    (list condition "Traversal failed")))
+            (should (= (length visited) 2))
+            (should (memq first visited))
+            (should (memq second visited)))
+        (kill-buffer first)
+        (kill-buffer second)))))
 
 (provide 'tessera-entry-tests)
 ;;; tessera-entry-tests.el ends here

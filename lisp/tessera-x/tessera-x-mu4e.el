@@ -72,7 +72,7 @@ A custom function may supply an account-specific query."
   :type 'function
   :group 'tessera-x-mu4e)
 
-;;;; Context snapshots
+;;;; Message metadata and selection
 
 (defun tessera-x-mu4e--contacts (contacts)
   "Format CONTACTS with full names and addresses."
@@ -153,6 +153,32 @@ Inspect the full result buffer, preserving its narrowing and point."
                  (push item items))))))))
     (nreverse items)))
 
+(defun tessera-x-mu4e--today-query ()
+  "Read a native Headers query or Main query-item at point."
+  (cond
+   ((derived-mode-p 'mu4e-headers-mode)
+    (if (stringp list-buffers-directory)
+        list-buffers-directory
+      (user-error "No query associated with this Headers buffer")))
+   ((derived-mode-p 'mu4e-main-mode)
+    (let ((position (line-beginning-position))
+          (end (line-end-position))
+          query)
+      (while (and (< position end) (not query))
+        (let ((help (get-text-property position 'help-echo)))
+          (when (and (stringp help)
+                     (cl-find help (mu4e-query-items)
+                              :key (lambda (item)
+                                     (plist-get item :query))
+                              :test #'equal))
+            (setq query help)))
+        (setq position (next-single-property-change
+                        position 'help-echo nil end)))
+      (or query (user-error "Point is not on a mu4e query item"))))
+   (t (user-error "Run in mu4e Headers or Main"))))
+
+;;;; Message content and context construction
+
 (defun tessera-x-mu4e--read-body (item)
   "Fill ITEM from its readable local message file."
   (tessera-x-read-message
@@ -176,6 +202,8 @@ Inspect the full result buffer, preserving its narrowing and point."
        (signal (car err) (cdr err)))
       (error (tessera-x-context-fail
               context (error-message-string err))))))
+
+;;;; Query lifecycle and callbacks
 
 (defun tessera-x-mu4e--cancel-query (process output errors)
   "Stop PROCESS and release OUTPUT and ERRORS buffers."
@@ -291,6 +319,8 @@ With ANCHOR, include related messages and keep descendants."
      (tessera-x-context-fail context (error-message-string err))))
   context)
 
+;;;; Context commands
+
 ;;;###autoload
 (defun tessera-x-mu4e-prepare-context ()
   "Prepare marked messages, an active region, or the current message.
@@ -340,30 +370,6 @@ the current search filter.  This does not fetch mail from a server."
         (tessera-x-mu4e--finish-context
          context (tessera-x-subthread items anchor)))
       context)))
-
-(defun tessera-x-mu4e--today-query ()
-  "Read a native Headers query or Main query-item at point."
-  (cond
-   ((derived-mode-p 'mu4e-headers-mode)
-    (if (stringp list-buffers-directory)
-        list-buffers-directory
-      (user-error "No query associated with this Headers buffer")))
-   ((derived-mode-p 'mu4e-main-mode)
-    (let ((position (line-beginning-position))
-          (end (line-end-position))
-          query)
-      (while (and (< position end) (not query))
-        (let ((help (get-text-property position 'help-echo)))
-          (when (and (stringp help)
-                     (cl-find help (mu4e-query-items)
-                              :key (lambda (item)
-                                     (plist-get item :query))
-                              :test #'equal))
-            (setq query help)))
-        (setq position (next-single-property-change
-                        position 'help-echo nil end)))
-      (or query (user-error "Point is not on a mu4e query item"))))
-   (t (user-error "Run in mu4e Headers or Main"))))
 
 ;;;###autoload
 (defun tessera-x-mu4e-prepare-today-context ()

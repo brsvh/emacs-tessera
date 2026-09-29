@@ -9,6 +9,42 @@
 (require 'ert)
 (require 'tessera)
 
+;;;; Reference validation
+
+(ert-deftest tessera-slot-optional-reference-validates-boolean ()
+  (tessera--validate-glyph-slot-reference
+   '(status :optional t) '(status) "Test")
+  (should-error
+   (tessera--validate-glyph-slot-reference
+    '(status :optional sometimes) '(status) "Test")))
+
+(ert-deftest tessera-slot-area-validates-alignment ()
+  (should-error
+   (tessera--validate-layout
+    (make-tessera-entry-layout :glyph-slots-align 'middle)
+    nil nil "Test")))
+
+(ert-deftest tessera-inline-slots-validate-all-regions ()
+  (dolist (region '(:main-left-segments
+                    :main-right-segments
+                    :extra-left-segments
+                    :extra-right-segments))
+    (tessera--validate-layout
+     (apply #'make-tessera-entry-layout
+            (list region '((:slots status))))
+     nil '(status) "Test")))
+
+(ert-deftest tessera-inline-slots-reject-invalid-groups ()
+  (dolist (reference '((:slots) (:slots missing)
+                       (:slots (status :grow t))))
+    (should-error
+     (tessera--validate-layout
+      (make-tessera-entry-layout
+       :main-left-segments (list reference))
+      nil '(status) "Test"))))
+
+;;;; Slot layout and width
+
 (ert-deftest tessera-slot-optional-reference-collapses-empty-width ()
   (let* ((tessera-glyph-style 'ascii)
          (calls 0)
@@ -72,13 +108,6 @@
            optional nil nil definition context align)
           (should (= calls 1)))))))
 
-(ert-deftest tessera-slot-optional-reference-validates-boolean ()
-  (tessera--validate-glyph-slot-reference
-   '(status :optional t) '(status) "Test")
-  (should-error
-   (tessera--validate-glyph-slot-reference
-    '(status :optional sometimes) '(status) "Test")))
-
 (ert-deftest tessera-slot-area-packs-icons-without-moving-content ()
   (let* ((tessera-glyph-style 'ascii)
          (references '(a b c d))
@@ -141,12 +170,6 @@
                                references definition context)))
                 "  b   d "))))))
 
-(ert-deftest tessera-slot-area-validates-alignment ()
-  (should-error
-   (tessera--validate-layout
-    (make-tessera-entry-layout :glyph-slots-align 'middle)
-    nil nil "Test")))
-
 (ert-deftest tessera-inline-slots-reserve-empty-and-visible-width ()
   (let* ((tessera-glyph-style 'ascii)
          (slot (make-tessera-glyph-slot
@@ -173,25 +196,6 @@
         (should-not (tessera--rendered-segment-truncate filled))
         (should (= 1 (cl-count ?* (tessera--rendered-segment-string
                                    filled))))))))
-
-(ert-deftest tessera-inline-slots-validate-all-regions ()
-  (dolist (region '(:main-left-segments
-                    :main-right-segments
-                    :extra-left-segments
-                    :extra-right-segments))
-    (tessera--validate-layout
-     (apply #'make-tessera-entry-layout
-            (list region '((:slots status))))
-     nil '(status) "Test")))
-
-(ert-deftest tessera-inline-slots-reject-invalid-groups ()
-  (dolist (reference '((:slots) (:slots missing)
-                       (:slots (status :grow t))))
-    (should-error
-     (tessera--validate-layout
-      (make-tessera-entry-layout
-       :main-left-segments (list reference))
-      nil '(status) "Test"))))
 
 (provide 'tessera-slot-tests)
 ;;; tessera-slot-tests.el ends here

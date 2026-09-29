@@ -12,26 +12,7 @@
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-headers)
 
-(ert-deftest tessera-mu4e-refreshes-after-font-remapping ()
-  (with-temp-buffer
-    (let* ((face-remapping-alist
-            (copy-tree '((default (:height 1.0)))))
-           (tessera-mu4e-headers--active t)
-           (tessera-mu4e-headers--dirty nil)
-           (tessera-mu4e-headers--appearance
-            (tessera-mu4e-headers--appearance))
-           (syncs 0))
-      (cl-letf (((symbol-function 'tessera-mu4e-headers--sync)
-                 (lambda (native force)
-                   (should-not native)
-                   (should force)
-                   (cl-incf syncs))))
-        (tessera-mu4e-headers--refresh)
-        (should (zerop syncs))
-        (setf (plist-get (cadar face-remapping-alist) :height) 2.0)
-        (tessera-mu4e-headers--refresh)
-        (tessera-mu4e-headers--refresh)
-        (should (= syncs 1))))))
+;;;; Fields and native identity
 
 (ert-deftest tessera-mu4e-undated-rows-keep-native-identity ()
   (dolist (date '(nil invalid (0 0 0) (0 0)))
@@ -79,204 +60,6 @@
                            (tessera-mu4e-headers--field
                             'date context)) "None"))))))
               (tessera-mu4e-headers--disable))))))))
-
-(ert-deftest tessera-mu4e-month-thread-date-is-latest-only ()
-  (should
-   (eq (default-value
-        'tessera-mu4e-headers-month-thread-date)
-       'latest))
-  (let ((widget
-         (widget-convert
-          (get 'tessera-mu4e-headers-month-thread-date
-               'custom-type))))
-    (should (widget-apply widget :match 'inherit))
-    (should (widget-apply widget :match 'latest))
-    (should-not (widget-apply widget :match 'root)))
-  (let ((tessera-month-thread-date 'root)
-        (tessera-mu4e-headers-month-thread-date 'inherit))
-    (should (eq (tessera-mu4e-headers--month-thread-date) 'latest)))
-  (let ((tessera-mu4e-headers-month-thread-date 'root))
-    (should-error
-     (tessera-mu4e-headers--month-thread-date))))
-
-(ert-deftest tessera-mu4e-restores-native-line-highlighting ()
-  (dolist (enabled '(nil t))
-    (let ((mu4e-headers-mode-hook nil))
-      (with-temp-buffer
-        (mu4e-headers-mode)
-        (hl-line-mode (if enabled 1 -1))
-        (tessera-mu4e--enable-headers)
-        (should-not hl-line-mode)
-        ;; Repeated activation must not replace the saved state.
-        (tessera-mu4e--enable-headers)
-        (should-not hl-line-mode)
-        (tessera-mu4e-headers--disable)
-        (should (eq hl-line-mode enabled))
-        (tessera-mu4e-headers--disable)
-        (should (eq hl-line-mode enabled))))))
-
-(ert-deftest tessera-mu4e-enable-failure-restores-state ()
-  (dolist (function '(tessera--save-settings
-                      tessera-mu4e-headers--refresh))
-    (let ((mu4e-headers-mode-hook nil)
-          (tessera-entry-layout 'single-line)
-          (line-move-ignore-invisible t)
-          native-sync
-          error-data)
-      (cl-letf (((symbol-function function)
-                 (lambda (&rest _)
-                   (error "Enable failed")))
-                ((symbol-function 'tessera-mu4e-headers--sync)
-                 (lambda (native &optional _force)
-                   (when native
-                     (setq native-sync t)))))
-        (with-temp-buffer
-          (mu4e-headers-mode)
-          (condition-case error
-              (tessera-mu4e-headers--enable)
-            (error (setq error-data error)))
-          (should (equal error-data '(error "Enable failed")))
-          (should (eq native-sync
-                      (eq function 'tessera-mu4e-headers--refresh)))
-          (should-not tessera-mu4e-headers--active)
-          (should-not tessera-mu4e-headers--saved-settings)
-          (should hl-line-mode)
-          (should-not (local-variable-p 'tessera-entry-layout))
-          (should-not
-           (local-variable-p 'line-move-ignore-invisible))
-          (should-not (memq #'tessera-mu4e-headers--refresh
-                            post-command-hook)))))))
-
-(ert-deftest tessera-mu4e-disable-failure-restores-state ()
-  (let ((mu4e-headers-mode-hook nil)
-        (tessera-entry-layout 'single-line)
-        (line-move-ignore-invisible t)
-        (sync-count 0)
-        error-data)
-    (cl-letf (((symbol-function 'tessera-mu4e-headers--sync)
-               (lambda (native &optional _force)
-                 (cl-incf sync-count)
-                 (when (and native (= sync-count 2))
-                   (error "Sync failed")))))
-      (with-temp-buffer
-        (mu4e-headers-mode)
-        (tessera-mu4e-headers--enable)
-        (condition-case error
-            (tessera-mu4e-headers--disable)
-          (error (setq error-data error)))
-        (should (equal error-data '(error "Sync failed")))
-        (should (= sync-count 3))
-        (should-not tessera-mu4e-headers--active)
-        (should-not tessera-mu4e-headers--saved-settings)
-        (should hl-line-mode)
-        (should-not (local-variable-p 'tessera-entry-layout))
-        (should-not
-         (local-variable-p 'line-move-ignore-invisible))
-        (should-not (memq #'tessera-mu4e-headers--refresh
-                          post-command-hook))))))
-
-(ert-deftest tessera-mu4e-disable-restores-after-nonlocal-exit ()
-  (let ((mu4e-headers-mode-hook nil)
-        (tessera-entry-layout 'single-line)
-        (line-move-ignore-invisible t))
-    (cl-letf (((symbol-function 'tessera-mu4e-headers--sync)
-               (lambda (native &optional _force)
-                 (when native
-                   (throw 'stopped :stopped)))))
-      (with-temp-buffer
-        (mu4e-headers-mode)
-        (tessera-mu4e-headers--enable)
-        (should (eq (catch 'stopped
-                      (tessera-mu4e-headers--disable))
-                    :stopped))
-        (should-not tessera-mu4e-headers--active)
-        (should-not tessera-mu4e-headers--saved-settings)
-        (should hl-line-mode)
-        (should-not (local-variable-p 'tessera-entry-layout))
-        (should-not
-         (local-variable-p 'line-move-ignore-invisible))
-        (should-not (memq #'tessera-mu4e-headers--refresh
-                          post-command-hook))))))
-
-(ert-deftest tessera-mu4e-mode-rolls-back-all-buffers ()
-  (let ((first (generate-new-buffer " *tessera-mu4e-mode-1*"))
-        (second (generate-new-buffer " *tessera-mu4e-mode-2*"))
-        (tessera-mu4e-mode nil)
-        (tessera-mu4e--installed nil)
-        (mu4e-headers-mode-hook nil)
-        (tessera--glyph-change-functions nil)
-        (tessera--month-change-functions nil)
-        enabled disabled error-data)
-    (unwind-protect
-        (progn
-          (dolist (buffer (list first second))
-            (with-current-buffer buffer
-              (setq major-mode 'mu4e-headers-mode)))
-          (cl-letf (((symbol-function 'tessera-mu4e--enable-headers)
-                     (lambda ()
-                       (setq tessera-mu4e-headers--active t)
-                       (push (current-buffer) enabled)
-                       (when (eq (current-buffer) first)
-                         (error "Enable failed"))))
-                    ((symbol-function
-                      'tessera-mu4e-headers--disable)
-                     (lambda ()
-                       (setq tessera-mu4e-headers--active nil)
-                       (push (current-buffer) disabled)))
-                    ((symbol-function
-                      'tessera-mu4e-headers--navigation)
-                     #'ignore))
-            (condition-case error
-                (tessera-mu4e-mode 1)
-              (error (setq error-data error))))
-          (should (equal error-data '(error "Enable failed")))
-          (should-not tessera-mu4e-mode)
-          (should (= (length enabled) 2))
-          (should (= (length disabled) 2))
-          (should-not (memq #'tessera-mu4e--enable-headers
-                            mu4e-headers-mode-hook))
-          (should-not (memq #'tessera-mu4e--months-changed
-                            tessera--month-change-functions))
-          (dolist (buffer (list first second))
-            (with-current-buffer buffer
-              (should-not tessera-mu4e-headers--active))))
-      (kill-buffer first)
-      (kill-buffer second))))
-
-(ert-deftest tessera-mu4e-mode-bulk-disable-scans-buffers-once ()
-  (let ((first (generate-new-buffer " *tessera-mu4e-bulk-1*"))
-        (second (generate-new-buffer " *tessera-mu4e-bulk-2*"))
-        (tessera-mu4e-mode t)
-        (tessera-mu4e--installed t)
-        (mu4e-headers-mode-hook nil)
-        (tessera--glyph-change-functions nil)
-        (scans 0)
-        navigation-calls)
-    (unwind-protect
-        (progn
-          (dolist (buffer (list first second))
-            (with-current-buffer buffer
-              (setq major-mode 'mu4e-headers-mode
-                    tessera-mu4e-headers--active t)))
-          (cl-letf (((symbol-function 'buffer-list)
-                     (lambda ()
-                       (setq scans (1+ scans))
-                       (list first second)))
-                    ((symbol-function
-                      'tessera-mu4e-headers--sync)
-                     #'ignore)
-                    ((symbol-function
-                      'tessera-mu4e-headers--navigation)
-                     (lambda (enable)
-                       (push enable navigation-calls))))
-            (tessera-mu4e-mode -1))
-          (should (= scans 1))
-          (should (equal navigation-calls '(nil)))
-          (dolist (buffer (list first second))
-            (with-current-buffer buffer
-              (should-not tessera-mu4e-headers--active))))
-      (kill-buffer first)
-      (kill-buffer second))))
 
 (ert-deftest tessera-mu4e-semantic-slots-retain-coexisting-states ()
   (let* ((tessera-glyph-style 'ascii)
@@ -553,6 +336,45 @@
                           (forward-line 1))))))
               (tessera-mu4e-headers--disable))))))))
 
+(ert-deftest tessera-mu4e-headers-labels-keep-neutral-separators ()
+  (let* ((mu4e--mark-map (make-hash-table))
+         (message '( :flags (seen)
+                     :labels ("foo" "bar")
+                     :tags ("bar" "baz")))
+         (context (tessera-mu4e-headers--context message nil nil))
+         (text (tessera-mu4e-headers--field 'labels context)))
+    (should (equal text "foo,bar,baz"))
+    (should (equal (get-text-property 4 'help-echo text)
+                   "bar (label, tag)"))
+    (dolist (position '(3 7))
+      (should (eq (get-text-property position 'mouse-face text)
+                  'default))
+      (should (eq (get-text-property position 'face text) 'default)))
+    (should (equal (plist-get message :labels) '("foo" "bar")))))
+
+;;;; Month grouping
+
+(ert-deftest tessera-mu4e-month-thread-date-is-latest-only ()
+  (should
+   (eq (default-value
+        'tessera-mu4e-headers-month-thread-date)
+       'latest))
+  (let ((widget
+         (widget-convert
+          (get 'tessera-mu4e-headers-month-thread-date
+               'custom-type))))
+    (should (widget-apply widget :match 'inherit))
+    (should (widget-apply widget :match 'latest))
+    (should-not (widget-apply widget :match 'root)))
+  (let ((tessera-month-thread-date 'root)
+        (tessera-mu4e-headers-month-thread-date 'inherit))
+    (should (eq (tessera-mu4e-headers--month-thread-date) 'latest)))
+  (let ((tessera-mu4e-headers-month-thread-date 'root))
+    (should-error
+     (tessera-mu4e-headers--month-thread-date))))
+
+;;;; Native navigation
+
 (ert-deftest tessera-mu4e-headers-navigate-logical-entries ()
   (let ((mu4e-search-threads nil)
         (mu4e-headers-mode-hook nil)
@@ -677,21 +499,209 @@
                 (should (= (point) (tessera-entry-point))))
             (tessera-mu4e-headers--disable)))))))
 
-(ert-deftest tessera-mu4e-headers-labels-keep-neutral-separators ()
-  (let* ((mu4e--mark-map (make-hash-table))
-         (message '( :flags (seen)
-                     :labels ("foo" "bar")
-                     :tags ("bar" "baz")))
-         (context (tessera-mu4e-headers--context message nil nil))
-         (text (tessera-mu4e-headers--field 'labels context)))
-    (should (equal text "foo,bar,baz"))
-    (should (equal (get-text-property 4 'help-echo text)
-                   "bar (label, tag)"))
-    (dolist (position '(3 7))
-      (should (eq (get-text-property position 'mouse-face text)
-                  'default))
-      (should (eq (get-text-property position 'face text) 'default)))
-    (should (equal (plist-get message :labels) '("foo" "bar")))))
+;;;; Appearance synchronization
+
+(ert-deftest tessera-mu4e-refreshes-after-font-remapping ()
+  (with-temp-buffer
+    (let* ((face-remapping-alist
+            (copy-tree '((default (:height 1.0)))))
+           (tessera-mu4e-headers--active t)
+           (tessera-mu4e-headers--dirty nil)
+           (tessera-mu4e-headers--appearance
+            (tessera-mu4e-headers--appearance))
+           (syncs 0))
+      (cl-letf (((symbol-function 'tessera-mu4e-headers--sync)
+                 (lambda (native force)
+                   (should-not native)
+                   (should force)
+                   (cl-incf syncs))))
+        (tessera-mu4e-headers--refresh)
+        (should (zerop syncs))
+        (setf (plist-get (cadar face-remapping-alist) :height) 2.0)
+        (tessera-mu4e-headers--refresh)
+        (tessera-mu4e-headers--refresh)
+        (should (= syncs 1))))))
+
+;;;; Buffer lifecycle
+
+(ert-deftest tessera-mu4e-restores-native-line-highlighting ()
+  (dolist (enabled '(nil t))
+    (let ((mu4e-headers-mode-hook nil))
+      (with-temp-buffer
+        (mu4e-headers-mode)
+        (hl-line-mode (if enabled 1 -1))
+        (tessera-mu4e--enable-headers)
+        (should-not hl-line-mode)
+        ;; Repeated activation must not replace the saved state.
+        (tessera-mu4e--enable-headers)
+        (should-not hl-line-mode)
+        (tessera-mu4e-headers--disable)
+        (should (eq hl-line-mode enabled))
+        (tessera-mu4e-headers--disable)
+        (should (eq hl-line-mode enabled))))))
+
+(ert-deftest tessera-mu4e-enable-failure-restores-state ()
+  (dolist (function '(tessera--save-settings
+                      tessera-mu4e-headers--refresh))
+    (let ((mu4e-headers-mode-hook nil)
+          (tessera-entry-layout 'single-line)
+          (line-move-ignore-invisible t)
+          native-sync
+          error-data)
+      (cl-letf (((symbol-function function)
+                 (lambda (&rest _)
+                   (error "Enable failed")))
+                ((symbol-function 'tessera-mu4e-headers--sync)
+                 (lambda (native &optional _force)
+                   (when native
+                     (setq native-sync t)))))
+        (with-temp-buffer
+          (mu4e-headers-mode)
+          (condition-case error
+              (tessera-mu4e-headers--enable)
+            (error (setq error-data error)))
+          (should (equal error-data '(error "Enable failed")))
+          (should (eq native-sync
+                      (eq function 'tessera-mu4e-headers--refresh)))
+          (should-not tessera-mu4e-headers--active)
+          (should-not tessera-mu4e-headers--saved-settings)
+          (should hl-line-mode)
+          (should-not (local-variable-p 'tessera-entry-layout))
+          (should-not
+           (local-variable-p 'line-move-ignore-invisible))
+          (should-not (memq #'tessera-mu4e-headers--refresh
+                            post-command-hook)))))))
+
+(ert-deftest tessera-mu4e-disable-failure-restores-state ()
+  (let ((mu4e-headers-mode-hook nil)
+        (tessera-entry-layout 'single-line)
+        (line-move-ignore-invisible t)
+        (sync-count 0)
+        error-data)
+    (cl-letf (((symbol-function 'tessera-mu4e-headers--sync)
+               (lambda (native &optional _force)
+                 (cl-incf sync-count)
+                 (when (and native (= sync-count 2))
+                   (error "Sync failed")))))
+      (with-temp-buffer
+        (mu4e-headers-mode)
+        (tessera-mu4e-headers--enable)
+        (condition-case error
+            (tessera-mu4e-headers--disable)
+          (error (setq error-data error)))
+        (should (equal error-data '(error "Sync failed")))
+        (should (= sync-count 3))
+        (should-not tessera-mu4e-headers--active)
+        (should-not tessera-mu4e-headers--saved-settings)
+        (should hl-line-mode)
+        (should-not (local-variable-p 'tessera-entry-layout))
+        (should-not
+         (local-variable-p 'line-move-ignore-invisible))
+        (should-not (memq #'tessera-mu4e-headers--refresh
+                          post-command-hook))))))
+
+(ert-deftest tessera-mu4e-disable-restores-after-nonlocal-exit ()
+  (let ((mu4e-headers-mode-hook nil)
+        (tessera-entry-layout 'single-line)
+        (line-move-ignore-invisible t))
+    (cl-letf (((symbol-function 'tessera-mu4e-headers--sync)
+               (lambda (native &optional _force)
+                 (when native
+                   (throw 'stopped :stopped)))))
+      (with-temp-buffer
+        (mu4e-headers-mode)
+        (tessera-mu4e-headers--enable)
+        (should (eq (catch 'stopped
+                      (tessera-mu4e-headers--disable))
+                    :stopped))
+        (should-not tessera-mu4e-headers--active)
+        (should-not tessera-mu4e-headers--saved-settings)
+        (should hl-line-mode)
+        (should-not (local-variable-p 'tessera-entry-layout))
+        (should-not
+         (local-variable-p 'line-move-ignore-invisible))
+        (should-not (memq #'tessera-mu4e-headers--refresh
+                          post-command-hook))))))
+
+(ert-deftest tessera-mu4e-mode-rolls-back-all-buffers ()
+  (let ((first (generate-new-buffer " *tessera-mu4e-mode-1*"))
+        (second (generate-new-buffer " *tessera-mu4e-mode-2*"))
+        (tessera-mu4e-mode nil)
+        (tessera-mu4e--installed nil)
+        (mu4e-headers-mode-hook nil)
+        (tessera--glyph-change-functions nil)
+        (tessera--month-change-functions nil)
+        enabled disabled error-data)
+    (unwind-protect
+        (progn
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (setq major-mode 'mu4e-headers-mode)))
+          (cl-letf (((symbol-function 'tessera-mu4e--enable-headers)
+                     (lambda ()
+                       (setq tessera-mu4e-headers--active t)
+                       (push (current-buffer) enabled)
+                       (when (eq (current-buffer) first)
+                         (error "Enable failed"))))
+                    ((symbol-function
+                      'tessera-mu4e-headers--disable)
+                     (lambda ()
+                       (setq tessera-mu4e-headers--active nil)
+                       (push (current-buffer) disabled)))
+                    ((symbol-function
+                      'tessera-mu4e-headers--navigation)
+                     #'ignore))
+            (condition-case error
+                (tessera-mu4e-mode 1)
+              (error (setq error-data error))))
+          (should (equal error-data '(error "Enable failed")))
+          (should-not tessera-mu4e-mode)
+          (should (= (length enabled) 2))
+          (should (= (length disabled) 2))
+          (should-not (memq #'tessera-mu4e--enable-headers
+                            mu4e-headers-mode-hook))
+          (should-not (memq #'tessera-mu4e--months-changed
+                            tessera--month-change-functions))
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (should-not tessera-mu4e-headers--active))))
+      (kill-buffer first)
+      (kill-buffer second))))
+
+(ert-deftest tessera-mu4e-mode-bulk-disable-scans-buffers-once ()
+  (let ((first (generate-new-buffer " *tessera-mu4e-bulk-1*"))
+        (second (generate-new-buffer " *tessera-mu4e-bulk-2*"))
+        (tessera-mu4e-mode t)
+        (tessera-mu4e--installed t)
+        (mu4e-headers-mode-hook nil)
+        (tessera--glyph-change-functions nil)
+        (scans 0)
+        navigation-calls)
+    (unwind-protect
+        (progn
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (setq major-mode 'mu4e-headers-mode
+                    tessera-mu4e-headers--active t)))
+          (cl-letf (((symbol-function 'buffer-list)
+                     (lambda ()
+                       (setq scans (1+ scans))
+                       (list first second)))
+                    ((symbol-function
+                      'tessera-mu4e-headers--sync)
+                     #'ignore)
+                    ((symbol-function
+                      'tessera-mu4e-headers--navigation)
+                     (lambda (enable)
+                       (push enable navigation-calls))))
+            (tessera-mu4e-mode -1))
+          (should (= scans 1))
+          (should (equal navigation-calls '(nil)))
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (should-not tessera-mu4e-headers--active))))
+      (kill-buffer first)
+      (kill-buffer second))))
 
 (provide 'tessera-mu4e-headers-tests)
 ;;; tessera-mu4e-headers-tests.el ends here

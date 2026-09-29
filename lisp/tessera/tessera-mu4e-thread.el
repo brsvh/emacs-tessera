@@ -38,22 +38,7 @@
 (defvar-local tessera-mu4e-thread-change-hook nil
   "Hook run after a native fold operation in this buffer.")
 
-(defun tessera-mu4e-thread-invalidate ()
-  "Invalidate cached folds after native buffer edits."
-  (setq tessera-mu4e-thread--folds t))
-
-(defun tessera-mu4e-thread--changed (&rest _arguments)
-  "Record a native fold operation."
-  (tessera-mu4e-thread-invalidate)
-  (run-hooks 'tessera-mu4e-thread-change-hook))
-
-(defun tessera-mu4e-thread-track (enable)
-  "Track native folds when ENABLE is non-nil, or stop tracking."
-  (dolist (function '(mu4e-thread-fold mu4e-thread-unfold
-                                       mu4e-thread-unfold-all))
-    (if enable
-        (advice-add function :after #'tessera-mu4e-thread--changed)
-      (advice-remove function #'tessera-mu4e-thread--changed))))
+;;;; Fold queries and padding
 
 (defun tessera-mu4e-thread-folds ()
   "Return cached native fold overlays in buffer order."
@@ -94,6 +79,25 @@
                       (if (tessera-thread-context-last node)
                           tessera-thread-outer-bottom-padding
                         tessera-thread-inner-bottom-padding)))))))
+
+;;;; Change tracking
+
+(defun tessera-mu4e-thread-invalidate ()
+  "Invalidate cached folds after native buffer edits."
+  (setq tessera-mu4e-thread--folds t))
+
+(defun tessera-mu4e-thread--changed (&rest _arguments)
+  "Record a native fold operation."
+  (tessera-mu4e-thread-invalidate)
+  (run-hooks 'tessera-mu4e-thread-change-hook))
+
+(defun tessera-mu4e-thread-track (enable)
+  "Track native folds when ENABLE is non-nil, or stop tracking."
+  (dolist (function '(mu4e-thread-fold mu4e-thread-unfold
+                                       mu4e-thread-unfold-all))
+    (if enable
+        (advice-add function :after #'tessera-mu4e-thread--changed)
+      (advice-remove function #'tessera-mu4e-thread--changed))))
 
 (provide 'tessera-mu4e-thread)
 ;;; tessera-mu4e-thread.el ends here

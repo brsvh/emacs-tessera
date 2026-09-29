@@ -35,10 +35,48 @@
 (require 'tessera-mu4e)
 (require 'tessera-mu4e-thread)
 
+(defvar mu4e-search-threads)
+(defvar mu4e-headers-visible-flags)
+(defvar mu4e-headers-show-target)
+(defvar mu4e-headers-date-format)
+(defvar mu4e-headers-time-format)
+(defvar mu4e-headers-open-after-move)
+(defvar mu4e--mark-map)
+(defvar mu4e--mark-fringe-len)
+(defvar mu4e~headers-docid-pre)
+(defvar mu4e~headers-docid-post)
+(defvar mu4e~end-of-results)
+(defvar mu4e~headers-view-win)
+
+(declare-function mu4e~headers-human-date "mu4e-headers")
+(declare-function mu4e-mark-at-point "mu4e-mark")
+(declare-function mu4e~headers-apply-flags "mu4e-headers")
+(declare-function mu4e~headers-thread-root-p "mu4e-headers")
+(declare-function mu4e-get-headers-buffer "mu4e-window")
+(declare-function mu4e-select-other-view "mu4e-helpers")
+(declare-function mu4e-headers-view-message "mu4e-headers")
+(declare-function mu4e-thread-next "mu4e-thread")
+(declare-function mu4e~headers-docid-at-point "mu4e-headers")
+(declare-function mu4e~headers-goto-docid "mu4e-headers")
+(declare-function mu4e~headers-field-for-docid "mu4e-headers")
+(declare-function mu4e-headers-find-if "mu4e-headers")
+(declare-function mu4e-headers-find-if-next "mu4e-headers")
+(declare-function mu4e-thread-message-folded-p "mu4e-thread")
+
+(defvar mu4e-index-update-status)
+(defvar mu4e--server-indexing)
+(defvar mu4e--update-buffer)
+(defvar mu4e--update-timer)
+(declare-function mu4e-update-mail-and-index "mu4e-update")
+(declare-function mu4e-context-current "mu4e-context")
+(declare-function mu4e-context-name "mu4e-context")
+
 (defgroup tessera-mu4e-headers nil
   "Tessera message headers for mu4e."
   :group 'tessera-mu4e
   :prefix "tessera-mu4e-headers-")
+
+;;;; Month options
 
 (defcustom tessera-mu4e-headers-month-grouping 'inherit
   "Whether mu4e headers buffers use month grouping.
@@ -263,6 +301,56 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
   :set #'tessera-mu4e-headers--set-glyphs
   :group 'tessera-mu4e-headers)
 
+;;;; Header line options
+
+(defcustom tessera-mu4e-headers-header-line-action-function
+  #'tessera-mu4e-headers-header-line-action
+  "Function rendering the action header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-mu4e-headers)
+
+(defcustom tessera-mu4e-headers-header-line-info-function
+  #'tessera-mu4e-headers-header-line-info
+  "Function rendering the info header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-mu4e-headers)
+
+(defcustom tessera-mu4e-headers-header-line-extra-function
+  #'tessera-mu4e-headers-header-line-extra
+  "Function rendering the extra header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-mu4e-headers)
+
+(defcustom tessera-mu4e-headers-header-line-statistics-function
+  #'tessera-header-line-statistics
+  "Function rendering the statistics header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-mu4e-headers)
+
+(defcustom tessera-mu4e-headers-header-line-next-update-function
+  #'tessera-mu4e-headers--next-update
+  "Function returning the next update time, or nil when unknown.
+The function receives a `tessera-header-line-context'.  It must
+return an absolute Emacs time value or nil, without scheduling work."
+  :type '(choice (const nil) function)
+  :group 'tessera-mu4e-headers)
+
 ;;;; Faces
 
 (defface tessera-mu4e-headers-subject-face
@@ -361,82 +449,7 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
   "Pending actions, separate from current message state."
   :group 'tessera-mu4e-headers)
 
-(defvar mu4e-search-threads)
-(defvar mu4e-headers-visible-flags)
-(defvar mu4e-headers-show-target)
-(defvar mu4e-headers-date-format)
-(defvar mu4e-headers-time-format)
-(defvar mu4e-headers-open-after-move)
-(defvar mu4e--mark-map)
-(defvar mu4e--mark-fringe-len)
-(defvar mu4e~headers-docid-pre)
-(defvar mu4e~headers-docid-post)
-(defvar mu4e~end-of-results)
-(defvar mu4e~headers-view-win)
-
-(declare-function mu4e~headers-human-date "mu4e-headers")
-(declare-function mu4e-mark-at-point "mu4e-mark")
-(declare-function mu4e~headers-apply-flags "mu4e-headers")
-(declare-function mu4e~headers-thread-root-p "mu4e-headers")
-(declare-function mu4e-get-headers-buffer "mu4e-window")
-(declare-function mu4e-select-other-view "mu4e-helpers")
-(declare-function mu4e-headers-view-message "mu4e-headers")
-(declare-function mu4e-thread-next "mu4e-thread")
-(declare-function mu4e~headers-docid-at-point "mu4e-headers")
-(declare-function mu4e~headers-goto-docid "mu4e-headers")
-(declare-function mu4e~headers-field-for-docid "mu4e-headers")
-(declare-function mu4e-headers-find-if "mu4e-headers")
-(declare-function mu4e-headers-find-if-next "mu4e-headers")
-(declare-function mu4e-thread-message-folded-p "mu4e-thread")
-
-;;;; Message state and face composition
-
-(defun tessera-mu4e-headers--unread-p (message)
-  "Return non-nil when native MESSAGE flags indicate unread or new."
-  (let ((flags (plist-get message :flags)))
-    (or (memq 'unread flags) (memq 'new flags))))
-
-(defun tessera-mu4e-headers--styled-text (role message text &optional
-                                               thread)
-  "Return TEXT styled for ROLE and native MESSAGE without mutation.
-ROLE is subject, contact, date, or label.  Subject styling preserves
-mu4e's native state evaluator, including theme-supplied attributes.
-Contacts and dates depend only on unread state outside THREAD.
-THREAD is an optional shared thread context; its subject uses the
-aggregate unread state, while contacts retain native message state."
-  (let* ((result (copy-sequence text))
-         (unread (tessera-mu4e-headers--unread-p message))
-         (face
-          (pcase role
-            ('subject
-             (if thread
-                 (if (> (tessera-thread-context-unread thread) 0)
-                     'tessera-mu4e-headers-thread-unread-subject-face
-                   'tessera-mu4e-headers-thread-subject-face)
-               (if unread 'tessera-mu4e-headers-unread-subject-face
-                 'tessera-mu4e-headers-subject-face)))
-            ('contact
-             (if thread
-                 (if unread
-                     'tessera-mu4e-headers-thread-unread-contact-face
-                   'tessera-mu4e-headers-thread-contact-face)
-               (if unread 'tessera-mu4e-headers-unread-contact-face
-                 'tessera-mu4e-headers-read-contact-face)))
-            ('date (if unread
-                       'tessera-mu4e-headers-unread-date-face
-                     'tessera-mu4e-headers-date-face))
-            ('label 'tessera-mu4e-headers-label-face)
-            (_ (error "Unknown mu4e face role: %S" role)))))
-    ;; A previously styled string must not carry an old state forward.
-    (remove-text-properties 0 (length result) '(face nil) result)
-    (when (or (and (eq role 'subject) (null thread))
-              (and (eq role 'contact) thread))
-      (require 'mu4e-headers)
-      (mu4e~headers-apply-flags message result))
-    (add-face-text-property 0 (length result) face nil result)
-    result))
-
-;;;; Glyphs and header fields
+;;;; Native marks and buffer state
 
 (defvar tessera-mu4e-headers--states
   '((status
@@ -502,7 +515,21 @@ These flags follow `mu4e-headers-visible-flags'.")
 (defvar tessera-mu4e-headers--bulk-deactivating nil
   "Non-nil while the global mode disables all Headers buffers.")
 
-;;;; Thread contexts from native result rows
+;;;; Message metadata
+
+(defun tessera-mu4e-headers-labels (message)
+  "Return unique label and tag names from native MESSAGE.
+Preserve first occurrence order, with labels before tags.  Return a
+fresh list without changing MESSAGE.  No Tessera mode is needed."
+  (delete-dups (append (plist-get message :labels)
+                       (plist-get message :tags) nil)))
+
+(defun tessera-mu4e-headers--unread-p (message)
+  "Return non-nil when native MESSAGE flags indicate unread or new."
+  (let ((flags (plist-get message :flags)))
+    (or (memq 'unread flags) (memq 'new flags))))
+
+;;;; Thread contexts
 
 (defvar-local tessera-mu4e-headers--threads nil
   "Native docids mapped to shared thread contexts.")
@@ -547,15 +574,6 @@ for padding purposes.  Threading follows `mu4e-search-threads'."
     (setq tessera-mu4e-headers--threads
           (tessera-thread-build-contexts (nreverse entries)))))
 
-;;;; Header elements
-
-(defun tessera-mu4e-headers-labels (message)
-  "Return unique label and tag names from native MESSAGE.
-Preserve first occurrence order, with labels before tags.  Return a
-fresh list without changing MESSAGE.  No Tessera mode is needed."
-  (delete-dups (append (plist-get message :labels)
-                       (plist-get message :tags) nil)))
-
 (defun tessera-mu4e-headers--context (object buffer window)
   "Build a context for native OBJECT in BUFFER and WINDOW."
   (make-tessera-entry-context
@@ -564,6 +582,8 @@ fresh list without changing MESSAGE.  No Tessera mode is needed."
    :buffer buffer
    :window window
    :thread (tessera-mu4e-headers--thread-context object)))
+
+;;;; Month contexts
 
 (defun tessera-mu4e-headers--month-enabled-p ()
   "Return the effective mu4e month grouping setting."
@@ -615,6 +635,48 @@ fresh list without changing MESSAGE.  No Tessera mode is needed."
                  (window-live-p mu4e~headers-view-win))
         (mu4e-headers-view-message))
       t)))
+
+;;;; Fields and glyphs
+
+(defun tessera-mu4e-headers--styled-text (role message text &optional
+                                               thread)
+  "Return TEXT styled for ROLE and native MESSAGE without mutation.
+ROLE is subject, contact, date, or label.  Subject styling preserves
+mu4e's native state evaluator, including theme-supplied attributes.
+Contacts and dates depend only on unread state outside THREAD.
+THREAD is an optional shared thread context; its subject uses the
+aggregate unread state, while contacts retain native message state."
+  (let* ((result (copy-sequence text))
+         (unread (tessera-mu4e-headers--unread-p message))
+         (face
+          (pcase role
+            ('subject
+             (if thread
+                 (if (> (tessera-thread-context-unread thread) 0)
+                     'tessera-mu4e-headers-thread-unread-subject-face
+                   'tessera-mu4e-headers-thread-subject-face)
+               (if unread 'tessera-mu4e-headers-unread-subject-face
+                 'tessera-mu4e-headers-subject-face)))
+            ('contact
+             (if thread
+                 (if unread
+                     'tessera-mu4e-headers-thread-unread-contact-face
+                   'tessera-mu4e-headers-thread-contact-face)
+               (if unread 'tessera-mu4e-headers-unread-contact-face
+                 'tessera-mu4e-headers-read-contact-face)))
+            ('date (if unread
+                       'tessera-mu4e-headers-unread-date-face
+                     'tessera-mu4e-headers-date-face))
+            ('label 'tessera-mu4e-headers-label-face)
+            (_ (error "Unknown mu4e face role: %S" role)))))
+    ;; A previously styled string must not carry an old state forward.
+    (remove-text-properties 0 (length result) '(face nil) result)
+    (when (or (and (eq role 'subject) (null thread))
+              (and (eq role 'contact) thread))
+      (require 'mu4e-headers)
+      (mu4e~headers-apply-flags message result))
+    (add-face-text-property 0 (length result) face nil result)
+    result))
 
 (defun tessera-mu4e-headers--mark (message)
   "Return the native pending mark and target for MESSAGE."
@@ -1145,6 +1207,113 @@ FORCE also redraws unchanged messages after presentation changes."
           (tessera-entry-clear-current)
         (tessera-entry-highlight-current)))))
 
+;;;; Header line providers
+
+(defun tessera-mu4e-headers--header-line-state ()
+  "Count distinct messages, excluding inherited footer properties."
+  (let ((messages (make-hash-table :test #'eql))
+        (unread 0))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (while (< (point) (point-max))
+          (when-let* ((message (get-text-property (point) 'msg))
+                      (id (plist-get message :docid))
+                      (_ (looking-at
+                          (regexp-quote mu4e~headers-docid-pre))))
+            (unless (gethash id messages)
+              (puthash id t messages)
+              (when (tessera-mu4e-headers--unread-p message)
+                (cl-incf unread))))
+          (forward-line 1))))
+    (list :shown (hash-table-count messages)
+          :unread unread
+          :query list-buffers-directory
+          :scope (concat "All inserted messages, including folded "
+                         "and off-screen messages; "
+                         "excludes the footer.")
+          :glyph-defaults 'tessera-mu4e-headers--glyph-defaults
+          :glyph-overrides 'tessera-mu4e-headers-glyphs)))
+
+(defun tessera-mu4e-headers-header-line-info (context)
+  "Return the current headers query for CONTEXT."
+  (let ((query (or (plist-get
+                    (tessera-header-line-context-state context)
+                    :query) "")))
+    (tessera-header-line-field
+     context 'info "Query" query (concat "Search query:\n" query))))
+
+(defun tessera-mu4e-headers-header-line-extra (_context)
+  "Return the current mu4e context name for render _CONTEXT."
+  (when-let* ((current (mu4e-context-current))
+              (name (mu4e-context-name current)))
+    (propertize name 'help-echo (concat "mu4e context: " name))))
+
+(defun tessera-mu4e-headers--next-update (_context)
+  "Return the active native timer's next time for _CONTEXT."
+  (when (and (timerp mu4e--update-timer)
+             (memq mu4e--update-timer timer-list))
+    (timer--time mu4e--update-timer)))
+
+(defun tessera-mu4e-headers-header-line-action (context)
+  "Return the mail retrieval and indexing action for CONTEXT."
+  (tessera-header-line-update
+   context (plist-get mu4e-index-update-status :tstamp)
+   (when tessera-mu4e-headers-header-line-next-update-function
+     (funcall tessera-mu4e-headers-header-line-next-update-function
+              context))
+   (or mu4e--server-indexing
+       (and (buffer-live-p mu4e--update-buffer)
+            (process-live-p
+             (get-buffer-process mu4e--update-buffer))))
+   #'mu4e-update-mail-and-index
+   (concat "Retrieve mail and update the index.\n"
+           "Last time records index completion, "
+           "not retrieval success.")))
+
+(defun tessera-mu4e-headers--header-line-notify (&rest _ignored)
+  "Redraw update and context information without recounting messages."
+  (dolist (buffer tessera--header-line-buffers)
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (and (eq tessera--header-line-view 'mu4e-headers)
+                   tessera-mu4e-headers--active
+                   tessera-header-line-enabled)
+          (force-mode-line-update))))))
+
+(defun tessera-mu4e-headers--header-line-changed (&rest _ignored)
+  "Invalidate counts and query data in the affected headers buffer."
+  (when-let* ((buffer (mu4e-get-headers-buffer)))
+    (with-current-buffer buffer
+      (when tessera-mu4e-headers--active
+        (tessera--header-line-changed)
+        (force-mode-line-update)))))
+
+(defun tessera-mu4e-headers--header-line-track (enable)
+  "Observe native updates and context changes when ENABLE is non-nil."
+  (pcase-dolist
+      (`(,function . ,hooks)
+       '((tessera-mu4e-headers--header-line-notify
+          mu4e-update-pre-hook mu4e-index-updated-hook
+          mu4e-context-changed-hook)
+         (tessera-mu4e-headers--header-line-changed
+          mu4e-message-changed-hook mu4e-headers-found-hook)))
+    (dolist (hook hooks)
+      (if enable
+          (add-hook hook function)
+        (remove-hook hook function)))))
+
+(defun tessera-mu4e-headers--header-line-enable ()
+  "Attach the four-region header to this native view."
+  (tessera--header-line-enable
+   'mu4e-headers #'tessera-mu4e-headers--header-line-state
+   '((action . tessera-mu4e-headers-header-line-action-function)
+     (info . tessera-mu4e-headers-header-line-info-function)
+     (extra . tessera-mu4e-headers-header-line-extra-function)
+     (statistics
+      . tessera-mu4e-headers-header-line-statistics-function))))
+
 ;;;; Native navigation
 
 (defun tessera-mu4e-headers--position-point ()
@@ -1456,7 +1625,38 @@ message only while it remains selected after the native update."
     (remove-hook 'mu4e-headers-found-hook
                  #'tessera-mu4e-headers--position-point)))
 
-;;;; Adapter lifecycle
+;;;; Configuration changes
+
+(defun tessera-mu4e-headers--glyphs-changed (option)
+  "Refresh active mu4e views after glyph OPTION changes.
+Nil means explicitly refresh all glyphs and their hover faces."
+  (when (or (null option)
+            (memq option '(tessera-mu4e-headers-glyphs
+                           tessera-month-glyphs
+                           tessera-thread-glyphs
+                           tessera-entry-ellipsis
+                           tessera-glyph-style tessera-glyph-color)))
+    (tessera-mu4e-headers--months-changed nil)))
+
+(defun tessera-mu4e-headers--months-changed (option)
+  "Refresh active mu4e views affected by month OPTION.
+Nil requests a full refresh, including glyphs and sorting."
+  (when (or (null option)
+            (memq option '(tessera-month-grouping
+                           tessera-mu4e-headers-month-grouping
+                           tessera-mu4e-headers-month-thread-date)))
+    (when (gethash 'mu4e-headers tessera--entry-backends)
+      (tessera-mu4e-headers--register))
+    (save-window-excursion
+      (tessera--map-mode-buffers
+       'mu4e-headers-mode
+       (lambda ()
+         (when tessera-mu4e-headers--active
+           (tessera-entry-clear-current)
+           (setq tessera-mu4e-headers--appearance nil)
+           (tessera-mu4e-headers--refresh)))))))
+
+;;;; Buffer lifecycle
 
 (defun tessera-mu4e-headers--restore-native-state ()
   "Restore native state in the current mu4e headers buffer."
@@ -1548,198 +1748,6 @@ message only while it remains selected after the native update."
   "Restore native text, marks, settings, and header line."
   (when tessera-mu4e-headers--active
     (tessera-mu4e-headers--restore-native-state)))
-
-(defun tessera-mu4e-headers--glyphs-changed (option)
-  "Refresh active mu4e views after glyph OPTION changes.
-Nil means explicitly refresh all glyphs and their hover faces."
-  (when (or (null option)
-            (memq option '(tessera-mu4e-headers-glyphs
-                           tessera-month-glyphs
-                           tessera-thread-glyphs
-                           tessera-entry-ellipsis
-                           tessera-glyph-style tessera-glyph-color)))
-    (tessera-mu4e-headers--months-changed nil)))
-
-(defun tessera-mu4e-headers--months-changed (option)
-  "Refresh active mu4e views affected by month OPTION.
-Nil requests a full refresh, including glyphs and sorting."
-  (when (or (null option)
-            (memq option '(tessera-month-grouping
-                           tessera-mu4e-headers-month-grouping
-                           tessera-mu4e-headers-month-thread-date)))
-    (when (gethash 'mu4e-headers tessera--entry-backends)
-      (tessera-mu4e-headers--register))
-    (save-window-excursion
-      (tessera--map-mode-buffers
-       'mu4e-headers-mode
-       (lambda ()
-         (when tessera-mu4e-headers--active
-           (tessera-entry-clear-current)
-           (setq tessera-mu4e-headers--appearance nil)
-           (tessera-mu4e-headers--refresh)))))))
-
-;;;; Header line providers
-
-(defcustom tessera-mu4e-headers-header-line-action-function
-  #'tessera-mu4e-headers-header-line-action
-  "Function rendering the action header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-mu4e-headers)
-
-(defcustom tessera-mu4e-headers-header-line-info-function
-  #'tessera-mu4e-headers-header-line-info
-  "Function rendering the info header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-mu4e-headers)
-
-(defcustom tessera-mu4e-headers-header-line-extra-function
-  #'tessera-mu4e-headers-header-line-extra
-  "Function rendering the extra header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-mu4e-headers)
-
-(defcustom tessera-mu4e-headers-header-line-statistics-function
-  #'tessera-header-line-statistics
-  "Function rendering the statistics header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-mu4e-headers)
-
-(defcustom tessera-mu4e-headers-header-line-next-update-function
-  #'tessera-mu4e-headers--next-update
-  "Function returning the next update time, or nil when unknown.
-The function receives a `tessera-header-line-context'.  It must
-return an absolute Emacs time value or nil, without scheduling work."
-  :type '(choice (const nil) function)
-  :group 'tessera-mu4e-headers)
-
-(defun tessera-mu4e-headers--header-line-enable ()
-  "Attach the four-region header to this native view."
-  (tessera--header-line-enable
-   'mu4e-headers #'tessera-mu4e-headers--header-line-state
-   '((action . tessera-mu4e-headers-header-line-action-function)
-     (info . tessera-mu4e-headers-header-line-info-function)
-     (extra . tessera-mu4e-headers-header-line-extra-function)
-     (statistics
-      . tessera-mu4e-headers-header-line-statistics-function))))
-
-(defvar mu4e-index-update-status)
-(defvar mu4e--server-indexing)
-(defvar mu4e--update-buffer)
-(defvar mu4e--update-timer)
-(declare-function mu4e-update-mail-and-index "mu4e-update")
-(declare-function mu4e-context-current "mu4e-context")
-(declare-function mu4e-context-name "mu4e-context")
-
-(defun tessera-mu4e-headers--header-line-state ()
-  "Count distinct messages, excluding inherited footer properties."
-  (let ((messages (make-hash-table :test #'eql))
-        (unread 0))
-    (save-excursion
-      (save-restriction
-        (widen)
-        (goto-char (point-min))
-        (while (< (point) (point-max))
-          (when-let* ((message (get-text-property (point) 'msg))
-                      (id (plist-get message :docid))
-                      (_ (looking-at
-                          (regexp-quote mu4e~headers-docid-pre))))
-            (unless (gethash id messages)
-              (puthash id t messages)
-              (when (tessera-mu4e-headers--unread-p message)
-                (cl-incf unread))))
-          (forward-line 1))))
-    (list :shown (hash-table-count messages)
-          :unread unread
-          :query list-buffers-directory
-          :scope (concat "All inserted messages, including folded "
-                         "and off-screen messages; "
-                         "excludes the footer.")
-          :glyph-defaults 'tessera-mu4e-headers--glyph-defaults
-          :glyph-overrides 'tessera-mu4e-headers-glyphs)))
-
-(defun tessera-mu4e-headers-header-line-info (context)
-  "Return the current headers query for CONTEXT."
-  (let ((query (or (plist-get
-                    (tessera-header-line-context-state context)
-                    :query) "")))
-    (tessera-header-line-field
-     context 'info "Query" query (concat "Search query:\n" query))))
-
-(defun tessera-mu4e-headers-header-line-extra (_context)
-  "Return the current mu4e context name for render _CONTEXT."
-  (when-let* ((current (mu4e-context-current))
-              (name (mu4e-context-name current)))
-    (propertize name 'help-echo (concat "mu4e context: " name))))
-
-(defun tessera-mu4e-headers--next-update (_context)
-  "Return the active native timer's next time for _CONTEXT."
-  (when (and (timerp mu4e--update-timer)
-             (memq mu4e--update-timer timer-list))
-    (timer--time mu4e--update-timer)))
-
-(defun tessera-mu4e-headers-header-line-action (context)
-  "Return the mail retrieval and indexing action for CONTEXT."
-  (tessera-header-line-update
-   context (plist-get mu4e-index-update-status :tstamp)
-   (when tessera-mu4e-headers-header-line-next-update-function
-     (funcall tessera-mu4e-headers-header-line-next-update-function
-              context))
-   (or mu4e--server-indexing
-       (and (buffer-live-p mu4e--update-buffer)
-            (process-live-p
-             (get-buffer-process mu4e--update-buffer))))
-   #'mu4e-update-mail-and-index
-   (concat "Retrieve mail and update the index.\n"
-           "Last time records index completion, "
-           "not retrieval success.")))
-
-(defun tessera-mu4e-headers--header-line-notify (&rest _ignored)
-  "Redraw update and context information without recounting messages."
-  (dolist (buffer tessera--header-line-buffers)
-    (when (buffer-live-p buffer)
-      (with-current-buffer buffer
-        (when (and (eq tessera--header-line-view 'mu4e-headers)
-                   tessera-mu4e-headers--active
-                   tessera-header-line-enabled)
-          (force-mode-line-update))))))
-
-(defun tessera-mu4e-headers--header-line-changed (&rest _ignored)
-  "Invalidate counts and query data in the affected headers buffer."
-  (when-let* ((buffer (mu4e-get-headers-buffer)))
-    (with-current-buffer buffer
-      (when tessera-mu4e-headers--active
-        (tessera--header-line-changed)
-        (force-mode-line-update)))))
-
-(defun tessera-mu4e-headers--header-line-track (enable)
-  "Observe native updates and context changes when ENABLE is non-nil."
-  (pcase-dolist
-      (`(,function . ,hooks)
-       '((tessera-mu4e-headers--header-line-notify
-          mu4e-update-pre-hook mu4e-index-updated-hook
-          mu4e-context-changed-hook)
-         (tessera-mu4e-headers--header-line-changed
-          mu4e-message-changed-hook mu4e-headers-found-hook)))
-    (dolist (hook hooks)
-      (if enable
-          (add-hook hook function)
-        (remove-hook hook function)))))
 
 (provide 'tessera-mu4e-headers)
 ;;; tessera-mu4e-headers.el ends here

@@ -39,10 +39,22 @@
 (require 'subr-x)
 (require 'seq)
 
+(defvar gnus-registry-db)
+
+(declare-function gnus-registry-get-id-key "gnus-registry")
+
+(defvar gnus-tmp-unread)
+(defvar gnus-tmp-replied)
+(defvar gnus-tmp-downloaded)
+(defvar gnus-tmp-score-char)
+(defvar gnus-tmp-from)
+
 (defgroup tessera-gnus-summary nil
   "Tessera entries in Gnus summary buffers."
   :group 'tessera-gnus
   :prefix "tessera-gnus-summary-")
+
+;;;; Month options
 
 (defcustom tessera-gnus-summary-month-grouping 'inherit
   "Whether Gnus summary buffers use month grouping.
@@ -313,6 +325,56 @@ not enable either native behavior by itself."
   :type 'boolean
   :group 'tessera-gnus-summary)
 
+;;;; Header line options
+
+(defcustom tessera-gnus-summary-header-line-action-function
+  #'tessera-gnus-summary-header-line-action
+  "Function rendering the action header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-gnus-summary)
+
+(defcustom tessera-gnus-summary-header-line-info-function
+  #'tessera-gnus-summary-header-line-info
+  "Function rendering the info header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-gnus-summary)
+
+(defcustom tessera-gnus-summary-header-line-extra-function
+  nil
+  "Function rendering the extra header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-gnus-summary)
+
+(defcustom tessera-gnus-summary-header-line-statistics-function
+  #'tessera-header-line-statistics
+  "Function rendering the statistics header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-gnus-summary)
+
+(defcustom tessera-gnus-summary-header-line-next-update-function
+  nil
+  "Function returning the next update time, or nil when unknown.
+The function receives a `tessera-header-line-context'.  It must
+return an absolute Emacs time value or nil, without scheduling work."
+  :type '(choice (const nil) function)
+  :group 'tessera-gnus-summary)
+
 ;;;; Faces
 
 (defface tessera-gnus-summary-subject-face
@@ -401,17 +463,12 @@ not enable either native behavior by itself."
   "Thread counts containing unread articles."
   :group 'tessera-gnus-summary)
 
-(defvar gnus-registry-db)
+(defface tessera-gnus-summary-header-line-group-face
+  '((t :weight bold :slant italic))
+  "Face for the source group name in the summary header."
+  :group 'tessera-gnus-summary)
 
-(declare-function gnus-registry-get-id-key "gnus-registry")
-
-(defvar gnus-tmp-unread)
-(defvar gnus-tmp-replied)
-(defvar gnus-tmp-downloaded)
-(defvar gnus-tmp-score-char)
-(defvar gnus-tmp-from)
-
-;;;; Native marks and glyphs
+;;;; Native marks and buffer state
 
 (defvar tessera-gnus-summary--states
   '((status 0
@@ -447,8 +504,6 @@ not enable either native behavior by itself."
            (low gnus-score-below-mark "Below default score")
            (high gnus-score-over-mark "Above default score")))
   "Native mark variables and help labels, grouped by slot.")
-
-;;;; Buffer state
 
 (defvar tessera-gnus-summary--metadata nil
   "Metadata dynamically bound while rendering one article.")
@@ -508,10 +563,10 @@ not enable either native behavior by itself."
 (defvar-local tessera-gnus-summary--appearance nil
   "Appearance used for the last synchronized entry rendering.")
 
-;;;; Summary metadata
-
 (defvar-local tessera-gnus-summary--content-cache nil
   "Snapshots of observed MIME properties, keyed by article identity.")
+
+;;;; Article metadata
 
 (defun tessera-gnus-summary-header-field (name header)
   "Return extra field NAME from native HEADER, ignoring case.
@@ -622,7 +677,28 @@ Return non-nil only when the observed properties have changed."
       (puthash key content tessera-gnus-summary--content-cache)
       t)))
 
-;;;; Thread contexts (gnus-sum.el)
+(defun tessera-gnus-summary--state (slot context)
+  "Return the native state of SLOT in CONTEXT."
+  (let* ((spec (assq slot tessera-gnus-summary--states))
+         (marks
+          (plist-get (tessera-entry-context-metadata context) :marks))
+         (mark (aref marks (cadr spec)))
+         (variant
+          (seq-find
+           (lambda (entry)
+             (eq mark (symbol-value (nth 1 entry))))
+           (cddr spec))))
+    (cond (variant (car variant))
+          ((eq mark gnus-no-mark) nil)
+          (t 'unknown))))
+
+(defun tessera-gnus-summary--unread-p (context)
+  "Return non-nil if CONTEXT's article has a native unread mark."
+  (not (gnus-read-mark-p
+        (aref (plist-get (tessera-entry-context-metadata context)
+                         :marks) 0))))
+
+;;;; Thread contexts
 
 (defvar-local tessera-gnus-summary--threads nil
   "Article numbers mapped to their displayed thread contexts.")
@@ -673,8 +749,6 @@ parents and adopted roots.  Threading follows `gnus-show-threads'."
            'tessera-gnus-summary-thread-count-face
            'tessera-gnus-summary-thread-unread-count-face))))
 
-;;;; Entry context and state
-
 (defun tessera-gnus-summary--context (header buffer window)
   "Return the entry context for HEADER in BUFFER and WINDOW."
   (make-tessera-entry-context
@@ -684,6 +758,24 @@ parents and adopted roots.  Threading follows `gnus-show-threads'."
    :window window
    :metadata tessera-gnus-summary--metadata
    :thread (plist-get tessera-gnus-summary--metadata :thread)))
+
+(defun tessera-gnus-summary--fold-changed (&rest _arguments)
+  "Invalidate the presentation after a native folding operation."
+  (when tessera-gnus-summary--active
+    (setq tessera-gnus-summary--dirty t)))
+
+(defun tessera-gnus-summary--track-folds (enable)
+  "Track native folding when ENABLE is non-nil, or stop tracking."
+  (dolist (function '(gnus-summary-hide-thread
+                      gnus-summary-show-thread
+                      gnus-summary-show-all-threads))
+    (if enable
+        (advice-add function :after
+                    #'tessera-gnus-summary--fold-changed)
+      (advice-remove function
+                     #'tessera-gnus-summary--fold-changed))))
+
+;;;; Month contexts
 
 (defvar tessera-gnus-summary--root-month-sort-functions
   '(gnus-thread-sort-by-number
@@ -796,26 +888,7 @@ Return non-nil when the effective sort values change."
       (gnus-summary-position-point)
       t)))
 
-(defun tessera-gnus-summary--state (slot context)
-  "Return the native state of SLOT in CONTEXT."
-  (let* ((spec (assq slot tessera-gnus-summary--states))
-         (marks
-          (plist-get (tessera-entry-context-metadata context) :marks))
-         (mark (aref marks (cadr spec)))
-         (variant
-          (seq-find
-           (lambda (entry)
-             (eq mark (symbol-value (nth 1 entry))))
-           (cddr spec))))
-    (cond (variant (car variant))
-          ((eq mark gnus-no-mark) nil)
-          (t 'unknown))))
-
-(defun tessera-gnus-summary--unread-p (context)
-  "Return non-nil if CONTEXT's article has a native unread mark."
-  (not (gnus-read-mark-p
-        (aref (plist-get (tessera-entry-context-metadata context)
-                         :marks) 0))))
+;;;; Fields and glyphs
 
 (defun tessera-gnus-summary--face-index ()
   "Index native scores and uncached articles for one batch update.
@@ -955,8 +1028,6 @@ value.  Signal an error if neither value is an ASCII character."
             'unknown tessera-gnus-summary--glyph-defaults
             tessera-gnus-summary-glyphs)
            :help-echo "Unrecognized Gnus mark")))))
-
-;;;; Rendered fields
 
 (defun tessera-gnus-summary--article-subject-face (context)
   "Return the ordinary article subject face for CONTEXT."
@@ -1205,6 +1276,21 @@ value.  Signal an error if neither value is an ASCII character."
 
 ;;;; Native row rendering
 
+(defun tessera-gnus-summary--author-name (header from)
+  "Return the sender name from HEADER and decoded FROM.
+Use an email address when no name is available, including for mail
+sent by the user."
+  (let* ((gnus-ignored-from-addresses nil)
+         (extract gnus-extract-address-components)
+         (gnus-extract-address-components
+          (lambda (address)
+            (let* ((parts (funcall extract address))
+                   (name (car parts)))
+              (cons (or (and name (not (string-empty-p name)) name)
+                        (cadr parts) "?")
+                    (cdr parts))))))
+    (gnus-summary-from-or-to-or-newsgroups header from)))
+
 (cl-defun tessera-gnus-summary--render
     (header metadata
             &optional (native-face
@@ -1240,21 +1326,6 @@ Use NATIVE-FACE when supplied, including an explicitly nil face."
           (setq position next))))
     result))
 
-(defun tessera-gnus-summary--author-name (header from)
-  "Return the sender name from HEADER and decoded FROM.
-Use an email address when no name is available, including for mail
-sent by the user."
-  (let* ((gnus-ignored-from-addresses nil)
-         (extract gnus-extract-address-components)
-         (gnus-extract-address-components
-          (lambda (address)
-            (let* ((parts (funcall extract address))
-                   (name (car parts)))
-              (cons (or (and name (not (string-empty-p name)) name)
-                        (cadr parts) "?")
-                    (cdr parts))))))
-    (gnus-summary-from-or-to-or-newsgroups header from)))
-
 (defun tessera-gnus-summary-format-entry (header)
   "Return a Tessera Gnus summary representation of HEADER.
 The first four characters retain Gnus's native status marks as a
@@ -1271,7 +1342,7 @@ native mark discovery and in-place updates."
 (defalias 'gnus-user-format-function-tessera
   #'tessera-gnus-summary-format-entry)
 
-;;;; Synchronization and lifecycle
+;;;; Appearance and content synchronization
 
 (defun tessera-gnus-summary--appearance ()
   "Return the current width and shared appearance settings."
@@ -1311,21 +1382,311 @@ Gnus applies its native row face before running the update hook."
             (put-text-property start next 'face (car saved)))
           (setq start next))))))
 
-(defun tessera-gnus-summary--fold-changed (&rest _arguments)
-  "Invalidate the presentation after a native folding operation."
+(defun tessera-gnus-summary--reindex ()
+  "Restore native integer positions after a batch of row changes."
+  (let ((entries (make-hash-table :test #'eql)))
+    (dolist (data gnus-newsgroup-data)
+      (puthash (gnus-data-number data) data entries))
+    (save-restriction
+      (widen)
+      (save-excursion
+        (goto-char (point-min))
+        (while (< (point) (point-max))
+          (when-let* ((data
+                       (gethash
+                        (get-text-property (point) 'gnus-number)
+                        entries)))
+            (setf (gnus-data-pos data) (1+ (point))))
+          (forward-line 1))))
+    (setq gnus-newsgroup-data-reverse nil)))
+
+(defun tessera-gnus-summary--sync-line
+    (&optional force face-index thread-paths)
+  "Synchronize the current logical article line.
+FORCE also redraws entries whose native marks have not changed.
+FACE-INDEX supplies native face data during a batch update.
+THREAD-PATHS caches shared ancestor comparisons for that update."
+  (let* ((start (line-beginning-position))
+         (end (line-end-position))
+         (entry
+          (get-text-property start 'tessera-gnus-summary-entry)))
+    (when (and entry (>= (- end start) 4))
+      (let* ((marks
+              (buffer-substring-no-properties start (+ start 4)))
+             (metadata (cdr entry))
+             (thread
+              (tessera-gnus-summary--thread-context (car entry)))
+             (native-face (tessera-gnus-summary--native-face
+                           (car entry) marks face-index))
+             (inhibit-read-only t)
+             (inhibit-modification-hooks t))
+        (when (or force
+                  (not (equal marks (plist-get metadata :marks)))
+                  (not (equal (plist-get metadata :native-face)
+                              native-face))
+                  (not (tessera-thread-context-key-equal-p
+                        (tessera-thread-context-key
+                         (plist-get metadata :thread))
+                        (tessera-thread-context-key thread)
+                        thread-paths)))
+          (tessera-entry-clear-current)
+          (tessera-entry-clear-layout start (1+ end))
+          (let* ((updated
+                  (plist-put (copy-sequence metadata) :marks marks))
+                 (rendered (tessera-gnus-summary--render
+                            (car entry) updated native-face))
+                 (number (get-text-property start 'gnus-number))
+                 (intangible
+                  (get-text-property start 'gnus-intangible)))
+            ;; Keep native marks and their fixed positions intact.
+            (delete-region (+ start 4) end)
+            (goto-char (+ start 4))
+            (insert (substring rendered 4))
+            (dotimes (offset 4)
+              (set-text-properties
+               (+ start offset) (+ start offset 1)
+               (text-properties-at offset rendered)))
+            ;; Gnus stores integer positions, not markers.  Keep later
+            ;; articles addressable when a visual layout changes size.
+            (when (and (not tessera-gnus-summary--batching)
+                       (/= end (point)))
+              (gnus-data-update-list
+               (cdr (gnus-data-find-list number)) (- (point) end)))
+            (setq end (point))
+            (add-text-properties
+             start (1+ end)
+             (list 'gnus-number number 'gnus-intangible intangible))))
+        ;; Keep path tails shared even when the row needs no redraw.
+        (setf (plist-get
+               (cdr (get-text-property
+                     start 'tessera-gnus-summary-entry)) :thread)
+              thread)
+        (when-let* ((context
+                     (get-text-property start
+                                        'tessera-entry-context)))
+          (setf (tessera-entry-context-thread context) thread))
+        (tessera-gnus-summary--restore-faces start end)
+        (if (invisible-p start)
+            (tessera-entry-clear-layout start (1+ end))
+          (unless (tessera-entry-layout-applied-p start)
+            (tessera-entry-apply-layout start end)))))))
+
+(defun tessera-gnus-summary--sync-buffer (&optional force)
+  "Synchronize all entries, preserving point within its article.
+FORCE also redraws entries with unchanged marks."
+  (save-restriction
+    (widen)
+    (tessera--month-clear-display)
+    (let ((width tessera-gnus-summary--thread-width))
+      (tessera-gnus-summary--build-threads)
+      (when (/= width tessera-gnus-summary--thread-width)
+        (setq force t)))
+    (let ((saved-point (tessera-entry-save-point))
+          (face-index (tessera-gnus-summary--face-index))
+          (thread-paths (make-hash-table :test #'eq))
+          (tessera-gnus-summary--batching t)
+          (tessera-gnus-summary--updating t))
+      (unwind-protect
+          (progn
+            (goto-char (point-min))
+            (while (< (point) (point-max))
+              (tessera-gnus-summary--sync-line
+               force face-index thread-paths)
+              (forward-line 1)))
+        (tessera-gnus-summary--reindex)
+        (tessera-entry-restore-point saved-point)))
+    (when tessera-gnus-summary--active
+      (tessera-month-sync))))
+
+(defun tessera-gnus-summary--refresh-content (article)
+  "Refresh ARTICLE after observing new MIME state.
+Preserve point, narrowing, and month folds while row widths change."
+  (save-restriction
+    (widen)
+    (when-let* ((position
+                 (text-property-any (point-min) (point-max)
+                                    'gnus-number article)))
+      (let ((saved-point (tessera-entry-save-point))
+            (tessera-gnus-summary--updating t))
+        (tessera-entry-clear-current)
+        (tessera--month-clear-display)
+        (unwind-protect
+            (progn
+              (goto-char position)
+              (tessera-gnus-summary--sync-line t))
+          (tessera-entry-restore-point saved-point)
+          (tessera-month-sync)))))
+  (tessera-entry-highlight-current))
+
+(defun tessera-gnus-summary--update-line ()
+  "Synchronize the article just updated by Gnus."
+  (when (and tessera-gnus-summary--active
+             (not tessera-gnus-summary--updating))
+    (setq tessera-gnus-summary--dirty t)
+    ;; A command may mark many articles.  Rebuild month and thread
+    ;; counts once after the command, when all marks have settled.
+    (unless tessera--month-enabled
+      (let ((tessera-gnus-summary--updating t)
+            (saved-point (tessera-entry-save-point)))
+        (unwind-protect
+            (tessera-gnus-summary--sync-line)
+          (tessera-entry-restore-point saved-point))))))
+
+(defun tessera-gnus-summary--prepare ()
+  "Attach entry layouts after Gnus has generated a summary."
   (when tessera-gnus-summary--active
+    (tessera--header-line-changed)
+    (tessera-gnus-summary--prune-content-cache)
+    (tessera-entry-clear-current)
+    (tessera-entry-clear-layout)
+    (tessera-gnus-summary--sync-buffer)
+    (setq tessera-gnus-summary--dirty nil
+          tessera-gnus-summary--appearance
+          (tessera-gnus-summary--appearance))
+    (tessera-entry-highlight-current)))
+
+(defun tessera-gnus-summary--changed (_start _end _old-length)
+  "Record a native summary buffer change."
+  (unless tessera-gnus-summary--updating
     (setq tessera-gnus-summary--dirty t)))
 
-(defun tessera-gnus-summary--track-folds (enable)
-  "Track native folding when ENABLE is non-nil, or stop tracking."
-  (dolist (function '(gnus-summary-hide-thread
-                      gnus-summary-show-thread
-                      gnus-summary-show-all-threads))
-    (if enable
-        (advice-add function :after
-                    #'tessera-gnus-summary--fold-changed)
-      (advice-remove function
-                     #'tessera-gnus-summary--fold-changed))))
+(defun tessera-gnus-summary--post-command ()
+  "Synchronize native changes and highlight the current entry."
+  (when tessera-gnus-summary--active
+    (setq-local tessera--month-enabled
+                (tessera-gnus-summary--month-enabled-p))
+    (setq-local tessera--month-thread-date
+                (tessera-gnus-summary--month-thread-date))
+    (let* ((appearance (tessera-gnus-summary--appearance))
+           (force (or (not (equal appearance
+                                  tessera-gnus-summary--appearance))
+                      (and (symbolp this-command)
+                           (string-prefix-p
+                            "gnus-registry-"
+                            (symbol-name this-command))))))
+      (when (or force tessera-gnus-summary--dirty)
+        (tessera-gnus-summary--sync-buffer force)
+        (setq tessera-gnus-summary--appearance appearance
+              tessera-gnus-summary--dirty nil)))
+    ;; Already at the root, Gnus's top-thread command does not move.
+    (when (and tessera--month-enabled tessera--month-groups
+               gnus-show-threads
+               (eq this-command 'gnus-summary-top-thread))
+      (gnus-summary-position-point))
+    (tessera-month-reveal-point)
+    (tessera-entry-highlight-current)))
+
+(defun tessera-gnus-summary--resize (_frame)
+  "Update entries after a window size change."
+  (tessera-gnus-summary--post-command))
+
+(defun tessera-gnus-summary--refresh ()
+  "Recompile the native summary format and regenerate articles."
+  (when gnus-newsgroup-headers
+    (let ((article (get-text-property (point) 'gnus-number))
+          (gnus-summary-buffer (current-buffer)))
+      (gnus-update-format-specifications nil 'summary)
+      (gnus-update-summary-mark-positions)
+      (gnus-summary-prepare)
+      (when article (gnus-summary-goto-subject article)))))
+
+;;;; Header line providers
+
+(defvar tessera-gnus-summary--update-times
+  (make-hash-table :test #'equal)
+  "Observed scan states, keyed by full Gnus group name.")
+
+(defun tessera-gnus-summary--header-line-state ()
+  "Collect real summary entries and the loaded header population."
+  (let ((shown (make-hash-table :test #'eql))
+        (loaded (make-hash-table :test #'eql))
+        (unread 0))
+    (dolist (header gnus-newsgroup-headers)
+      (when (mail-header-p header)
+        (puthash (mail-header-number header) t loaded)))
+    (dolist (data gnus-newsgroup-data)
+      (when (and (mail-header-p (gnus-data-header data))
+                 (not (gethash (gnus-data-number data) shown)))
+        (puthash (gnus-data-number data) t shown)
+        (puthash (gnus-data-number data) t loaded)
+        (unless (gnus-read-mark-p (gnus-data-mark data))
+          (cl-incf unread))))
+    (list :shown (hash-table-count shown)
+          :unread unread
+          :loaded (hash-table-count loaded)
+          :group gnus-newsgroup-name
+          :scope (concat "All real summary articles, including "
+                         "folded and off-screen articles; excludes "
+                         "pseudo "
+                         "thread roots and headings.")
+          :glyph-defaults 'tessera-gnus-summary--glyph-defaults
+          :glyph-overrides 'tessera-gnus-summary-glyphs)))
+
+(defun tessera-gnus-summary-header-line-info (context)
+  "Return the summary's source group name for CONTEXT."
+  (let ((group (or (plist-get
+                    (tessera-header-line-context-state context)
+                    :group) "—")))
+    (tessera-header-line-field
+     context 'info "Group" group
+     (concat "Current summary source: " group
+             "\nVirtual or search groups may combine sources.")
+     'tessera-gnus-summary-header-line-group-face)))
+
+(defun tessera-gnus-summary-header-line-action (context)
+  "Return the current group's rescan action for CONTEXT."
+  (let* ((group (plist-get
+                 (tessera-header-line-context-state context) :group))
+         (status (gethash group tessera-gnus-summary--update-times)))
+    (tessera-header-line-update
+     context (plist-get status :last)
+     (when tessera-gnus-summary-header-line-next-update-function
+       (funcall tessera-gnus-summary-header-line-next-update-function
+                context))
+     (plist-get status :running) #'gnus-summary-rescan-group
+     "Rescan this group.  Last time records a completed group rescan."
+     (plist-get status :failed))))
+
+(defun tessera-gnus-summary--observe-rescan (function &rest args)
+  "Observe FUNCTION with ARGS when it requests a group rescan."
+  (if (not (nth 1 args))
+      (apply function args)
+    (let* ((group gnus-newsgroup-name)
+           (status
+            (copy-sequence
+             (gethash group tessera-gnus-summary--update-times)))
+           completed)
+      (puthash group (plist-put status :running t)
+               tessera-gnus-summary--update-times)
+      (force-mode-line-update t)
+      (unwind-protect
+          (prog1 (apply function args) (setq completed t))
+        (setq status (plist-put status :running nil)
+              status (plist-put status :failed (not completed)))
+        (when completed
+          (setq status (plist-put status :last (current-time))))
+        (puthash group status tessera-gnus-summary--update-times)
+        (force-mode-line-update t)))))
+
+(defun tessera-gnus-summary--header-line-track (enable)
+  "Observe native rescans when ENABLE is non-nil."
+  (if enable
+      (advice-add 'gnus-summary-reselect-current-group :around
+                  #'tessera-gnus-summary--observe-rescan)
+    (advice-remove 'gnus-summary-reselect-current-group
+                   #'tessera-gnus-summary--observe-rescan)))
+
+(defun tessera-gnus-summary--header-line-enable ()
+  "Attach the four-region header to this native view."
+  (tessera--header-line-enable
+   'gnus-summary #'tessera-gnus-summary--header-line-state
+   '((action . tessera-gnus-summary-header-line-action-function)
+     (info . tessera-gnus-summary-header-line-info-function)
+     (extra . tessera-gnus-summary-header-line-extra-function)
+     (statistics
+      . tessera-gnus-summary-header-line-statistics-function))))
+
+;;;; Native navigation
 
 (defun tessera-gnus-summary--horizontal-recenter
     (function &rest arguments)
@@ -1586,213 +1947,50 @@ ARGUMENTS retain Gnus's unread, subject, and direction filters."
     (advice-remove 'gnus-summary-position-point
                    #'tessera-gnus-summary--positioned)))
 
-(defun tessera-gnus-summary--sync-buffer (&optional force)
-  "Synchronize all entries, preserving point within its article.
-FORCE also redraws entries with unchanged marks."
-  (save-restriction
-    (widen)
-    (tessera--month-clear-display)
-    (let ((width tessera-gnus-summary--thread-width))
-      (tessera-gnus-summary--build-threads)
-      (when (/= width tessera-gnus-summary--thread-width)
-        (setq force t)))
-    (let ((saved-point (tessera-entry-save-point))
-          (face-index (tessera-gnus-summary--face-index))
-          (thread-paths (make-hash-table :test #'eq))
-          (tessera-gnus-summary--batching t)
-          (tessera-gnus-summary--updating t))
-      (unwind-protect
-          (progn
-            (goto-char (point-min))
-            (while (< (point) (point-max))
-              (tessera-gnus-summary--sync-line
-               force face-index thread-paths)
-              (forward-line 1)))
-        (tessera-gnus-summary--reindex)
-        (tessera-entry-restore-point saved-point)))
-    (when tessera-gnus-summary--active
-      (tessera-month-sync))))
+;;;; Configuration changes
 
-(defun tessera-gnus-summary--reindex ()
-  "Restore native integer positions after a batch of row changes."
-  (let ((entries (make-hash-table :test #'eql)))
-    (dolist (data gnus-newsgroup-data)
-      (puthash (gnus-data-number data) data entries))
-    (save-restriction
-      (widen)
-      (save-excursion
-        (goto-char (point-min))
-        (while (< (point) (point-max))
-          (when-let* ((data
-                       (gethash
-                        (get-text-property (point) 'gnus-number)
-                        entries)))
-            (setf (gnus-data-pos data) (1+ (point))))
-          (forward-line 1))))
-    (setq gnus-newsgroup-data-reverse nil)))
+(defun tessera-gnus-summary--glyphs-changed (option)
+  "Refresh active gnus views after glyph OPTION changes.
+Nil means explicitly refresh all glyphs and their hover faces."
+  (when (or (null option)
+            (memq option '(tessera-gnus-summary-glyphs
+                           tessera-month-glyphs
+                           tessera-thread-glyphs
+                           tessera-entry-ellipsis
+                           tessera-glyph-style tessera-glyph-color)))
+    (tessera-gnus-summary--months-changed nil)))
 
-(defun tessera-gnus-summary--sync-line
-    (&optional force face-index thread-paths)
-  "Synchronize the current logical article line.
-FORCE also redraws entries whose native marks have not changed.
-FACE-INDEX supplies native face data during a batch update.
-THREAD-PATHS caches shared ancestor comparisons for that update."
-  (let* ((start (line-beginning-position))
-         (end (line-end-position))
-         (entry
-          (get-text-property start 'tessera-gnus-summary-entry)))
-    (when (and entry (>= (- end start) 4))
-      (let* ((marks
-              (buffer-substring-no-properties start (+ start 4)))
-             (metadata (cdr entry))
-             (thread
-              (tessera-gnus-summary--thread-context (car entry)))
-             (native-face (tessera-gnus-summary--native-face
-                           (car entry) marks face-index))
-             (inhibit-read-only t)
-             (inhibit-modification-hooks t))
-        (when (or force
-                  (not (equal marks (plist-get metadata :marks)))
-                  (not (equal (plist-get metadata :native-face)
-                              native-face))
-                  (not (tessera-thread-context-key-equal-p
-                        (tessera-thread-context-key
-                         (plist-get metadata :thread))
-                        (tessera-thread-context-key thread)
-                        thread-paths)))
-          (tessera-entry-clear-current)
-          (tessera-entry-clear-layout start (1+ end))
-          (let* ((updated
-                  (plist-put (copy-sequence metadata) :marks marks))
-                 (rendered (tessera-gnus-summary--render
-                            (car entry) updated native-face))
-                 (number (get-text-property start 'gnus-number))
-                 (intangible
-                  (get-text-property start 'gnus-intangible)))
-            ;; Keep native marks and their fixed positions intact.
-            (delete-region (+ start 4) end)
-            (goto-char (+ start 4))
-            (insert (substring rendered 4))
-            (dotimes (offset 4)
-              (set-text-properties
-               (+ start offset) (+ start offset 1)
-               (text-properties-at offset rendered)))
-            ;; Gnus stores integer positions, not markers.  Keep later
-            ;; articles addressable when a visual layout changes size.
-            (when (and (not tessera-gnus-summary--batching)
-                       (/= end (point)))
-              (gnus-data-update-list
-               (cdr (gnus-data-find-list number)) (- (point) end)))
-            (setq end (point))
-            (add-text-properties
-             start (1+ end)
-             (list 'gnus-number number 'gnus-intangible intangible))))
-        ;; Keep path tails shared even when the row needs no redraw.
-        (setf (plist-get
-               (cdr (get-text-property
-                     start 'tessera-gnus-summary-entry)) :thread)
-              thread)
-        (when-let* ((context
-                     (get-text-property start
-                                        'tessera-entry-context)))
-          (setf (tessera-entry-context-thread context) thread))
-        (tessera-gnus-summary--restore-faces start end)
-        (if (invisible-p start)
-            (tessera-entry-clear-layout start (1+ end))
-          (unless (tessera-entry-layout-applied-p start)
-            (tessera-entry-apply-layout start end)))))))
+(defun tessera-gnus-summary--months-changed (option)
+  "Refresh active Gnus views affected by month OPTION.
+Nil requests a full refresh, including glyphs and sorting."
+  (when (or (null option)
+            (memq option '(tessera-month-grouping
+                           tessera-month-thread-date
+                           tessera-gnus-summary-month-grouping
+                           tessera-gnus-summary-month-thread-date)))
+    (when (gethash 'gnus-summary tessera--entry-backends)
+      (tessera-gnus-summary--register))
+    (save-window-excursion
+      (tessera--map-mode-buffers
+       'gnus-summary-mode
+       (lambda ()
+         (when tessera-gnus-summary--active
+           (setq-local tessera--month-enabled
+                       (tessera-gnus-summary--month-enabled-p))
+           (setq-local tessera--month-thread-date
+                       (tessera-gnus-summary--month-thread-date))
+           (let ((sort-changed
+                  (tessera-gnus-summary--update-month-sorting)))
+             (tessera-entry-clear-current)
+             (if (and sort-changed gnus-newsgroup-headers)
+                 (tessera-gnus-summary--refresh)
+               (tessera-gnus-summary--sync-buffer t)))
+           (setq tessera-gnus-summary--dirty nil
+                 tessera-gnus-summary--appearance
+                 (tessera-gnus-summary--appearance))
+           (tessera-entry-highlight-current)))))))
 
-(defun tessera-gnus-summary--refresh-content (article)
-  "Refresh ARTICLE after observing new MIME state.
-Preserve point, narrowing, and month folds while row widths change."
-  (save-restriction
-    (widen)
-    (when-let* ((position
-                 (text-property-any (point-min) (point-max)
-                                    'gnus-number article)))
-      (let ((saved-point (tessera-entry-save-point))
-            (tessera-gnus-summary--updating t))
-        (tessera-entry-clear-current)
-        (tessera--month-clear-display)
-        (unwind-protect
-            (progn
-              (goto-char position)
-              (tessera-gnus-summary--sync-line t))
-          (tessera-entry-restore-point saved-point)
-          (tessera-month-sync)))))
-  (tessera-entry-highlight-current))
-
-(defun tessera-gnus-summary--update-line ()
-  "Synchronize the article just updated by Gnus."
-  (when (and tessera-gnus-summary--active
-             (not tessera-gnus-summary--updating))
-    (setq tessera-gnus-summary--dirty t)
-    ;; A command may mark many articles.  Rebuild month and thread
-    ;; counts once after the command, when all marks have settled.
-    (unless tessera--month-enabled
-      (let ((tessera-gnus-summary--updating t)
-            (saved-point (tessera-entry-save-point)))
-        (unwind-protect
-            (tessera-gnus-summary--sync-line)
-          (tessera-entry-restore-point saved-point))))))
-
-(defun tessera-gnus-summary--prepare ()
-  "Attach entry layouts after Gnus has generated a summary."
-  (when tessera-gnus-summary--active
-    (tessera--header-line-changed)
-    (tessera-gnus-summary--prune-content-cache)
-    (tessera-entry-clear-current)
-    (tessera-entry-clear-layout)
-    (tessera-gnus-summary--sync-buffer)
-    (setq tessera-gnus-summary--dirty nil
-          tessera-gnus-summary--appearance
-          (tessera-gnus-summary--appearance))
-    (tessera-entry-highlight-current)))
-
-(defun tessera-gnus-summary--changed (_start _end _old-length)
-  "Record a native summary buffer change."
-  (unless tessera-gnus-summary--updating
-    (setq tessera-gnus-summary--dirty t)))
-
-(defun tessera-gnus-summary--post-command ()
-  "Synchronize native changes and highlight the current entry."
-  (when tessera-gnus-summary--active
-    (setq-local tessera--month-enabled
-                (tessera-gnus-summary--month-enabled-p))
-    (setq-local tessera--month-thread-date
-                (tessera-gnus-summary--month-thread-date))
-    (let* ((appearance (tessera-gnus-summary--appearance))
-           (force (or (not (equal appearance
-                                  tessera-gnus-summary--appearance))
-                      (and (symbolp this-command)
-                           (string-prefix-p
-                            "gnus-registry-"
-                            (symbol-name this-command))))))
-      (when (or force tessera-gnus-summary--dirty)
-        (tessera-gnus-summary--sync-buffer force)
-        (setq tessera-gnus-summary--appearance appearance
-              tessera-gnus-summary--dirty nil)))
-    ;; Already at the root, Gnus's top-thread command does not move.
-    (when (and tessera--month-enabled tessera--month-groups
-               gnus-show-threads
-               (eq this-command 'gnus-summary-top-thread))
-      (gnus-summary-position-point))
-    (tessera-month-reveal-point)
-    (tessera-entry-highlight-current)))
-
-(defun tessera-gnus-summary--resize (_frame)
-  "Update entries after a window size change."
-  (tessera-gnus-summary--post-command))
-
-(defun tessera-gnus-summary--refresh ()
-  "Recompile the native summary format and regenerate articles."
-  (when gnus-newsgroup-headers
-    (let ((article (get-text-property (point) 'gnus-number))
-          (gnus-summary-buffer (current-buffer)))
-      (gnus-update-format-specifications nil 'summary)
-      (gnus-update-summary-mark-positions)
-      (gnus-summary-prepare)
-      (when article (gnus-summary-goto-subject article)))))
+;;;; Buffer lifecycle
 
 (defun tessera-gnus-summary--restore-native-state ()
   "Restore native state in the current Gnus summary buffer."
@@ -1871,196 +2069,6 @@ Preserve point, narrowing, and month folds while row widths change."
       (error
        (ignore-errors (tessera-gnus-summary--refresh))
        (signal (car error-data) (cdr error-data))))))
-
-(defun tessera-gnus-summary--glyphs-changed (option)
-  "Refresh active gnus views after glyph OPTION changes.
-Nil means explicitly refresh all glyphs and their hover faces."
-  (when (or (null option)
-            (memq option '(tessera-gnus-summary-glyphs
-                           tessera-month-glyphs
-                           tessera-thread-glyphs
-                           tessera-entry-ellipsis
-                           tessera-glyph-style tessera-glyph-color)))
-    (tessera-gnus-summary--months-changed nil)))
-
-(defun tessera-gnus-summary--months-changed (option)
-  "Refresh active Gnus views affected by month OPTION.
-Nil requests a full refresh, including glyphs and sorting."
-  (when (or (null option)
-            (memq option '(tessera-month-grouping
-                           tessera-month-thread-date
-                           tessera-gnus-summary-month-grouping
-                           tessera-gnus-summary-month-thread-date)))
-    (when (gethash 'gnus-summary tessera--entry-backends)
-      (tessera-gnus-summary--register))
-    (save-window-excursion
-      (tessera--map-mode-buffers
-       'gnus-summary-mode
-       (lambda ()
-         (when tessera-gnus-summary--active
-           (setq-local tessera--month-enabled
-                       (tessera-gnus-summary--month-enabled-p))
-           (setq-local tessera--month-thread-date
-                       (tessera-gnus-summary--month-thread-date))
-           (let ((sort-changed
-                  (tessera-gnus-summary--update-month-sorting)))
-             (tessera-entry-clear-current)
-             (if (and sort-changed gnus-newsgroup-headers)
-                 (tessera-gnus-summary--refresh)
-               (tessera-gnus-summary--sync-buffer t)))
-           (setq tessera-gnus-summary--dirty nil
-                 tessera-gnus-summary--appearance
-                 (tessera-gnus-summary--appearance))
-           (tessera-entry-highlight-current)))))))
-
-;;;; Header line providers
-
-(defcustom tessera-gnus-summary-header-line-action-function
-  #'tessera-gnus-summary-header-line-action
-  "Function rendering the action header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-gnus-summary)
-
-(defcustom tessera-gnus-summary-header-line-info-function
-  #'tessera-gnus-summary-header-line-info
-  "Function rendering the info header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-gnus-summary)
-
-(defcustom tessera-gnus-summary-header-line-extra-function
-  nil
-  "Function rendering the extra header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-gnus-summary)
-
-(defcustom tessera-gnus-summary-header-line-statistics-function
-  #'tessera-header-line-statistics
-  "Function rendering the statistics header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-gnus-summary)
-
-(defcustom tessera-gnus-summary-header-line-next-update-function
-  nil
-  "Function returning the next update time, or nil when unknown.
-The function receives a `tessera-header-line-context'.  It must
-return an absolute Emacs time value or nil, without scheduling work."
-  :type '(choice (const nil) function)
-  :group 'tessera-gnus-summary)
-
-(defun tessera-gnus-summary--header-line-enable ()
-  "Attach the four-region header to this native view."
-  (tessera--header-line-enable
-   'gnus-summary #'tessera-gnus-summary--header-line-state
-   '((action . tessera-gnus-summary-header-line-action-function)
-     (info . tessera-gnus-summary-header-line-info-function)
-     (extra . tessera-gnus-summary-header-line-extra-function)
-     (statistics
-      . tessera-gnus-summary-header-line-statistics-function))))
-
-(defface tessera-gnus-summary-header-line-group-face
-  '((t :weight bold :slant italic))
-  "Face for the source group name in the summary header."
-  :group 'tessera-gnus-summary)
-
-(defvar tessera-gnus-summary--update-times
-  (make-hash-table :test #'equal)
-  "Observed scan states, keyed by full Gnus group name.")
-
-(defun tessera-gnus-summary--header-line-state ()
-  "Collect real summary entries and the loaded header population."
-  (let ((shown (make-hash-table :test #'eql))
-        (loaded (make-hash-table :test #'eql))
-        (unread 0))
-    (dolist (header gnus-newsgroup-headers)
-      (when (mail-header-p header)
-        (puthash (mail-header-number header) t loaded)))
-    (dolist (data gnus-newsgroup-data)
-      (when (and (mail-header-p (gnus-data-header data))
-                 (not (gethash (gnus-data-number data) shown)))
-        (puthash (gnus-data-number data) t shown)
-        (puthash (gnus-data-number data) t loaded)
-        (unless (gnus-read-mark-p (gnus-data-mark data))
-          (cl-incf unread))))
-    (list :shown (hash-table-count shown)
-          :unread unread
-          :loaded (hash-table-count loaded)
-          :group gnus-newsgroup-name
-          :scope (concat "All real summary articles, including "
-                         "folded and off-screen articles; excludes "
-                         "pseudo "
-                         "thread roots and headings.")
-          :glyph-defaults 'tessera-gnus-summary--glyph-defaults
-          :glyph-overrides 'tessera-gnus-summary-glyphs)))
-
-(defun tessera-gnus-summary-header-line-info (context)
-  "Return the summary's source group name for CONTEXT."
-  (let ((group (or (plist-get
-                    (tessera-header-line-context-state context)
-                    :group) "—")))
-    (tessera-header-line-field
-     context 'info "Group" group
-     (concat "Current summary source: " group
-             "\nVirtual or search groups may combine sources.")
-     'tessera-gnus-summary-header-line-group-face)))
-
-(defun tessera-gnus-summary-header-line-action (context)
-  "Return the current group's rescan action for CONTEXT."
-  (let* ((group (plist-get
-                 (tessera-header-line-context-state context) :group))
-         (status (gethash group tessera-gnus-summary--update-times)))
-    (tessera-header-line-update
-     context (plist-get status :last)
-     (when tessera-gnus-summary-header-line-next-update-function
-       (funcall tessera-gnus-summary-header-line-next-update-function
-                context))
-     (plist-get status :running) #'gnus-summary-rescan-group
-     "Rescan this group.  Last time records a completed group rescan."
-     (plist-get status :failed))))
-
-(defun tessera-gnus-summary--observe-rescan (function &rest args)
-  "Observe FUNCTION with ARGS when it requests a group rescan."
-  (if (not (nth 1 args))
-      (apply function args)
-    (let* ((group gnus-newsgroup-name)
-           (status
-            (copy-sequence
-             (gethash group tessera-gnus-summary--update-times)))
-           completed)
-      (puthash group (plist-put status :running t)
-               tessera-gnus-summary--update-times)
-      (force-mode-line-update t)
-      (unwind-protect
-          (prog1 (apply function args) (setq completed t))
-        (setq status (plist-put status :running nil)
-              status (plist-put status :failed (not completed)))
-        (when completed
-          (setq status (plist-put status :last (current-time))))
-        (puthash group status tessera-gnus-summary--update-times)
-        (force-mode-line-update t)))))
-
-(defun tessera-gnus-summary--header-line-track (enable)
-  "Observe native rescans when ENABLE is non-nil."
-  (if enable
-      (advice-add 'gnus-summary-reselect-current-group :around
-                  #'tessera-gnus-summary--observe-rescan)
-    (advice-remove 'gnus-summary-reselect-current-group
-                   #'tessera-gnus-summary--observe-rescan)))
 
 (provide 'tessera-gnus-summary)
 ;;; tessera-gnus-summary.el ends here

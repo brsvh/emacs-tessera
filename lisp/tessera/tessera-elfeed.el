@@ -30,11 +30,6 @@
 
 (require 'tessera)
 
-(defgroup tessera-elfeed nil
-  "Tessera interfaces for Elfeed."
-  :group 'tessera
-  :prefix "tessera-elfeed-")
-
 (declare-function tessera-elfeed-search--header-line-track
                   "tessera-elfeed-search")
 
@@ -45,10 +40,20 @@
 (declare-function tessera-elfeed-search--register
                   "tessera-elfeed-search")
 
-(defvar tessera-elfeed--installed nil
-  "Whether the global Elfeed integration is fully installed.")
+(declare-function tessera-elfeed-search--glyphs-changed
+                  "tessera-elfeed-search")
+(declare-function tessera-elfeed-search--months-changed
+                  "tessera-elfeed-search")
+
+(defgroup tessera-elfeed nil
+  "Tessera interfaces for Elfeed."
+  :group 'tessera
+  :prefix "tessera-elfeed-")
 
 ;;;; Adapter lifecycle
+
+(defvar tessera-elfeed--installed nil
+  "Whether the global Elfeed integration is fully installed.")
 
 (defun tessera-elfeed--map-search-buffers (function)
   "Call FUNCTION in every live Elfeed search buffer."
@@ -60,11 +65,6 @@
   (tessera-elfeed-search--header-line-track t)
   (tessera-elfeed-search--register)
   (tessera-elfeed-search--enable))
-
-(declare-function tessera-elfeed-search--glyphs-changed
-                  "tessera-elfeed-search")
-(declare-function tessera-elfeed-search--months-changed
-                  "tessera-elfeed-search")
 
 (defun tessera-elfeed--glyphs-changed (option)
   "Forward changed glyph OPTION to an already loaded adapter."

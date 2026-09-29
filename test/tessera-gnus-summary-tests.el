@@ -15,6 +15,8 @@
 
 (tessera-gnus-summary--register)
 
+;;;; Fixtures
+
 (defun tessera-gnus-tests--find (start end property value
                                        &optional string)
   "Find PROPERTY equal to VALUE between START and END in STRING."
@@ -46,6 +48,87 @@
                (tessera-gnus-tests--metadata)) "\n")
       (put-text-property start (point) 'gnus-number (+ 42 index))))
   (goto-char (point-min)))
+
+;;;; Article metadata and content state
+
+(defun tessera-gnus-tests--metadata-header (&optional extra)
+  "Return a native header with EXTRA fields."
+  (let ((header (make-full-mail-header
+                 42 "Subject" "Author" "" "<metadata@test>")))
+    (setf (mail-header-extra header) extra)
+    header))
+
+(ert-deftest tessera-gnus-summary-labels-merge-sources ()
+  (let ((gnus-registry-db t))
+    (cl-letf (((symbol-function 'gnus-registry-get-id-key)
+               (lambda (_id _key) '(Work Later))))
+      (should
+       (equal
+        (tessera-gnus-summary-label-data
+         (tessera-gnus-tests--metadata-header
+          '((X-GM-LABELS . "(\"Work\" \"Two words\")")
+            (Keywords . "Work, release,\n multi line"))))
+        '(("Work" "Keywords" "Gmail" "Registry")
+          ("Later" "Registry") ("Two words" "Gmail")
+          ("release" "Keywords") ("multi line" "Keywords")))))))
+
+(ert-deftest tessera-gnus-summary-unknown-is-not-absent ()
+  (let ((header (tessera-gnus-tests--metadata-header))
+        (tessera-gnus-summary--content-cache nil))
+    (should (eq (plist-get (tessera-gnus-summary--content-data header)
+                           :attachment) 'unknown))
+    (with-temp-buffer
+      (let ((handle
+             (mm-make-handle (current-buffer) '("text/plain"))))
+        (should (tessera-gnus-summary--observe-content header handle))
+        (should-not (tessera-gnus-summary--observe-content
+                     header handle))
+        (should-not (plist-get (tessera-gnus-summary--content-data
+                                header)
+                               :attachment))))))
+
+(ert-deftest tessera-gnus-summary-header-hints-preserve-unknowns ()
+  (let ((data (tessera-gnus-summary--content-data
+               (tessera-gnus-tests--metadata-header
+                '((Content-Type . "multipart/signed; boundary=x"))))))
+    (should (eq (plist-get data :signature) 'present))
+    (should (eq (plist-get data :attachment) 'unknown))
+    (should (eq (plist-get data :encryption) 'unknown))))
+
+(ert-deftest tessera-gnus-content-cache-prunes-removed-articles ()
+  (with-temp-buffer
+    (let* ((header (tessera-gnus-tests--header))
+           (gnus-newsgroup-headers (list header))
+           (tessera-gnus-summary--active t)
+           (tessera-gnus-summary--content-cache
+            (make-hash-table :test #'equal))
+           (key (tessera-gnus-summary--content-key header)))
+      (puthash key 'retained tessera-gnus-summary--content-cache)
+      (puthash "<removed@test>" 'old
+               tessera-gnus-summary--content-cache)
+      (tessera-gnus-summary--prepare)
+      (should (= (hash-table-count
+                  tessera-gnus-summary--content-cache) 1))
+      (should (eq (gethash key tessera-gnus-summary--content-cache)
+                  'retained))
+      (setq gnus-newsgroup-headers nil)
+      (tessera-gnus-summary--prepare)
+      (should (zerop (hash-table-count
+                      tessera-gnus-summary--content-cache))))))
+
+(ert-deftest tessera-gnus-content-slots-share-one-observation ()
+  (let ((calls 0)
+        (original
+         (symbol-function 'tessera-gnus-summary--content-data)))
+    (cl-letf (((symbol-function 'tessera-gnus-summary--content-data)
+               (lambda (header)
+                 (cl-incf calls)
+                 (funcall original header))))
+      (tessera-gnus-summary--render
+       (tessera-gnus-tests--header) (tessera-gnus-tests--metadata)))
+    (should (= 1 calls))))
+
+;;;; Fields and native marks
 
 (ert-deftest tessera-gnus-authors-use-names-with-address-fallback ()
   (with-temp-buffer
@@ -210,69 +293,16 @@
                 (tessera-gnus-tests--metadata))
           (should-not (tessera-gnus-summary--unread-p context)))))))
 
-(ert-deftest tessera-gnus-custom-marks-restore-existing-and-new
-    ()
-  (dolist (character '(?~ ?•))
-    (let ((gnus-unread-mark character)
-          (gnus-summary-mode-hook nil)
-          (gnus-summary-line-format "Native format\n")
-          (tessera-gnus-mode nil)
-          (tessera--entry-backends (make-hash-table :test #'eq))
-          buffers saved native-local)
-      (unwind-protect
-          (progn
-            (dotimes (index 2)
-              (let ((buffer (generate-new-buffer " *Gnus existing*")))
-                (push buffer buffers)
-                (with-current-buffer buffer
-                  (gnus-summary-mode)
-                  (when (= index 0)
-                    (setq native-local
-                          (local-variable-p
-                           'gnus-summary-line-format)))
-                  (when (= index 1)
-                    (setq-local gnus-summary-line-format "Local\n"))
-                  (push (list buffer gnus-summary-line-format
-                              (local-variable-p
-                               'gnus-summary-line-format))
-                        saved))))
-            (dotimes (cycle 2)
-              (tessera-gnus-mode 1)
-              ;; Exercise an explicit repeated enable once; the next
-              ;; cycle exercises activation after full restoration.
-              (when (zerop cycle)
-                (tessera-gnus-mode 1))
-              (let ((buffer (generate-new-buffer " *Gnus future*")))
-                (push buffer buffers)
-                (with-current-buffer buffer (gnus-summary-mode)))
-              (dolist (buffer buffers)
-                (with-current-buffer buffer
-                  (should tessera-gnus-summary--active)
-                  (should (equal gnus-summary-line-format
-                                 "%u&tessera;\n"))))
-              (tessera-gnus-mode -1)
-              (when (zerop cycle)
-                (tessera-gnus-mode -1))
-              (dolist (buffer buffers)
-                (with-current-buffer buffer
-                  (should-not tessera-gnus-summary--active)
-                  (should-not tessera-gnus-summary--saved-settings)
-                  (unless (assq buffer saved)
-                    (should (equal gnus-summary-line-format
-                                   "Native format\n"))
-                    (should
-                     (eq (local-variable-p 'gnus-summary-line-format)
-                         native-local)))))
-              (dolist (item saved)
-                (with-current-buffer (car item)
-                  (should (equal gnus-summary-line-format
-                                 (nth 1 item)))
-                  (should (eq (local-variable-p
-                               'gnus-summary-line-format)
-                              (nth 2 item)))))
-              (should (= gnus-unread-mark character))))
-        (tessera-gnus-mode -1)
-        (mapc #'kill-buffer buffers)))))
+(ert-deftest tessera-gnus-custom-mark-rejects-invalid-default ()
+  (let ((gnus-unread-mark ?•)
+        (tessera--entry-backends (make-hash-table :test #'eq)))
+    (dolist (default '(nil (?•) ("x")))
+      (cl-letf (((get 'gnus-unread-mark 'standard-value) default))
+        (should-error (tessera-gnus-summary--register) :type 'error)
+        (should-not (gethash 'gnus-summary tessera--entry-backends))
+        (should (= gnus-unread-mark ?•))))))
+
+;;;; Highlighting and native faces
 
 (ert-deftest tessera-gnus-current-highlights-entry ()
   (with-temp-buffer
@@ -306,32 +336,23 @@
                           (get-char-property (point) 'face))))
         (tessera-gnus-summary--disable)))))
 
-(ert-deftest tessera-gnus-major-mode-change-cleans-layout ()
+(ert-deftest tessera-gnus-restores-faces-after-native-highlighting ()
   (with-temp-buffer
-    (let ((gnus-show-threads t)
-          (gnus-newsgroup-headers nil)
-          (tessera-glyph-style 'ascii))
-      (setq-local major-mode 'gnus-summary-mode)
-      (tessera-gnus-summary--register)
-      (tessera-tests--gnus-rows)
-      (tessera-gnus-summary--enable)
-      (tessera-gnus-summary--prepare)
-      (let ((overlays (overlays-in (point-min) (point-max)))
-            (markers (seq-take tessera--current-entry 2)))
-        (should overlays)
-        (should markers)
-        (fundamental-mode)
-        (should-not (seq-some #'overlay-buffer overlays))
-        (should-not (seq-some #'marker-buffer markers))))))
+    (let ((tessera-glyph-style 'ascii)
+          (tessera-entry-layout 'two-line)
+          (tessera-gnus-summary--active t))
+      (tessera-gnus-tests--insert)
+      (put-text-property (point-min) (line-end-position)
+                         'face 'gnus-summary-normal-read)
+      (tessera-gnus-summary--update-line)
+      (let ((position
+             (tessera-gnus-tests--find (point-min) (line-end-position)
+                                       'help-echo
+                                       "A useful article")))
+        (should (memq 'tessera-gnus-summary-subject-face
+                      (get-text-property position 'face)))))))
 
-(ert-deftest tessera-gnus-custom-mark-rejects-invalid-default ()
-  (let ((gnus-unread-mark ?•)
-        (tessera--entry-backends (make-hash-table :test #'eq)))
-    (dolist (default '(nil (?•) ("x")))
-      (cl-letf (((get 'gnus-unread-mark 'standard-value) default))
-        (should-error (tessera-gnus-summary--register) :type 'error)
-        (should-not (gethash 'gnus-summary tessera--entry-backends))
-        (should (= gnus-unread-mark ?•))))))
+;;;; Month grouping
 
 (ert-deftest tessera-gnus-month-search-skips-folded-results ()
   (with-temp-buffer
@@ -536,6 +557,8 @@
         (should (= syncs 1))
         (should-not tessera-gnus-summary--dirty)))))
 
+;;;; Content synchronization
+
 (ert-deftest tessera-gnus-refreshes-after-font-remapping ()
   (with-temp-buffer
     (let* ((face-remapping-alist
@@ -555,27 +578,6 @@
         (tessera-gnus-summary--post-command)
         (tessera-gnus-summary--post-command)
         (should (= syncs 1))))))
-
-(ert-deftest tessera-gnus-content-cache-prunes-removed-articles ()
-  (with-temp-buffer
-    (let* ((header (tessera-gnus-tests--header))
-           (gnus-newsgroup-headers (list header))
-           (tessera-gnus-summary--active t)
-           (tessera-gnus-summary--content-cache
-            (make-hash-table :test #'equal))
-           (key (tessera-gnus-summary--content-key header)))
-      (puthash key 'retained tessera-gnus-summary--content-cache)
-      (puthash "<removed@test>" 'old
-               tessera-gnus-summary--content-cache)
-      (tessera-gnus-summary--prepare)
-      (should (= (hash-table-count
-                  tessera-gnus-summary--content-cache) 1))
-      (should (eq (gethash key tessera-gnus-summary--content-cache)
-                  'retained))
-      (setq gnus-newsgroup-headers nil)
-      (tessera-gnus-summary--prepare)
-      (should (zerop (hash-table-count
-                      tessera-gnus-summary--content-cache))))))
 
 (ert-deftest tessera-gnus-mark-update-keeps-native-identity ()
   (with-temp-buffer
@@ -600,21 +602,165 @@
       (forward-line 1)
       (should (= (get-text-property (point) 'gnus-number) 43)))))
 
-(ert-deftest tessera-gnus-restores-faces-after-native-highlighting ()
+(ert-deftest tessera-gnus-redraw-preserves-point-offset ()
+  (with-temp-buffer
+    (let ((tessera-glyph-style 'ascii)
+          (tessera-entry-layout 'two-line))
+      (tessera-gnus-tests--insert)
+      (forward-line 1)
+      (forward-char 10)
+      (tessera-gnus-summary--sync-buffer t)
+      (should (= (- (point) (line-beginning-position)) 10))
+      (should (= (get-text-property (point) 'gnus-number) 43)))))
+
+(ert-deftest tessera-gnus-glyph-refresh-finishes-synchronization ()
+  (with-temp-buffer
+    (let ((gnus-show-threads nil)
+          (tessera-glyph-style 'ascii)
+          (tessera-glyph-color t)
+          (tessera-gnus-summary--active t)
+          (tessera--entry-backends (make-hash-table :test #'eq))
+          (this-command nil)
+          (sync (symbol-function 'tessera-gnus-summary--sync-buffer))
+          calls)
+      (setq major-mode 'gnus-summary-mode)
+      (tessera-gnus-summary--register)
+      (tessera-tests--gnus-rows '(0 0 0))
+      (tessera-gnus-summary--prepare)
+      (setq tessera-glyph-color nil
+            tessera-gnus-summary--dirty t)
+      (cl-letf (((symbol-function 'tessera-gnus-summary--sync-buffer)
+                 (lambda (&optional force)
+                   (push force calls)
+                   (funcall sync force))))
+        (tessera-gnus-summary--glyphs-changed 'tessera-glyph-color)
+        (should (equal calls '(t)))
+        (tessera-gnus-summary--post-command)
+        (should (equal calls '(t)))))))
+
+(ert-deftest tessera-gnus-layout-update-is-idempotent ()
   (with-temp-buffer
     (let ((tessera-glyph-style 'ascii)
           (tessera-entry-layout 'two-line)
+          (tessera-entry-top-padding 0.5)
+          (tessera-entry-bottom-padding 0.2))
+      (tessera-gnus-tests--insert)
+      (tessera-gnus-summary--sync-buffer)
+      (let ((count (length (overlays-in (point-min) (point-max)))))
+        (dotimes (_ 3) (tessera-gnus-summary--sync-buffer t))
+        (should (= count (length (overlays-in
+                                  (point-min) (point-max)))))))))
+
+(ert-deftest tessera-gnus-batch-reindexes-native-positions-once ()
+  (with-temp-buffer
+    (let ((gnus-show-threads nil)
+          (tessera-glyph-style 'ascii)
+          (tessera-entry-layout 'two-line))
+      (tessera-tests--gnus-rows (make-list 100 0))
+      (tessera-gnus-summary--sync-buffer t)
+      (gnus-summary-goto-subject 50)
+      (let ((tessera-entry-layout 'single-line))
+        (cl-letf (((symbol-function 'gnus-data-update-list)
+                   (lambda (&rest _)
+                     (ert-fail "Batch updated a suffix"))))
+          (tessera-gnus-summary--sync-buffer t)))
+      (should (= 50 (gnus-summary-article-number)))
+      (should (= (point) (tessera-entry-point)))
+      (dolist (data gnus-newsgroup-data)
+        (goto-char (1- (gnus-data-pos data)))
+        (should (bolp))
+        (should (= (gnus-data-number data)
+                   (gnus-summary-article-number)))))))
+
+(ert-deftest tessera-gnus-mark-keeps-unrelated-layout-overlays ()
+  (with-temp-buffer
+    (let ((gnus-show-threads nil)
+          (tessera-glyph-style 'ascii)
+          (tessera-gnus-summary--active t)
+          (count 0)
+          (apply-layout
+           (symbol-function 'tessera-entry-apply-layout)))
+      (tessera-tests--gnus-rows (make-list 100 0))
+      (tessera-gnus-summary--prepare)
+      (gnus-summary-goto-subject 2)
+      (let ((overlay (get-text-property
+                      (line-beginning-position)
+                      'tessera--layout-overlay)))
+        (goto-char (point-min))
+        (subst-char-in-region (point) (1+ (point))
+                              gnus-unread-mark gnus-read-mark)
+        (cl-letf (((symbol-function 'tessera-entry-apply-layout)
+                   (lambda (&rest arguments)
+                     (cl-incf count)
+                     (apply apply-layout arguments))))
+          (tessera-gnus-summary--sync-buffer))
+        (should (= 1 count))
+        (should (overlay-buffer overlay))
+        (gnus-summary-goto-subject 2)
+        (should (eq overlay (get-text-property
+                             (line-beginning-position)
+                             'tessera--layout-overlay)))))))
+
+;;;; Native folding
+
+(ert-deftest tessera-gnus-folding-removes-hidden-layout ()
+  (with-temp-buffer
+    (let ((tessera-glyph-style 'ascii)
+          (tessera-entry-layout 'two-line)
+          (tessera-entry-top-padding 0.5)
+          (tessera-entry-bottom-padding 0.2)
           (tessera-gnus-summary--active t))
       (tessera-gnus-tests--insert)
-      (put-text-property (point-min) (line-end-position)
-                         'face 'gnus-summary-normal-read)
-      (tessera-gnus-summary--update-line)
-      (let ((position
-             (tessera-gnus-tests--find (point-min) (line-end-position)
-                                       'help-echo
-                                       "A useful article")))
-        (should (memq 'tessera-gnus-summary-subject-face
-                      (get-text-property position 'face)))))))
+      (tessera-gnus-summary--prepare)
+      (forward-line 1)
+      (let ((start (point))
+            (overlay (make-overlay (point) (point-max))))
+        (overlay-put overlay 'invisible 'gnus-sum)
+        (tessera-gnus-summary--fold-changed)
+        (goto-char (point-min))
+        (tessera-gnus-summary--post-command)
+        (should-not
+         (seq-some
+          (lambda (item) (overlay-get item 'tessera-entry-overlay))
+          (overlays-in start (point-max))))
+        (delete-overlay overlay)
+        (tessera-gnus-summary--fold-changed)
+        (tessera-gnus-summary--post-command)
+        (should
+         (seq-some
+          (lambda (item) (overlay-get item 'tessera-entry-overlay))
+          (overlays-in start (point-max))))))))
+
+(ert-deftest tessera-gnus-fold-events-invalidate-without-polling ()
+  (with-temp-buffer
+    (let ((gnus-show-threads t)
+          (gnus-summary-buffer (current-buffer))
+          (gnus-auto-center-summary nil)
+          (tessera-gnus-summary--active t))
+      (tessera-tests--gnus-rows)
+      (add-to-invisibility-spec 'gnus-sum)
+      (tessera-gnus-summary--track-folds t)
+      (unwind-protect
+          (progn
+            (tessera-gnus-summary--prepare)
+            (gnus-summary-hide-thread)
+            (should tessera-gnus-summary--dirty)
+            (tessera-gnus-summary--post-command)
+            (gnus-summary-goto-subject 1)
+            (should (tessera-thread-context-last
+                     (gethash 1 tessera-gnus-summary--threads)))
+            (cl-letf (((symbol-function 'overlays-in)
+                       (lambda (&rest _)
+                         (ert-fail "Clean command scanned"))))
+              (tessera-gnus-summary--post-command))
+            (gnus-summary-show-all-threads)
+            (should tessera-gnus-summary--dirty)
+            (tessera-gnus-summary--post-command)
+            (should-not (tessera-thread-context-last
+                         (gethash 1 tessera-gnus-summary--threads))))
+        (tessera-gnus-summary--track-folds nil)))))
+
+;;;; Native navigation
 
 (ert-deftest tessera-gnus-navigation-selects-subject-in-flat-layouts
     ()
@@ -1056,82 +1202,89 @@
                                       setting)))))
                   (tessera-gnus-summary--navigation nil))))))))))
 
-(ert-deftest tessera-gnus-redraw-preserves-point-offset ()
-  (with-temp-buffer
-    (let ((tessera-glyph-style 'ascii)
-          (tessera-entry-layout 'two-line))
-      (tessera-gnus-tests--insert)
-      (forward-line 1)
-      (forward-char 10)
-      (tessera-gnus-summary--sync-buffer t)
-      (should (= (- (point) (line-beginning-position)) 10))
-      (should (= (get-text-property (point) 'gnus-number) 43)))))
+;;;; Buffer lifecycle
 
-(ert-deftest tessera-gnus-glyph-refresh-finishes-synchronization ()
-  (with-temp-buffer
-    (let ((gnus-show-threads nil)
-          (tessera-glyph-style 'ascii)
-          (tessera-glyph-color t)
-          (tessera-gnus-summary--active t)
+(ert-deftest tessera-gnus-custom-marks-restore-existing-and-new
+    ()
+  (dolist (character '(?~ ?•))
+    (let ((gnus-unread-mark character)
+          (gnus-summary-mode-hook nil)
+          (gnus-summary-line-format "Native format\n")
+          (tessera-gnus-mode nil)
           (tessera--entry-backends (make-hash-table :test #'eq))
-          (this-command nil)
-          (sync (symbol-function 'tessera-gnus-summary--sync-buffer))
-          calls)
-      (setq major-mode 'gnus-summary-mode)
+          buffers saved native-local)
+      (unwind-protect
+          (progn
+            (dotimes (index 2)
+              (let ((buffer (generate-new-buffer " *Gnus existing*")))
+                (push buffer buffers)
+                (with-current-buffer buffer
+                  (gnus-summary-mode)
+                  (when (= index 0)
+                    (setq native-local
+                          (local-variable-p
+                           'gnus-summary-line-format)))
+                  (when (= index 1)
+                    (setq-local gnus-summary-line-format "Local\n"))
+                  (push (list buffer gnus-summary-line-format
+                              (local-variable-p
+                               'gnus-summary-line-format))
+                        saved))))
+            (dotimes (cycle 2)
+              (tessera-gnus-mode 1)
+              ;; Exercise an explicit repeated enable once; the next
+              ;; cycle exercises activation after full restoration.
+              (when (zerop cycle)
+                (tessera-gnus-mode 1))
+              (let ((buffer (generate-new-buffer " *Gnus future*")))
+                (push buffer buffers)
+                (with-current-buffer buffer (gnus-summary-mode)))
+              (dolist (buffer buffers)
+                (with-current-buffer buffer
+                  (should tessera-gnus-summary--active)
+                  (should (equal gnus-summary-line-format
+                                 "%u&tessera;\n"))))
+              (tessera-gnus-mode -1)
+              (when (zerop cycle)
+                (tessera-gnus-mode -1))
+              (dolist (buffer buffers)
+                (with-current-buffer buffer
+                  (should-not tessera-gnus-summary--active)
+                  (should-not tessera-gnus-summary--saved-settings)
+                  (unless (assq buffer saved)
+                    (should (equal gnus-summary-line-format
+                                   "Native format\n"))
+                    (should
+                     (eq (local-variable-p 'gnus-summary-line-format)
+                         native-local)))))
+              (dolist (item saved)
+                (with-current-buffer (car item)
+                  (should (equal gnus-summary-line-format
+                                 (nth 1 item)))
+                  (should (eq (local-variable-p
+                               'gnus-summary-line-format)
+                              (nth 2 item)))))
+              (should (= gnus-unread-mark character))))
+        (tessera-gnus-mode -1)
+        (mapc #'kill-buffer buffers)))))
+
+(ert-deftest tessera-gnus-major-mode-change-cleans-layout ()
+  (with-temp-buffer
+    (let ((gnus-show-threads t)
+          (gnus-newsgroup-headers nil)
+          (tessera-glyph-style 'ascii))
+      (setq-local major-mode 'gnus-summary-mode)
       (tessera-gnus-summary--register)
-      (tessera-tests--gnus-rows '(0 0 0))
+      (tessera-tests--gnus-rows)
+      (tessera-gnus-summary--enable)
       (tessera-gnus-summary--prepare)
-      (setq tessera-glyph-color nil
-            tessera-gnus-summary--dirty t)
-      (cl-letf (((symbol-function 'tessera-gnus-summary--sync-buffer)
-                 (lambda (&optional force)
-                   (push force calls)
-                   (funcall sync force))))
-        (tessera-gnus-summary--glyphs-changed 'tessera-glyph-color)
-        (should (equal calls '(t)))
-        (tessera-gnus-summary--post-command)
-        (should (equal calls '(t)))))))
-
-(ert-deftest tessera-gnus-folding-removes-hidden-layout ()
-  (with-temp-buffer
-    (let ((tessera-glyph-style 'ascii)
-          (tessera-entry-layout 'two-line)
-          (tessera-entry-top-padding 0.5)
-          (tessera-entry-bottom-padding 0.2)
-          (tessera-gnus-summary--active t))
-      (tessera-gnus-tests--insert)
-      (tessera-gnus-summary--prepare)
-      (forward-line 1)
-      (let ((start (point))
-            (overlay (make-overlay (point) (point-max))))
-        (overlay-put overlay 'invisible 'gnus-sum)
-        (tessera-gnus-summary--fold-changed)
-        (goto-char (point-min))
-        (tessera-gnus-summary--post-command)
-        (should-not
-         (seq-some
-          (lambda (item) (overlay-get item 'tessera-entry-overlay))
-          (overlays-in start (point-max))))
-        (delete-overlay overlay)
-        (tessera-gnus-summary--fold-changed)
-        (tessera-gnus-summary--post-command)
-        (should
-         (seq-some
-          (lambda (item) (overlay-get item 'tessera-entry-overlay))
-          (overlays-in start (point-max))))))))
-
-(ert-deftest tessera-gnus-layout-update-is-idempotent ()
-  (with-temp-buffer
-    (let ((tessera-glyph-style 'ascii)
-          (tessera-entry-layout 'two-line)
-          (tessera-entry-top-padding 0.5)
-          (tessera-entry-bottom-padding 0.2))
-      (tessera-gnus-tests--insert)
-      (tessera-gnus-summary--sync-buffer)
-      (let ((count (length (overlays-in (point-min) (point-max)))))
-        (dotimes (_ 3) (tessera-gnus-summary--sync-buffer t))
-        (should (= count (length (overlays-in
-                                  (point-min) (point-max)))))))))
+      (let ((overlays (overlays-in (point-min) (point-max)))
+            (markers (seq-take tessera--current-entry 2)))
+        (should overlays)
+        (should markers)
+        (fundamental-mode)
+        (should-not (seq-some #'overlay-buffer overlays))
+        (should-not (seq-some #'marker-buffer markers))))))
 
 (ert-deftest tessera-gnus-enable-restores-setting-locality ()
   (dolist (local '(nil t))
@@ -1286,141 +1439,6 @@
               (should-not tessera-gnus-summary--active))))
       (kill-buffer first)
       (kill-buffer second))))
-
-(defun tessera-gnus-tests--metadata-header (&optional extra)
-  "Return a native header with EXTRA fields."
-  (let ((header (make-full-mail-header
-                 42 "Subject" "Author" "" "<metadata@test>")))
-    (setf (mail-header-extra header) extra)
-    header))
-
-(ert-deftest tessera-gnus-summary-labels-merge-sources ()
-  (let ((gnus-registry-db t))
-    (cl-letf (((symbol-function 'gnus-registry-get-id-key)
-               (lambda (_id _key) '(Work Later))))
-      (should
-       (equal
-        (tessera-gnus-summary-label-data
-         (tessera-gnus-tests--metadata-header
-          '((X-GM-LABELS . "(\"Work\" \"Two words\")")
-            (Keywords . "Work, release,\n multi line"))))
-        '(("Work" "Keywords" "Gmail" "Registry")
-          ("Later" "Registry") ("Two words" "Gmail")
-          ("release" "Keywords") ("multi line" "Keywords")))))))
-
-(ert-deftest tessera-gnus-summary-unknown-is-not-absent ()
-  (let ((header (tessera-gnus-tests--metadata-header))
-        (tessera-gnus-summary--content-cache nil))
-    (should (eq (plist-get (tessera-gnus-summary--content-data header)
-                           :attachment) 'unknown))
-    (with-temp-buffer
-      (let ((handle
-             (mm-make-handle (current-buffer) '("text/plain"))))
-        (should (tessera-gnus-summary--observe-content header handle))
-        (should-not (tessera-gnus-summary--observe-content
-                     header handle))
-        (should-not (plist-get (tessera-gnus-summary--content-data
-                                header)
-                               :attachment))))))
-
-(ert-deftest tessera-gnus-summary-header-hints-preserve-unknowns ()
-  (let ((data (tessera-gnus-summary--content-data
-               (tessera-gnus-tests--metadata-header
-                '((Content-Type . "multipart/signed; boundary=x"))))))
-    (should (eq (plist-get data :signature) 'present))
-    (should (eq (plist-get data :attachment) 'unknown))
-    (should (eq (plist-get data :encryption) 'unknown))))
-
-(ert-deftest tessera-gnus-batch-reindexes-native-positions-once ()
-  (with-temp-buffer
-    (let ((gnus-show-threads nil)
-          (tessera-glyph-style 'ascii)
-          (tessera-entry-layout 'two-line))
-      (tessera-tests--gnus-rows (make-list 100 0))
-      (tessera-gnus-summary--sync-buffer t)
-      (gnus-summary-goto-subject 50)
-      (let ((tessera-entry-layout 'single-line))
-        (cl-letf (((symbol-function 'gnus-data-update-list)
-                   (lambda (&rest _)
-                     (ert-fail "Batch updated a suffix"))))
-          (tessera-gnus-summary--sync-buffer t)))
-      (should (= 50 (gnus-summary-article-number)))
-      (should (= (point) (tessera-entry-point)))
-      (dolist (data gnus-newsgroup-data)
-        (goto-char (1- (gnus-data-pos data)))
-        (should (bolp))
-        (should (= (gnus-data-number data)
-                   (gnus-summary-article-number)))))))
-
-(ert-deftest tessera-gnus-mark-keeps-unrelated-layout-overlays ()
-  (with-temp-buffer
-    (let ((gnus-show-threads nil)
-          (tessera-glyph-style 'ascii)
-          (tessera-gnus-summary--active t)
-          (count 0)
-          (apply-layout
-           (symbol-function 'tessera-entry-apply-layout)))
-      (tessera-tests--gnus-rows (make-list 100 0))
-      (tessera-gnus-summary--prepare)
-      (gnus-summary-goto-subject 2)
-      (let ((overlay (get-text-property
-                      (line-beginning-position)
-                      'tessera--layout-overlay)))
-        (goto-char (point-min))
-        (subst-char-in-region (point) (1+ (point))
-                              gnus-unread-mark gnus-read-mark)
-        (cl-letf (((symbol-function 'tessera-entry-apply-layout)
-                   (lambda (&rest arguments)
-                     (cl-incf count)
-                     (apply apply-layout arguments))))
-          (tessera-gnus-summary--sync-buffer))
-        (should (= 1 count))
-        (should (overlay-buffer overlay))
-        (gnus-summary-goto-subject 2)
-        (should (eq overlay (get-text-property
-                             (line-beginning-position)
-                             'tessera--layout-overlay)))))))
-
-(ert-deftest tessera-gnus-fold-events-invalidate-without-polling ()
-  (with-temp-buffer
-    (let ((gnus-show-threads t)
-          (gnus-summary-buffer (current-buffer))
-          (gnus-auto-center-summary nil)
-          (tessera-gnus-summary--active t))
-      (tessera-tests--gnus-rows)
-      (add-to-invisibility-spec 'gnus-sum)
-      (tessera-gnus-summary--track-folds t)
-      (unwind-protect
-          (progn
-            (tessera-gnus-summary--prepare)
-            (gnus-summary-hide-thread)
-            (should tessera-gnus-summary--dirty)
-            (tessera-gnus-summary--post-command)
-            (gnus-summary-goto-subject 1)
-            (should (tessera-thread-context-last
-                     (gethash 1 tessera-gnus-summary--threads)))
-            (cl-letf (((symbol-function 'overlays-in)
-                       (lambda (&rest _)
-                         (ert-fail "Clean command scanned"))))
-              (tessera-gnus-summary--post-command))
-            (gnus-summary-show-all-threads)
-            (should tessera-gnus-summary--dirty)
-            (tessera-gnus-summary--post-command)
-            (should-not (tessera-thread-context-last
-                         (gethash 1 tessera-gnus-summary--threads))))
-        (tessera-gnus-summary--track-folds nil)))))
-
-(ert-deftest tessera-gnus-content-slots-share-one-observation ()
-  (let ((calls 0)
-        (original
-         (symbol-function 'tessera-gnus-summary--content-data)))
-    (cl-letf (((symbol-function 'tessera-gnus-summary--content-data)
-               (lambda (header)
-                 (cl-incf calls)
-                 (funcall original header))))
-      (tessera-gnus-summary--render
-       (tessera-gnus-tests--header) (tessera-gnus-tests--metadata)))
-    (should (= 1 calls))))
 
 (provide 'tessera-gnus-summary-tests)
 ;;; tessera-gnus-summary-tests.el ends here

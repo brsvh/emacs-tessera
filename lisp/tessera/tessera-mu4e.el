@@ -30,13 +30,6 @@
 
 (require 'tessera)
 
-(defgroup tessera-mu4e nil
-  "Tessera interfaces for mu4e."
-  :group 'tessera
-  :prefix "tessera-mu4e-")
-
-;;;; Adapter lifecycle
-
 (declare-function tessera-mu4e-headers--enable "tessera-mu4e-headers")
 (declare-function tessera-mu4e-headers--disable
                   "tessera-mu4e-headers")
@@ -49,6 +42,18 @@
                   "tessera-mu4e-headers")
 
 (defvar tessera-mu4e-headers--bulk-deactivating)
+
+(declare-function tessera-mu4e-headers--glyphs-changed
+                  "tessera-mu4e-headers")
+(declare-function tessera-mu4e-headers--months-changed
+                  "tessera-mu4e-headers")
+
+(defgroup tessera-mu4e nil
+  "Tessera interfaces for mu4e."
+  :group 'tessera
+  :prefix "tessera-mu4e-")
+
+;;;; Adapter lifecycle
 
 (defvar tessera-mu4e--installed nil
   "Whether the global mu4e integration is fully installed.")
@@ -64,11 +69,6 @@
   (tessera-mu4e-headers--header-line-track t)
   (tessera-mu4e-headers--register)
   (tessera-mu4e-headers--enable))
-
-(declare-function tessera-mu4e-headers--glyphs-changed
-                  "tessera-mu4e-headers")
-(declare-function tessera-mu4e-headers--months-changed
-                  "tessera-mu4e-headers")
 
 (defun tessera-mu4e--glyphs-changed (option)
   "Forward changed glyph OPTION to an already loaded adapter."

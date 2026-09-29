@@ -31,10 +31,38 @@
 (require 'subr-x)
 (require 'tessera-elfeed)
 
+(declare-function elfeed-add-properties "elfeed-lib")
+(declare-function elfeed--position-save "elfeed-lib")
+(declare-function elfeed--position-restore "elfeed-lib")
+(declare-function elfeed-entry-date "elfeed-db")
+(declare-function elfeed-entry-enclosures "elfeed-db")
+(declare-function elfeed-entry-feed "elfeed-db")
+(declare-function elfeed-entry-link "elfeed-db")
+(declare-function elfeed-entry-tags "elfeed-db")
+(declare-function elfeed-meta--title "elfeed-db")
+(declare-function elfeed-search--faces "elfeed-search")
+(declare-function elfeed-search-format-date "elfeed-search")
+(declare-function elfeed-search-update "elfeed-search")
+(declare-function elfeed-search--update-immediately "elfeed-search")
+
+(defvar elfeed-search-print-entry-function)
+(defvar elfeed-search-update-hook)
+(defvar elfeed-search-separator-date-format)
+
+(declare-function elfeed-update "elfeed")
+(declare-function elfeed-entry-id "elfeed-db")
+(declare-function elfeed-entry-feed-id "elfeed-db")
+(defvar elfeed-search-entries)
+(defvar elfeed-search-filter)
+(defvar elfeed-fetch-functions)
+(defvar elfeed-parse-error-hook)
+
 (defgroup tessera-elfeed-search nil
   "Tessera entries in Elfeed search buffers."
   :group 'tessera-elfeed
   :prefix "tessera-elfeed-search-")
+
+;;;; Month options
 
 (defcustom tessera-elfeed-search-month-grouping 'inherit
   "Whether Elfeed search buffers use month grouping.
@@ -86,6 +114,56 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
          tessera-elfeed-search--glyph-defaults)
   :initialize #'custom-initialize-default
   :set #'tessera-elfeed-search--set-glyphs
+  :group 'tessera-elfeed-search)
+
+;;;; Header line options
+
+(defcustom tessera-elfeed-search-header-line-action-function
+  #'tessera-elfeed-search-header-line-action
+  "Function rendering the action header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-elfeed-search)
+
+(defcustom tessera-elfeed-search-header-line-info-function
+  #'tessera-elfeed-search-header-line-info
+  "Function rendering the info header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-elfeed-search)
+
+(defcustom tessera-elfeed-search-header-line-extra-function
+  nil
+  "Function rendering the extra header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-elfeed-search)
+
+(defcustom tessera-elfeed-search-header-line-statistics-function
+  #'tessera-header-line-statistics
+  "Function rendering the statistics header region, or nil to hide it.
+The function receives a `tessera-header-line-context' and returns
+single-line text with optional face, help and keymap properties."
+  :type '(choice (const nil) function)
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-header-line-option
+  :group 'tessera-elfeed-search)
+
+(defcustom tessera-elfeed-search-header-line-next-update-function
+  nil
+  "Function returning the next update time, or nil when unknown.
+The function receives a `tessera-header-line-context'.  It must
+return an absolute Emacs time value or nil, without scheduling work."
+  :type '(choice (const nil) function)
   :group 'tessera-elfeed-search)
 
 ;;;; Faces
@@ -152,25 +230,7 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
   "Face used for unread URLs, with unread date color and weight."
   :group 'tessera-elfeed-search)
 
-(declare-function elfeed-add-properties "elfeed-lib")
-(declare-function elfeed--position-save "elfeed-lib")
-(declare-function elfeed--position-restore "elfeed-lib")
-(declare-function elfeed-entry-date "elfeed-db")
-(declare-function elfeed-entry-enclosures "elfeed-db")
-(declare-function elfeed-entry-feed "elfeed-db")
-(declare-function elfeed-entry-link "elfeed-db")
-(declare-function elfeed-entry-tags "elfeed-db")
-(declare-function elfeed-meta--title "elfeed-db")
-(declare-function elfeed-search--faces "elfeed-search")
-(declare-function elfeed-search-format-date "elfeed-search")
-(declare-function elfeed-search-update "elfeed-search")
-(declare-function elfeed-search--update-immediately "elfeed-search")
-
-(defvar elfeed-search-print-entry-function)
-(defvar elfeed-search-update-hook)
-(defvar elfeed-search-separator-date-format)
-
-;;;; Buffer state and fields
+;;;; Buffer state
 
 (defvar-local tessera-elfeed-search--active nil
   "Non-nil when Tessera renders the current Elfeed search buffer.")
@@ -200,6 +260,8 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (defvar-local tessera-elfeed-search--month-separator-hidden nil
   "Non-nil when month grouping hid the native date separator.")
 
+;;;; Entry metadata
+
 (defun tessera-elfeed-search--entry (context)
   "Return the Elfeed entry stored in CONTEXT."
   (tessera-entry-context-object context))
@@ -212,13 +274,7 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
    :buffer buffer
    :window window))
 
-(defun tessera-elfeed-search--select-status (context)
-  "Return the status glyph variant for CONTEXT."
-  (if (memq 'unread
-            (elfeed-entry-tags
-             (tessera-elfeed-search--entry context)))
-      'unread
-    'read))
+;;;; Month contexts
 
 (defun tessera-elfeed-search--month-enabled-p ()
   "Return the effective Elfeed month grouping setting."
@@ -295,6 +351,16 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
     (when-let* ((preferred (and found (tessera-entry-point))))
       (goto-char preferred))
     found))
+
+;;;; Fields and glyphs
+
+(defun tessera-elfeed-search--select-status (context)
+  "Return the status glyph variant for CONTEXT."
+  (if (memq 'unread
+            (elfeed-entry-tags
+             (tessera-elfeed-search--entry context)))
+      'unread
+    'read))
 
 (defun tessera-elfeed-search--status-slot ()
   "Return the status glyph slot for Elfeed entries."
@@ -484,7 +550,7 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
    `((single-line . ,(tessera-elfeed-search--single-line-layout))
      (two-line . ,(tessera-elfeed-search--two-line-layout)))))
 
-;;;; Rendering and lifecycle
+;;;; Native row rendering
 
 (defun tessera-elfeed-search-print-entry (entry)
   "Insert a Tessera rendering of Elfeed ENTRY."
@@ -528,62 +594,7 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
       (overlay-put overlay 'before-string original)
       (overlay-put overlay 'tessera-elfeed-search-separator nil))))
 
-;;;; Native navigation
-
-(defun tessera-elfeed-search--entry-at-point ()
-  "Return the native Elfeed entry on the current line."
-  (let ((position (line-beginning-position)))
-    (when (< position (point-max))
-      (get-text-property position 'elfeed-entry))))
-
-(defun tessera-elfeed-search--position-point ()
-  "Place point at the selected entry's title anchor."
-  (when-let* ((position (tessera-entry-point)))
-    (goto-char position)))
-
-(defun tessera-elfeed-search--target-position (lines)
-  "Return the target position LINES logical entries away.
-Return nil when the requested logical Elfeed entry does not exist."
-  (tessera-elfeed-search--sync-months)
-  (unless (zerop lines)
-    (if (and tessera--month-enabled tessera--month-groups)
-        (tessera--month-visible-entry-position
-         (if (> lines 0) 1 -1) (abs lines))
-      (save-excursion
-        (when (and (zerop (forward-line lines))
-                   (tessera-elfeed-search--entry-at-point))
-          (point))))))
-
-(defun tessera-elfeed-search--move (lines)
-  "Move point LINES logical Elfeed entries when the target exists."
-  (when-let* ((target
-               (tessera-elfeed-search--target-position lines)))
-    (goto-char target)
-    (tessera-elfeed-search--position-point)))
-
-(defun tessera-elfeed-search--next (count)
-  "Move forward COUNT logical Elfeed entries."
-  (interactive "p")
-  (tessera-elfeed-search--move count))
-
-(defun tessera-elfeed-search--previous (count)
-  "Move backward COUNT logical Elfeed entries."
-  (interactive "p")
-  (tessera-elfeed-search--move (- count)))
-
-(defun tessera-elfeed-search--navigation (enable)
-  "Install navigation integration when ENABLE is non-nil."
-  (if enable
-      (advice-add 'elfeed-search-update-entry :around
-                  #'tessera-elfeed-search--update-entries)
-    (advice-remove 'elfeed-search-update-entry
-                   #'tessera-elfeed-search--update-entries))
-  (if enable
-      (add-to-list 'emulation-mode-map-alists
-                   'tessera-elfeed-search--emulation-map-alist)
-    (setq emulation-mode-map-alists
-          (delq 'tessera-elfeed-search--emulation-map-alist
-                emulation-mode-map-alists))))
+;;;; Content synchronization
 
 (defun tessera-elfeed-search--apply-layout ()
   "Attach layouts after Elfeed has inserted entry terminators."
@@ -660,211 +671,7 @@ can navigate using the changed records."
   (tessera-month-reveal-point)
   (tessera-entry-highlight-current))
 
-(defun tessera-elfeed-search--acquire-navigation ()
-  "Register one buffer as a navigation integration user."
-  (when (zerop tessera-elfeed-search--navigation-users)
-    (tessera-elfeed-search--navigation t))
-  (setq tessera-elfeed-search--navigation-users
-        (1+ tessera-elfeed-search--navigation-users)))
-
-(defun tessera-elfeed-search--release-navigation ()
-  "Unregister one buffer from the navigation integration."
-  (when (> tessera-elfeed-search--navigation-users 0)
-    (setq tessera-elfeed-search--navigation-users
-          (1- tessera-elfeed-search--navigation-users)))
-  (when (zerop tessera-elfeed-search--navigation-users)
-    (tessera-elfeed-search--navigation nil)))
-
-(defun tessera-elfeed-search--kill-buffer ()
-  "Release navigation resources before killing this search buffer."
-  (when tessera-elfeed-search--active
-    (setq tessera-elfeed-search--active nil
-          tessera-elfeed-search--emulation-map-alist nil)
-    (tessera-elfeed-search--release-navigation)))
-
-(defun tessera-elfeed-search--restore-native-state
-    (release-navigation)
-  "Restore native state in the current Elfeed search buffer.
-When RELEASE-NAVIGATION is non-nil, release this buffer's shared
-navigation registration."
-  (tessera--header-line-disable)
-  (setq tessera-elfeed-search--active nil
-        tessera-elfeed-search--emulation-map-alist nil)
-  (tessera--restore-settings
-   tessera-elfeed-search--saved-settings)
-  (remove-hook 'elfeed-search-update-hook
-               #'tessera-elfeed-search--apply-layout t)
-  (remove-hook 'post-command-hook
-               #'tessera-elfeed-search--post-command t)
-  (remove-hook 'pre-redisplay-functions
-               #'tessera-elfeed-search--prepare t)
-  (remove-hook 'change-major-mode-hook
-               #'tessera-elfeed-search--disable t)
-  (remove-hook 'kill-buffer-hook
-               #'tessera-elfeed-search--kill-buffer t)
-  (tessera-entry-clear-current)
-  (tessera-month-clear)
-  (tessera-entry-clear-layout)
-  (tessera-elfeed-search--restore-separators)
-  (setq tessera-elfeed-search--saved-settings nil
-        tessera-elfeed-search--face-remapping nil
-        tessera-elfeed-search--months-dirty nil
-        tessera-elfeed-search--month-separator-hidden nil)
-  (when release-navigation
-    (tessera-elfeed-search--release-navigation)))
-
-(defun tessera-elfeed-search--enable ()
-  "Enable Tessera rendering in the current Elfeed search buffer."
-  (require 'elfeed)
-  (unless tessera-elfeed-search--active
-    (setq tessera-elfeed-search--saved-settings
-          (tessera--save-settings
-           '(elfeed-search-print-entry-function
-             tessera-entry-layout
-             elfeed-search-separator-date-format)))
-    (let (completed navigation-acquired)
-      (unwind-protect
-          (progn
-            (setq-local elfeed-search-print-entry-function
-                        #'tessera-elfeed-search-print-entry)
-            (setq-local tessera-entry-layout 'two-line)
-            (setq-local tessera--month-enabled
-                        (tessera-elfeed-search--month-enabled-p))
-            (tessera-elfeed-search--update-date-separator)
-            (add-hook 'elfeed-search-update-hook
-                      #'tessera-elfeed-search--apply-layout t t)
-            (add-hook 'post-command-hook
-                      #'tessera-elfeed-search--post-command nil t)
-            (add-hook 'pre-redisplay-functions
-                      #'tessera-elfeed-search--prepare nil t)
-            (add-hook 'change-major-mode-hook
-                      #'tessera-elfeed-search--disable nil t)
-            (add-hook 'kill-buffer-hook
-                      #'tessera-elfeed-search--kill-buffer nil t)
-            (setq tessera-elfeed-search--active t
-                  tessera-elfeed-search--emulation-map-alist
-                  (list
-                   (cons
-                    'tessera-elfeed-search--active
-                    tessera-elfeed-search--navigation-map)))
-            (tessera-elfeed-search--acquire-navigation)
-            (setq navigation-acquired t)
-            (tessera-elfeed-search--refresh)
-            (tessera-elfeed-search--header-line-enable)
-            (setq completed t))
-        (unless completed
-          (condition-case nil
-              (progn
-                (tessera-elfeed-search--restore-native-state
-                 navigation-acquired)
-                (tessera-elfeed-search--refresh))
-            (error nil)))))))
-
-(defun tessera-elfeed-search--disable ()
-  "Disable Tessera rendering in the current Elfeed search buffer."
-  (when tessera-elfeed-search--active
-    (tessera-elfeed-search--restore-native-state t)
-    (condition-case error-data
-        (tessera-elfeed-search--refresh)
-      (error
-       (ignore-errors (tessera-elfeed-search--refresh))
-       (signal (car error-data) (cdr error-data))))))
-
-(defun tessera-elfeed-search--glyphs-changed (option)
-  "Refresh active elfeed views after glyph OPTION changes.
-Nil means explicitly refresh all glyphs and their hover faces."
-  (when (or (null option)
-            (memq option '(tessera-elfeed-search-glyphs
-                           tessera-month-glyphs
-                           tessera-entry-ellipsis
-                           tessera-glyph-style tessera-glyph-color)))
-    (tessera-elfeed-search--months-changed nil)))
-
-(defun tessera-elfeed-search--months-changed (option)
-  "Refresh active Elfeed views affected by month OPTION.
-Nil requests a full refresh, including glyphs."
-  (when (or (null option)
-            (memq option '(tessera-month-grouping
-                           tessera-elfeed-search-month-grouping)))
-    (when (gethash 'elfeed-search tessera--entry-backends)
-      (tessera-elfeed-search--register))
-    (save-window-excursion
-      (tessera--map-mode-buffers
-       'elfeed-search-mode
-       (lambda ()
-         (when tessera-elfeed-search--active
-           (setq-local tessera--month-enabled
-                       (tessera-elfeed-search--month-enabled-p))
-           (tessera-elfeed-search--update-date-separator)
-           (tessera-elfeed-search--refresh)))))))
-
 ;;;; Header line providers
-
-(defcustom tessera-elfeed-search-header-line-action-function
-  #'tessera-elfeed-search-header-line-action
-  "Function rendering the action header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-elfeed-search)
-
-(defcustom tessera-elfeed-search-header-line-info-function
-  #'tessera-elfeed-search-header-line-info
-  "Function rendering the info header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-elfeed-search)
-
-(defcustom tessera-elfeed-search-header-line-extra-function
-  nil
-  "Function rendering the extra header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-elfeed-search)
-
-(defcustom tessera-elfeed-search-header-line-statistics-function
-  #'tessera-header-line-statistics
-  "Function rendering the statistics header region, or nil to hide it.
-The function receives a `tessera-header-line-context' and returns
-single-line text with optional face, help and keymap properties."
-  :type '(choice (const nil) function)
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-header-line-option
-  :group 'tessera-elfeed-search)
-
-(defcustom tessera-elfeed-search-header-line-next-update-function
-  nil
-  "Function returning the next update time, or nil when unknown.
-The function receives a `tessera-header-line-context'.  It must
-return an absolute Emacs time value or nil, without scheduling work."
-  :type '(choice (const nil) function)
-  :group 'tessera-elfeed-search)
-
-(defun tessera-elfeed-search--header-line-enable ()
-  "Attach the four-region header to this native view."
-  (tessera--header-line-enable
-   'elfeed-search #'tessera-elfeed-search--header-line-state
-   '((action . tessera-elfeed-search-header-line-action-function)
-     (info . tessera-elfeed-search-header-line-info-function)
-     (extra . tessera-elfeed-search-header-line-extra-function)
-     (statistics
-      . tessera-elfeed-search-header-line-statistics-function))))
-
-(declare-function elfeed-update "elfeed")
-(declare-function elfeed-entry-id "elfeed-db")
-(declare-function elfeed-entry-feed-id "elfeed-db")
-(defvar elfeed-search-entries)
-(defvar elfeed-search-filter)
-(defvar elfeed-fetch-functions)
-(defvar elfeed-parse-error-hook)
 
 (defvar tessera-elfeed-search--requests nil
   "Outstanding observed feed request tokens.")
@@ -1021,6 +828,215 @@ parsing, native hooks, or request ordering."
                     #'tessera-elfeed-search--observe-batch)
       (advice-remove function
                      #'tessera-elfeed-search--observe-batch))))
+
+(defun tessera-elfeed-search--header-line-enable ()
+  "Attach the four-region header to this native view."
+  (tessera--header-line-enable
+   'elfeed-search #'tessera-elfeed-search--header-line-state
+   '((action . tessera-elfeed-search-header-line-action-function)
+     (info . tessera-elfeed-search-header-line-info-function)
+     (extra . tessera-elfeed-search-header-line-extra-function)
+     (statistics
+      . tessera-elfeed-search-header-line-statistics-function))))
+
+;;;; Native navigation
+
+(defun tessera-elfeed-search--entry-at-point ()
+  "Return the native Elfeed entry on the current line."
+  (let ((position (line-beginning-position)))
+    (when (< position (point-max))
+      (get-text-property position 'elfeed-entry))))
+
+(defun tessera-elfeed-search--position-point ()
+  "Place point at the selected entry's title anchor."
+  (when-let* ((position (tessera-entry-point)))
+    (goto-char position)))
+
+(defun tessera-elfeed-search--target-position (lines)
+  "Return the target position LINES logical entries away.
+Return nil when the requested logical Elfeed entry does not exist."
+  (tessera-elfeed-search--sync-months)
+  (unless (zerop lines)
+    (if (and tessera--month-enabled tessera--month-groups)
+        (tessera--month-visible-entry-position
+         (if (> lines 0) 1 -1) (abs lines))
+      (save-excursion
+        (when (and (zerop (forward-line lines))
+                   (tessera-elfeed-search--entry-at-point))
+          (point))))))
+
+(defun tessera-elfeed-search--move (lines)
+  "Move point LINES logical Elfeed entries when the target exists."
+  (when-let* ((target
+               (tessera-elfeed-search--target-position lines)))
+    (goto-char target)
+    (tessera-elfeed-search--position-point)))
+
+(defun tessera-elfeed-search--next (count)
+  "Move forward COUNT logical Elfeed entries."
+  (interactive "p")
+  (tessera-elfeed-search--move count))
+
+(defun tessera-elfeed-search--previous (count)
+  "Move backward COUNT logical Elfeed entries."
+  (interactive "p")
+  (tessera-elfeed-search--move (- count)))
+
+(defun tessera-elfeed-search--navigation (enable)
+  "Install navigation integration when ENABLE is non-nil."
+  (if enable
+      (advice-add 'elfeed-search-update-entry :around
+                  #'tessera-elfeed-search--update-entries)
+    (advice-remove 'elfeed-search-update-entry
+                   #'tessera-elfeed-search--update-entries))
+  (if enable
+      (add-to-list 'emulation-mode-map-alists
+                   'tessera-elfeed-search--emulation-map-alist)
+    (setq emulation-mode-map-alists
+          (delq 'tessera-elfeed-search--emulation-map-alist
+                emulation-mode-map-alists))))
+
+(defun tessera-elfeed-search--acquire-navigation ()
+  "Register one buffer as a navigation integration user."
+  (when (zerop tessera-elfeed-search--navigation-users)
+    (tessera-elfeed-search--navigation t))
+  (setq tessera-elfeed-search--navigation-users
+        (1+ tessera-elfeed-search--navigation-users)))
+
+(defun tessera-elfeed-search--release-navigation ()
+  "Unregister one buffer from the navigation integration."
+  (when (> tessera-elfeed-search--navigation-users 0)
+    (setq tessera-elfeed-search--navigation-users
+          (1- tessera-elfeed-search--navigation-users)))
+  (when (zerop tessera-elfeed-search--navigation-users)
+    (tessera-elfeed-search--navigation nil)))
+
+;;;; Configuration changes
+
+(defun tessera-elfeed-search--glyphs-changed (option)
+  "Refresh active elfeed views after glyph OPTION changes.
+Nil means explicitly refresh all glyphs and their hover faces."
+  (when (or (null option)
+            (memq option '(tessera-elfeed-search-glyphs
+                           tessera-month-glyphs
+                           tessera-entry-ellipsis
+                           tessera-glyph-style tessera-glyph-color)))
+    (tessera-elfeed-search--months-changed nil)))
+
+(defun tessera-elfeed-search--months-changed (option)
+  "Refresh active Elfeed views affected by month OPTION.
+Nil requests a full refresh, including glyphs."
+  (when (or (null option)
+            (memq option '(tessera-month-grouping
+                           tessera-elfeed-search-month-grouping)))
+    (when (gethash 'elfeed-search tessera--entry-backends)
+      (tessera-elfeed-search--register))
+    (save-window-excursion
+      (tessera--map-mode-buffers
+       'elfeed-search-mode
+       (lambda ()
+         (when tessera-elfeed-search--active
+           (setq-local tessera--month-enabled
+                       (tessera-elfeed-search--month-enabled-p))
+           (tessera-elfeed-search--update-date-separator)
+           (tessera-elfeed-search--refresh)))))))
+
+;;;; Buffer lifecycle
+
+(defun tessera-elfeed-search--kill-buffer ()
+  "Release navigation resources before killing this search buffer."
+  (when tessera-elfeed-search--active
+    (setq tessera-elfeed-search--active nil
+          tessera-elfeed-search--emulation-map-alist nil)
+    (tessera-elfeed-search--release-navigation)))
+
+(defun tessera-elfeed-search--restore-native-state
+    (release-navigation)
+  "Restore native state in the current Elfeed search buffer.
+When RELEASE-NAVIGATION is non-nil, release this buffer's shared
+navigation registration."
+  (tessera--header-line-disable)
+  (setq tessera-elfeed-search--active nil
+        tessera-elfeed-search--emulation-map-alist nil)
+  (tessera--restore-settings
+   tessera-elfeed-search--saved-settings)
+  (remove-hook 'elfeed-search-update-hook
+               #'tessera-elfeed-search--apply-layout t)
+  (remove-hook 'post-command-hook
+               #'tessera-elfeed-search--post-command t)
+  (remove-hook 'pre-redisplay-functions
+               #'tessera-elfeed-search--prepare t)
+  (remove-hook 'change-major-mode-hook
+               #'tessera-elfeed-search--disable t)
+  (remove-hook 'kill-buffer-hook
+               #'tessera-elfeed-search--kill-buffer t)
+  (tessera-entry-clear-current)
+  (tessera-month-clear)
+  (tessera-entry-clear-layout)
+  (tessera-elfeed-search--restore-separators)
+  (setq tessera-elfeed-search--saved-settings nil
+        tessera-elfeed-search--face-remapping nil
+        tessera-elfeed-search--months-dirty nil
+        tessera-elfeed-search--month-separator-hidden nil)
+  (when release-navigation
+    (tessera-elfeed-search--release-navigation)))
+
+(defun tessera-elfeed-search--enable ()
+  "Enable Tessera rendering in the current Elfeed search buffer."
+  (require 'elfeed)
+  (unless tessera-elfeed-search--active
+    (setq tessera-elfeed-search--saved-settings
+          (tessera--save-settings
+           '(elfeed-search-print-entry-function
+             tessera-entry-layout
+             elfeed-search-separator-date-format)))
+    (let (completed navigation-acquired)
+      (unwind-protect
+          (progn
+            (setq-local elfeed-search-print-entry-function
+                        #'tessera-elfeed-search-print-entry)
+            (setq-local tessera-entry-layout 'two-line)
+            (setq-local tessera--month-enabled
+                        (tessera-elfeed-search--month-enabled-p))
+            (tessera-elfeed-search--update-date-separator)
+            (add-hook 'elfeed-search-update-hook
+                      #'tessera-elfeed-search--apply-layout t t)
+            (add-hook 'post-command-hook
+                      #'tessera-elfeed-search--post-command nil t)
+            (add-hook 'pre-redisplay-functions
+                      #'tessera-elfeed-search--prepare nil t)
+            (add-hook 'change-major-mode-hook
+                      #'tessera-elfeed-search--disable nil t)
+            (add-hook 'kill-buffer-hook
+                      #'tessera-elfeed-search--kill-buffer nil t)
+            (setq tessera-elfeed-search--active t
+                  tessera-elfeed-search--emulation-map-alist
+                  (list
+                   (cons
+                    'tessera-elfeed-search--active
+                    tessera-elfeed-search--navigation-map)))
+            (tessera-elfeed-search--acquire-navigation)
+            (setq navigation-acquired t)
+            (tessera-elfeed-search--refresh)
+            (tessera-elfeed-search--header-line-enable)
+            (setq completed t))
+        (unless completed
+          (condition-case nil
+              (progn
+                (tessera-elfeed-search--restore-native-state
+                 navigation-acquired)
+                (tessera-elfeed-search--refresh))
+            (error nil)))))))
+
+(defun tessera-elfeed-search--disable ()
+  "Disable Tessera rendering in the current Elfeed search buffer."
+  (when tessera-elfeed-search--active
+    (tessera-elfeed-search--restore-native-state t)
+    (condition-case error-data
+        (tessera-elfeed-search--refresh)
+      (error
+       (ignore-errors (tessera-elfeed-search--refresh))
+       (signal (car error-data) (cdr error-data))))))
 
 (provide 'tessera-elfeed-search)
 ;;; tessera-elfeed-search.el ends here

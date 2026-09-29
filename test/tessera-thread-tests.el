@@ -12,90 +12,111 @@
 (require 'tessera-mu4e-headers)
 (require 'tessera-test-support)
 
-(ert-deftest tessera-thread-graphical-counts-align-with-slots ()
-  (skip-unless (display-graphic-p))
-  (with-temp-buffer
-    (save-window-excursion
-      (set-window-buffer (selected-window) (current-buffer))
-      (let* ((threads (tessera-thread-build-contexts
-                       '((1 nil nil t) (2 nil t t))))
-             (context (make-tessera-entry-context
-                       :buffer (current-buffer)
-                       :window (selected-window)))
-             (face '(:height 1.13))
-             (unread-face '(:height 1.31))
-             (definition
-              (tessera--make-entry-backend
-               :segments
-               (list
-                (cons 'label (lambda (_) "Label"))
-                (cons 'count
-                      (lambda (ctx)
-                        (let ((text (tessera-thread-count ctx)))
-                          (put-text-property
-                           0 (length text) 'face
-                           (if (> (tessera-thread-context-unread
-                                   (tessera-entry-context-thread ctx))
-                                  0)
-                               unread-face face) text)
-                          text))))
-               :glyph-slots
-               (list (make-tessera-glyph-slot
-                      :name 'status :width 8 :selector #'ignore)))))
-        (maphash (lambda (_id node)
-                   (setf (tessera-thread-context-total node) 161))
-                 threads)
-        (dolist (scale '(1.0 2.0 3.0))
-          (let* ((face-remapping-alist
-                  `((default (:height ,scale))))
-                 (width (tessera--thread-leading-width
-                         threads 8 face unread-face))
-                 (slots (tessera--render-line
-                         '((status :reserve t)) '(label) nil
-                         definition context nil nil width)))
-            (maphash
-             (lambda (_id node)
-               (setf (tessera-entry-context-thread context) node)
-               (let ((head (tessera--render-line
-                            nil '(label) nil definition context
-                            nil '(count) width)))
-                 (should
-                  (equal (substring-no-properties
-                          (tessera--entry-content head))
-                         (concat " " (tessera-thread-count context)
-                                 "Label")))
-                 (should
-                  (= (tessera-tests--pixel-width
-                      (substring head 0 (string-match "Label" head)))
-                     (tessera-tests--pixel-width
-                      (substring slots 0
-                                 (string-match "Label" slots)))))))
-             threads)))))))
+;;;; Context identity and native ancestry
 
-(ert-deftest tessera-gnus-narrowing-keeps-thread-contexts ()
-  (let ((gnus-show-threads t))
-    (with-temp-buffer
-      (tessera-tests--gnus-rows '(0 1 2))
-      (tessera-gnus-summary--register)
-      (tessera-gnus-summary--sync-buffer t)
-      (setq tessera-gnus-summary--active t)
-      (forward-line 1)
-      (narrow-to-region (point) (point-max))
-      (setq tessera-gnus-summary--dirty t)
-      (tessera-gnus-summary--post-command)
-      (should (buffer-narrowed-p))
-      (should (= 2 (get-text-property (point) 'gnus-number)))
-      (widen)
-      (tessera-gnus-summary--post-command)
-      (should (= 3 (hash-table-count tessera-gnus-summary--threads)))
-      (should (= 1 (tessera-thread-context-parent
-                    (gethash 2 tessera-gnus-summary--threads))))
-      (should (= 3 (tessera-thread-context-total
-                    (gethash 1 tessera-gnus-summary--threads))))
-      (dolist (data gnus-newsgroup-data)
-        (should (= (gnus-data-number data)
-                   (get-text-property (1- (gnus-data-pos data))
-                                      'gnus-number)))))))
+(ert-deftest tessera-thread-context-key-includes-all-ancestors ()
+  (let ((node (make-tessera-thread-context
+               :path (cons t (make-list 26 nil)))))
+    (let ((key (tessera-thread-context-key node)))
+      (setf (tessera-thread-context-path node) (make-list 27 nil))
+      (dolist (cache (list nil (make-hash-table :test #'eq)))
+        (should-not (tessera-thread-context-key-equal-p
+                     key (tessera-thread-context-key node) cache))))))
+
+(ert-deftest tessera-thread-key-comparison-keeps-row-state ()
+  (let* ((cache (make-hash-table :test #'eq))
+         (keys
+          (list nil
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :path '(t nil)))
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :path '(nil nil)))
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :path '(t nil nil)))
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :first t :total 3))
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :first t :total 4))
+                (tessera-thread-context-key
+                 (make-tessera-thread-context :last t)))))
+    (dolist (left keys)
+      (dolist (right (append keys (reverse keys)))
+        (should (eq (equal left right)
+                    (tessera-thread-context-key-equal-p
+                     left right cache)))))))
+
+(ert-deftest tessera-thread-key-comparison-handles-deep-changes ()
+  (let* ((size 2000)
+         (entries (cl-loop for id from 1 to size
+                           collect
+                           (list id (and (> id 1) (1- id)) nil t)))
+         (old (tessera-thread-build-contexts entries)))
+    (dolist (changed '(nil t))
+      (let* ((updated (if changed
+                          (append entries (list '(extra 1 nil t)))
+                        entries))
+             (new (tessera-thread-build-contexts updated))
+             (cache (make-hash-table :test #'eq)))
+        ;; Visit leaves first too, so comparison cannot rely on order.
+        (dolist (id (append (number-sequence size 1 -1)
+                            (number-sequence 1 size)))
+          (should (eq (not changed)
+                      (tessera-thread-context-key-equal-p
+                       (tessera-thread-context-key (gethash id old))
+                       (tessera-thread-context-key (gethash id new))
+                       cache))))))))
+
+(ert-deftest tessera-thread-native-order-counts-and-paths ()
+  (with-temp-buffer
+    (let ((gnus-show-threads t))
+      (tessera-tests--gnus-rows)
+      (tessera-gnus-summary--build-threads)
+      (let ((head (gethash 1 tessera-gnus-summary--threads))
+            (child (gethash 2 tessera-gnus-summary--threads))
+            (nested (gethash 3 tessera-gnus-summary--threads))
+            (last (gethash 4 tessera-gnus-summary--threads)))
+        (should (tessera-thread-context-first head))
+        (should (= 4 (tessera-thread-context-total head)))
+        (should (= 2 (tessera-thread-context-unread head)))
+        (should (equal '(t) (tessera-thread-context-path child)))
+        (should (equal '(t nil) (tessera-thread-context-path nested)))
+        (should (equal '(nil) (tessera-thread-context-path last)))
+        (should (tessera-thread-context-last last))
+        (should (tessera-thread-context-first
+                 (gethash 5 tessera-gnus-summary--threads)))))))
+
+(ert-deftest tessera-thread-deep-paths-share-ancestors ()
+  (let* ((size 2000)
+         (tessera-entry-segment-gap 1)
+         (nodes
+          (tessera-thread-build-contexts
+           (cl-loop for id from 1 to size
+                    collect (list id (and (> id 1) (1- id)) nil t))))
+         (context (make-tessera-entry-context)))
+    (cl-loop
+     for id from 2 to size
+     for node = (gethash id nodes)
+     for parent = (gethash (1- id) nodes)
+     do
+     (should (eq (cdr (tessera-thread-context-reverse-path node))
+                 (tessera-thread-context-reverse-path parent)))
+     (when (memq id '(2 5 6 28 2000))
+       (setf (tessera-entry-context-thread context) node)
+       (should (= (string-width (tessera-thread-prefix context))
+                  (1- (* 3 (1- id))))))
+     (tessera-thread-context-key node)
+     ;; Rendering must never materialize the full forward path.
+     (should-not (tessera-thread-context-forward-path node)))
+    (let ((last (gethash size nodes)))
+      (should (= (1- size)
+                 (length (tessera-thread-context-path last))))
+      (setf (tessera-thread-context-path last) '(t nil))
+      (should (equal '(t nil) (tessera-thread-context-path last)))
+      (setf (tessera-entry-context-thread context) last)
+      (should-not
+       (string-prefix-p "…" (tessera-thread-prefix context))))))
+
+;;;; Layout selection and validation
 
 (ert-deftest tessera-thread-selects-layout-from-context ()
   (let* ((plain (make-tessera-entry-layout))
@@ -117,45 +138,6 @@
     (should (eq plain (tessera--find-entry-layout
                        definition context)))))
 
-(ert-deftest tessera-thread-gnus-refresh-keeps-shared-paths ()
-  "Unchanged rows must not retain earlier generations of paths."
-  (tessera-gnus-summary--register)
-  (with-temp-buffer
-    (let ((gnus-show-threads t)
-          (tessera-glyph-style 'ascii))
-      (tessera-tests--gnus-rows (number-sequence 0 39))
-      (tessera-gnus-summary--sync-buffer t)
-      (dotimes (index 40)
-        (goto-char (point-min))
-        (forward-line index)
-        (subst-char-in-region
-         (point) (1+ (point)) (char-after)
-         (if (eq (char-after) gnus-unread-mark)
-             gnus-read-mark
-           gnus-unread-mark))
-        (tessera-gnus-summary--sync-buffer))
-      (let ((cells (make-hash-table :test #'eq)))
-        (goto-char (point-min))
-        (while (< (point) (point-max))
-          (let* ((entry (get-text-property
-                         (point) 'tessera-gnus-summary-entry))
-                 (node (plist-get (cdr entry) :thread))
-                 (context (get-text-property
-                           (point) 'tessera-entry-context))
-                 (path (tessera-thread-context-reverse-path node)))
-            (should (eq node (tessera-entry-context-thread context)))
-            (should (eq node (plist-get
-                              (tessera-entry-context-metadata context)
-                              :thread)))
-            (should (eq node
-                        (tessera-gnus-summary--thread-context
-                         (car entry))))
-            (while (and path (not (gethash path cells)))
-              (puthash path t cells)
-              (setq path (cdr path))))
-          (forward-line 1))
-        (should (= 39 (hash-table-count cells)))))))
-
 (ert-deftest tessera-thread-rejects-mixed-leading-regions ()
   (should-error
    (tessera--validate-layout
@@ -166,6 +148,8 @@
   (should-error
    (tessera--validate-layout
     (make-tessera-entry-layout :leading-width -1) nil nil "Test")))
+
+;;;; Thread prefixes and width
 
 (ert-deftest tessera-thread-prefix-preserves-branches-at-full-depth
     ()
@@ -260,58 +244,6 @@
            (tessera-thread-prefix context width) width))))
       (should (= 100 (length (tessera-thread-context-path node)))))))
 
-(ert-deftest tessera-thread-context-key-includes-all-ancestors ()
-  (let ((node (make-tessera-thread-context
-               :path (cons t (make-list 26 nil)))))
-    (let ((key (tessera-thread-context-key node)))
-      (setf (tessera-thread-context-path node) (make-list 27 nil))
-      (dolist (cache (list nil (make-hash-table :test #'eq)))
-        (should-not (tessera-thread-context-key-equal-p
-                     key (tessera-thread-context-key node) cache))))))
-
-(ert-deftest tessera-thread-key-comparison-keeps-row-state ()
-  (let* ((cache (make-hash-table :test #'eq))
-         (keys
-          (list nil
-                (tessera-thread-context-key
-                 (make-tessera-thread-context :path '(t nil)))
-                (tessera-thread-context-key
-                 (make-tessera-thread-context :path '(nil nil)))
-                (tessera-thread-context-key
-                 (make-tessera-thread-context :path '(t nil nil)))
-                (tessera-thread-context-key
-                 (make-tessera-thread-context :first t :total 3))
-                (tessera-thread-context-key
-                 (make-tessera-thread-context :first t :total 4))
-                (tessera-thread-context-key
-                 (make-tessera-thread-context :last t)))))
-    (dolist (left keys)
-      (dolist (right (append keys (reverse keys)))
-        (should (eq (equal left right)
-                    (tessera-thread-context-key-equal-p
-                     left right cache)))))))
-
-(ert-deftest tessera-thread-key-comparison-handles-deep-changes ()
-  (let* ((size 2000)
-         (entries (cl-loop for id from 1 to size
-                           collect
-                           (list id (and (> id 1) (1- id)) nil t)))
-         (old (tessera-thread-build-contexts entries)))
-    (dolist (changed '(nil t))
-      (let* ((updated (if changed
-                          (append entries (list '(extra 1 nil t)))
-                        entries))
-             (new (tessera-thread-build-contexts updated))
-             (cache (make-hash-table :test #'eq)))
-        ;; Visit leaves first too, so comparison cannot rely on order.
-        (dolist (id (append (number-sequence size 1 -1)
-                            (number-sequence 1 size)))
-          (should (eq (not changed)
-                      (tessera-thread-context-key-equal-p
-                       (tessera-thread-context-key (gethash id old))
-                       (tessera-thread-context-key (gethash id new))
-                       cache))))))))
-
 (ert-deftest tessera-thread-tree-survives-narrow-width-allocation ()
   (tessera-gnus-summary--register)
   (let* ((definition (tessera--find-entry-backend 'gnus-summary))
@@ -362,24 +294,67 @@
           (should (= 24 (get-text-property
                          (point) 'gnus-number))))))))
 
-(ert-deftest tessera-thread-native-order-counts-and-paths ()
+(ert-deftest tessera-thread-graphical-counts-align-with-slots ()
+  (skip-unless (display-graphic-p))
   (with-temp-buffer
-    (let ((gnus-show-threads t))
-      (tessera-tests--gnus-rows)
-      (tessera-gnus-summary--build-threads)
-      (let ((head (gethash 1 tessera-gnus-summary--threads))
-            (child (gethash 2 tessera-gnus-summary--threads))
-            (nested (gethash 3 tessera-gnus-summary--threads))
-            (last (gethash 4 tessera-gnus-summary--threads)))
-        (should (tessera-thread-context-first head))
-        (should (= 4 (tessera-thread-context-total head)))
-        (should (= 2 (tessera-thread-context-unread head)))
-        (should (equal '(t) (tessera-thread-context-path child)))
-        (should (equal '(t nil) (tessera-thread-context-path nested)))
-        (should (equal '(nil) (tessera-thread-context-path last)))
-        (should (tessera-thread-context-last last))
-        (should (tessera-thread-context-first
-                 (gethash 5 tessera-gnus-summary--threads)))))))
+    (save-window-excursion
+      (set-window-buffer (selected-window) (current-buffer))
+      (let* ((threads (tessera-thread-build-contexts
+                       '((1 nil nil t) (2 nil t t))))
+             (context (make-tessera-entry-context
+                       :buffer (current-buffer)
+                       :window (selected-window)))
+             (face '(:height 1.13))
+             (unread-face '(:height 1.31))
+             (definition
+              (tessera--make-entry-backend
+               :segments
+               (list
+                (cons 'label (lambda (_) "Label"))
+                (cons 'count
+                      (lambda (ctx)
+                        (let ((text (tessera-thread-count ctx)))
+                          (put-text-property
+                           0 (length text) 'face
+                           (if (> (tessera-thread-context-unread
+                                   (tessera-entry-context-thread ctx))
+                                  0)
+                               unread-face face) text)
+                          text))))
+               :glyph-slots
+               (list (make-tessera-glyph-slot
+                      :name 'status :width 8 :selector #'ignore)))))
+        (maphash (lambda (_id node)
+                   (setf (tessera-thread-context-total node) 161))
+                 threads)
+        (dolist (scale '(1.0 2.0 3.0))
+          (let* ((face-remapping-alist
+                  `((default (:height ,scale))))
+                 (width (tessera--thread-leading-width
+                         threads 8 face unread-face))
+                 (slots (tessera--render-line
+                         '((status :reserve t)) '(label) nil
+                         definition context nil nil width)))
+            (maphash
+             (lambda (_id node)
+               (setf (tessera-entry-context-thread context) node)
+               (let ((head (tessera--render-line
+                            nil '(label) nil definition context
+                            nil '(count) width)))
+                 (should
+                  (equal (substring-no-properties
+                          (tessera--entry-content head))
+                         (concat " " (tessera-thread-count context)
+                                 "Label")))
+                 (should
+                  (= (tessera-tests--pixel-width
+                      (substring head 0 (string-match "Label" head)))
+                     (tessera-tests--pixel-width
+                      (substring slots 0
+                                 (string-match "Label" slots)))))))
+             threads)))))))
+
+;;;; Native folding and padding
 
 (ert-deftest tessera-thread-folding-retains-counts-and-moves-padding
     ()
@@ -416,6 +391,100 @@
       (should (= 0 (hash-table-count
                     tessera-gnus-summary--threads))))))
 
+(ert-deftest tessera-thread-uses-inner-and-outer-overlay-padding ()
+  (with-temp-buffer
+    (let ((gnus-show-threads t)
+          (tessera-entry-layout 'two-line)
+          (tessera-glyph-style 'ascii)
+          (tessera-thread-outer-top-padding 0.2)
+          (tessera-thread-outer-bottom-padding 0.3)
+          (tessera-thread-inner-top-padding 0.05)
+          (tessera-thread-inner-bottom-padding 0.07))
+      (tessera-gnus-summary--register)
+      (tessera-tests--gnus-rows)
+      (tessera-gnus-summary--sync-buffer)
+      (cl-loop
+       for (top bottom) in
+       '((0.2 0.07) (0.05 0.07) (0.05 0.07) (0.05 0.3) (0.2 0.3))
+       do
+       (let* ((layout
+               (get-text-property (point) 'tessera--entry-layout))
+              (above (nth 2 (caar layout))))
+         (should (= bottom (cadr layout)))
+         (should (= top (plist-get
+                         (car (get-text-property 0 'face above))
+                         :height)))
+         (should (seq-some
+                  (lambda (o) (overlay-get o 'tessera-entry-overlay))
+                  (overlays-at (point)))))
+       (forward-line 1)))))
+
+;;;; Context synchronization
+
+(ert-deftest tessera-gnus-narrowing-keeps-thread-contexts ()
+  (let ((gnus-show-threads t))
+    (with-temp-buffer
+      (tessera-tests--gnus-rows '(0 1 2))
+      (tessera-gnus-summary--register)
+      (tessera-gnus-summary--sync-buffer t)
+      (setq tessera-gnus-summary--active t)
+      (forward-line 1)
+      (narrow-to-region (point) (point-max))
+      (setq tessera-gnus-summary--dirty t)
+      (tessera-gnus-summary--post-command)
+      (should (buffer-narrowed-p))
+      (should (= 2 (get-text-property (point) 'gnus-number)))
+      (widen)
+      (tessera-gnus-summary--post-command)
+      (should (= 3 (hash-table-count tessera-gnus-summary--threads)))
+      (should (= 1 (tessera-thread-context-parent
+                    (gethash 2 tessera-gnus-summary--threads))))
+      (should (= 3 (tessera-thread-context-total
+                    (gethash 1 tessera-gnus-summary--threads))))
+      (dolist (data gnus-newsgroup-data)
+        (should (= (gnus-data-number data)
+                   (get-text-property (1- (gnus-data-pos data))
+                                      'gnus-number)))))))
+
+(ert-deftest tessera-thread-gnus-refresh-keeps-shared-paths ()
+  "Unchanged rows must not retain earlier generations of paths."
+  (tessera-gnus-summary--register)
+  (with-temp-buffer
+    (let ((gnus-show-threads t)
+          (tessera-glyph-style 'ascii))
+      (tessera-tests--gnus-rows (number-sequence 0 39))
+      (tessera-gnus-summary--sync-buffer t)
+      (dotimes (index 40)
+        (goto-char (point-min))
+        (forward-line index)
+        (subst-char-in-region
+         (point) (1+ (point)) (char-after)
+         (if (eq (char-after) gnus-unread-mark)
+             gnus-read-mark
+           gnus-unread-mark))
+        (tessera-gnus-summary--sync-buffer))
+      (let ((cells (make-hash-table :test #'eq)))
+        (goto-char (point-min))
+        (while (< (point) (point-max))
+          (let* ((entry (get-text-property
+                         (point) 'tessera-gnus-summary-entry))
+                 (node (plist-get (cdr entry) :thread))
+                 (context (get-text-property
+                           (point) 'tessera-entry-context))
+                 (path (tessera-thread-context-reverse-path node)))
+            (should (eq node (tessera-entry-context-thread context)))
+            (should (eq node (plist-get
+                              (tessera-entry-context-metadata context)
+                              :thread)))
+            (should (eq node
+                        (tessera-gnus-summary--thread-context
+                         (car entry))))
+            (while (and path (not (gethash path cells)))
+              (puthash path t cells)
+              (setq path (cdr path))))
+          (forward-line 1))
+        (should (= 39 (hash-table-count cells)))))))
+
 (ert-deftest tessera-thread-mark-update-refreshes-head-count ()
   (with-temp-buffer
     (let ((gnus-show-threads t)
@@ -448,33 +517,7 @@
                 thereis (equal (get-text-property p 'display) "\n")))
       (should-not (search-forward "Subject" (line-end-position) t)))))
 
-(ert-deftest tessera-thread-uses-inner-and-outer-overlay-padding ()
-  (with-temp-buffer
-    (let ((gnus-show-threads t)
-          (tessera-entry-layout 'two-line)
-          (tessera-glyph-style 'ascii)
-          (tessera-thread-outer-top-padding 0.2)
-          (tessera-thread-outer-bottom-padding 0.3)
-          (tessera-thread-inner-top-padding 0.05)
-          (tessera-thread-inner-bottom-padding 0.07))
-      (tessera-gnus-summary--register)
-      (tessera-tests--gnus-rows)
-      (tessera-gnus-summary--sync-buffer)
-      (cl-loop
-       for (top bottom) in
-       '((0.2 0.07) (0.05 0.07) (0.05 0.07) (0.05 0.3) (0.2 0.3))
-       do
-       (let* ((layout
-               (get-text-property (point) 'tessera--entry-layout))
-              (above (nth 2 (caar layout))))
-         (should (= bottom (cadr layout)))
-         (should (= top (plist-get
-                         (car (get-text-property 0 'face above))
-                         :height)))
-         (should (seq-some
-                  (lambda (o) (overlay-get o 'tessera-entry-overlay))
-                  (overlays-at (point)))))
-       (forward-line 1)))))
+;;;; Native navigation
 
 (ert-deftest tessera-thread-navigation-uses-native-author-position ()
   (with-temp-buffer
@@ -591,37 +634,6 @@
                       thereis
                       (equal (get-text-property pos 'display text)
                              "\n")))))))))
-
-(ert-deftest tessera-thread-deep-paths-share-ancestors ()
-  (let* ((size 2000)
-         (tessera-entry-segment-gap 1)
-         (nodes
-          (tessera-thread-build-contexts
-           (cl-loop for id from 1 to size
-                    collect (list id (and (> id 1) (1- id)) nil t))))
-         (context (make-tessera-entry-context)))
-    (cl-loop
-     for id from 2 to size
-     for node = (gethash id nodes)
-     for parent = (gethash (1- id) nodes)
-     do
-     (should (eq (cdr (tessera-thread-context-reverse-path node))
-                 (tessera-thread-context-reverse-path parent)))
-     (when (memq id '(2 5 6 28 2000))
-       (setf (tessera-entry-context-thread context) node)
-       (should (= (string-width (tessera-thread-prefix context))
-                  (1- (* 3 (1- id))))))
-     (tessera-thread-context-key node)
-     ;; Rendering must never materialize the full forward path.
-     (should-not (tessera-thread-context-forward-path node)))
-    (let ((last (gethash size nodes)))
-      (should (= (1- size)
-                 (length (tessera-thread-context-path last))))
-      (setf (tessera-thread-context-path last) '(t nil))
-      (should (equal '(t nil) (tessera-thread-context-path last)))
-      (setf (tessera-entry-context-thread context) last)
-      (should-not
-       (string-prefix-p "…" (tessera-thread-prefix context))))))
 
 (provide 'tessera-thread-tests)
 ;;; tessera-thread-tests.el ends here

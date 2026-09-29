@@ -98,7 +98,7 @@ current group's Agent overview, which can itself be incomplete."
   :type '(choice (const results) (const local-index))
   :group 'tessera-x-gnus)
 
-;;;; Context snapshots
+;;;; Article metadata and selection
 
 (cl-defun tessera-x-gnus--item
     (header group &optional
@@ -155,6 +155,55 @@ Reuse an already parsed DATE when supplied, including nil."
                 (setf (tessera-x-item-parent item) (cdadr stack))
                 (push item items)))))))
     (nreverse items)))
+
+(defun tessera-x-gnus--overview (groups &optional bounds)
+  "Read local Agent overview GROUPS within optional BOUNDS.
+BOUNDS is a pair of Emacs times.  No articles or headers are fetched."
+  (let (items)
+    (dolist (group (delete-dups (copy-sequence groups)))
+      (when (gnus-agent-method-p (gnus-find-method-for-group group))
+        (let ((file (tessera-x-gnus--agent-file group ".overview")))
+          (when (file-readable-p file)
+            (with-temp-buffer
+              (insert-file-contents file)
+              (goto-char (point-min))
+              (while (not (eobp))
+                (let* ((header (save-excursion
+                                 (nnheader-parse-nov)))
+                       (date (ignore-errors
+                               (date-to-time
+                                (mail-header-date header)))))
+                  (when (and (> (mail-header-number header) 0)
+                             (or (not bounds)
+                                 (and date
+                                      (not (time-less-p
+                                            date (car bounds)))
+                                      (time-less-p
+                                       date (cdr bounds)))))
+                    (push (tessera-x-gnus--item header group date)
+                          items)))
+                (forward-line 1)))))))
+    (sort items
+          (lambda (left right)
+            (time-less-p (or (tessera-x-item-date left) 0)
+                         (or (tessera-x-item-date right) 0))))))
+
+(defun tessera-x-gnus--topic-groups (topic)
+  "Return groups in TOPIC and its descendants."
+  (cl-labels
+      ((find-node (node)
+         (if (equal topic (caar node)) node
+           (cl-some #'find-node (cdr node))))
+       (groups (node)
+         (append (copy-sequence
+                  (cdr (assoc (caar node) gnus-topic-alist)))
+                 (cl-mapcan #'groups (cdr node)))))
+    (let ((node (and gnus-topic-topology
+                     (find-node gnus-topic-topology))))
+      (if node (groups node)
+        (copy-sequence (cdr (assoc topic gnus-topic-alist)))))))
+
+;;;; Agent content and download state
 
 (defun tessera-x-gnus--agent-file (group name)
   "Return Agent file NAME belonging to GROUP."
@@ -235,6 +284,8 @@ Leave failures as content notes so other bodies remain usable."
       (setf (tessera-x-item-note item)
             "Body absent from local Agent"))))
 
+;;;; Context construction
+
 (defun tessera-x-gnus--build-context (items scope local-only)
   "Build a context from ITEMS for SCOPE.
 Download missing bodies unless LOCAL-ONLY forbids it."
@@ -259,37 +310,7 @@ Download missing bodies unless LOCAL-ONLY forbids it."
               context (error-message-string err))))
     context))
 
-(defun tessera-x-gnus--overview (groups &optional bounds)
-  "Read local Agent overview GROUPS within optional BOUNDS.
-BOUNDS is a pair of Emacs times.  No articles or headers are fetched."
-  (let (items)
-    (dolist (group (delete-dups (copy-sequence groups)))
-      (when (gnus-agent-method-p (gnus-find-method-for-group group))
-        (let ((file (tessera-x-gnus--agent-file group ".overview")))
-          (when (file-readable-p file)
-            (with-temp-buffer
-              (insert-file-contents file)
-              (goto-char (point-min))
-              (while (not (eobp))
-                (let* ((header (save-excursion
-                                 (nnheader-parse-nov)))
-                       (date (ignore-errors
-                               (date-to-time
-                                (mail-header-date header)))))
-                  (when (and (> (mail-header-number header) 0)
-                             (or (not bounds)
-                                 (and date
-                                      (not (time-less-p
-                                            date (car bounds)))
-                                      (time-less-p
-                                       date (cdr bounds)))))
-                    (push (tessera-x-gnus--item header group date)
-                          items)))
-                (forward-line 1)))))))
-    (sort items
-          (lambda (left right)
-            (time-less-p (or (tessera-x-item-date left) 0)
-                         (or (tessera-x-item-date right) 0))))))
+;;;; Context commands
 
 ;;;###autoload
 (defun tessera-x-gnus-prepare-context ()
@@ -339,21 +360,6 @@ overview.  That local index may omit articles absent from the Agent."
          "Subthread; group Agent overview, possibly incomplete"
        "Subthread; current results, including folds")
      nil)))
-
-(defun tessera-x-gnus--topic-groups (topic)
-  "Return groups in TOPIC and its descendants."
-  (cl-labels
-      ((find-node (node)
-         (if (equal topic (caar node)) node
-           (cl-some #'find-node (cdr node))))
-       (groups (node)
-         (append (copy-sequence
-                  (cdr (assoc (caar node) gnus-topic-alist)))
-                 (cl-mapcan #'groups (cdr node)))))
-    (let ((node (and gnus-topic-topology
-                     (find-node gnus-topic-topology))))
-      (if node (groups node)
-        (copy-sequence (cdr (assoc topic gnus-topic-alist)))))))
 
 ;;;###autoload
 (defun tessera-x-gnus-prepare-today-context ()

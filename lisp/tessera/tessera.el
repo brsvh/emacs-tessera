@@ -38,12 +38,12 @@
 (require 'subr-x)
 (require 'wid-edit)
 
-;;;; Customization
-
 (defgroup tessera nil
   "Modern interfaces for Emacs communication tools."
   :group 'applications
   :prefix "tessera-")
+
+;;;; Entry options and faces
 
 (defun tessera--nonnegative-number-p (value)
   "Return non-nil when VALUE is a nonnegative number."
@@ -133,10 +133,27 @@
   :safe #'natnump
   :group 'tessera)
 
+(defface tessera-entry-current-face
+  '((t :inherit hl-line :extend nil))
+  "Face used for the entry containing point."
+  :group 'tessera)
+
+(defface tessera-entry-hover-face
+  '((t :inherit highlight))
+  "Face used when the pointer is over an entry surface."
+  :group 'tessera)
+
+;;;; Month options and faces
+
 (defvar tessera--month-change-functions nil
   "Functions called after a month display option changes.
 Each function receives the option symbol, or nil for an explicit
 refresh of all month appearance settings.")
+
+(defun tessera--run-month-change-functions (option)
+  "Notify every month callback about OPTION."
+  (tessera--run-change-functions
+   'tessera--month-change-functions option))
 
 (defun tessera--set-month-option (symbol value)
   "Set month option SYMBOL to VALUE and refresh active views."
@@ -229,41 +246,6 @@ time in the current Emacs time zone."
   :set #'tessera--set-month-option
   :group 'tessera)
 
-(defcustom tessera-glyph-style 'unicode
-  "Preferred visual style for Tessera glyphs."
-  :type '(choice
-          (const :tag "ASCII" ascii)
-          (const :tag "Unicode" unicode)
-          (const :tag "Nerd Icons" nerd-icons))
-  :safe #'symbolp
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-glyph-appearance
-  :group 'tessera)
-
-(defcustom tessera-glyph-color t
-  "Color treatment applied to Tessera glyphs.
-
-A nil value inherits the surrounding foreground.  A t value uses
-the glyph's semantic face.  A color string applies that foreground
-to every glyph."
-  :type '(choice
-          (const :tag "Monochrome" nil)
-          (const :tag "Semantic colors" t)
-          (color :tag "Uniform color"))
-  :initialize #'custom-initialize-default
-  :set #'tessera--set-glyph-appearance
-  :group 'tessera)
-
-(defface tessera-entry-current-face
-  '((t :inherit hl-line :extend nil))
-  "Face used for the entry containing point."
-  :group 'tessera)
-
-(defface tessera-entry-hover-face
-  '((t :inherit highlight))
-  "Face used when the pointer is over an entry surface."
-  :group 'tessera)
-
 (defface tessera-month-face
   '((t :inherit (font-lock-keyword-face default)
        :weight bold
@@ -293,77 +275,11 @@ When this face does not specify a background, Tessera computes one
 from the current `warning' foreground and `default' background."
   :group 'tessera)
 
-(defface tessera-glyph-accent-face
-  '((t :inherit font-lock-keyword-face :weight bold))
-  "Theme emphasis for new, unread, and distinctive content."
-  :group 'tessera)
+(defvar-local tessera--month-enabled nil
+  "Non-nil when month grouping participates in this buffer.")
 
-(defface tessera-glyph-attention-face
-  '((t :inherit warning :weight bold))
-  "Theme warning color for important or pending actions."
-  :group 'tessera)
-
-(defface tessera-glyph-informational-face
-  '((t :inherit font-lock-type-face))
-  "Theme information color for attributes and correspondence."
-  :group 'tessera)
-
-(defface tessera-glyph-muted-face
-  '((t :inherit shadow))
-  "Face used for muted Tessera content."
-  :group 'tessera)
-
-(defface tessera-glyph-negative-face
-  '((t :inherit error))
-  "Theme error color for failures and destructive actions."
-  :group 'tessera)
-
-(defface tessera-glyph-neutral-face
-  '((t :inherit default))
-  "Face used for neutral Tessera content."
-  :group 'tessera)
-
-(defface tessera-glyph-positive-face
-  '((t :inherit success))
-  "Theme success color for completed actions and availability."
-  :group 'tessera)
-
-(defface tessera-glyph-warning-face
-  '((t :inherit warning))
-  "Theme warning color for urgent or uncertain states."
-  :group 'tessera)
-
-(defun tessera--save-settings (variables)
-  "Snapshot current values and buffer locality of VARIABLES."
-  (mapcar (lambda (variable)
-            (list variable (local-variable-p variable)
-                  (symbol-value variable)))
-          variables))
-
-(defun tessera--restore-settings (settings)
-  "Restore a SETTINGS snapshot in the current buffer."
-  (dolist (setting settings)
-    (pcase-let ((`(,variable ,local ,value) setting))
-      (if local
-          (set (make-local-variable variable) value)
-        (kill-local-variable variable)))))
-
-(defun tessera--map-mode-buffers (mode function)
-  "Call FUNCTION in every live buffer derived from MODE.
-When MODE is nil, visit every live buffer.
-Continue after errors or quits, then signal the first condition."
-  (let (condition-data)
-    (dolist (buffer (buffer-list))
-      (when (buffer-live-p buffer)
-        (condition-case condition
-            (with-current-buffer buffer
-              (when (or (null mode) (derived-mode-p mode))
-                (funcall function)))
-          ((error quit)
-           (unless condition-data
-             (setq condition-data condition))))))
-    (when condition-data
-      (signal (car condition-data) (cdr condition-data)))))
+(defvar-local tessera--month-thread-date nil
+  "Effective thread date policy in the current buffer.")
 
 ;;;; Data model
 
@@ -400,65 +316,6 @@ boolean says whether that branch has a following sibling.
 FIRST identifies the displayed representative, LAST the last visible
 member.  TOTAL and UNREAD include folded members of the result set."
   id parent root forward-path reverse-path first last total unread)
-
-(defun tessera-thread-context-path (context)
-  "Return CONTEXT's branch path in root-to-child order.
-Built contexts share reversed paths.  Materialize the public list
-only when requested, rather than copying every ancestor per row.
-Treat the returned list as read-only; update this place with `setf'."
-  (or (tessera-thread-context-forward-path context)
-      (setf (tessera-thread-context-forward-path context)
-            (reverse (tessera-thread-context-reverse-path context)))))
-
-(gv-define-setter tessera-thread-context-path (value context)
-  `(let ((node ,context)
-         (path ,value))
-     (setf (tessera-thread-context-forward-path node) path
-           (tessera-thread-context-reverse-path node) (reverse path))
-     path))
-
-(defun tessera--thread-path-tail (context)
-  "Return CONTEXT's branch path in child-to-root order."
-  (tessera-thread-context-reverse-path context))
-
-(defun tessera-thread-context-key (context)
-  "Return the fields affecting CONTEXT's displayed row, or nil.
-Counts affect the head only.  All ancestor branches affect the
-displayed tree, including those outside the current window."
-  (when context
-    (let ((first (tessera-thread-context-first context)))
-      (list first (tessera-thread-context-last context)
-            (and first (tessera-thread-context-total context))
-            (and first (tessera-thread-context-unread context))
-            (tessera--thread-path-tail context)))))
-
-(defun tessera-thread-context-key-equal-p (left right &optional cache)
-  "Return non-nil when thread keys LEFT and RIGHT describe equal rows.
-CACHE, when non-nil, is an `eq' hash table shared by one refresh.
-Reuse ancestor comparisons for shared paths.  Discard CACHE before
-changing paths or starting another refresh."
-  (if (null cache)
-      (equal left right)
-    (and (equal (butlast left) (butlast right))
-         (let ((old (car (last left)))
-               (new (car (last right)))
-               (same t)
-               pending)
-           (while (and same (not (eq old new)))
-             (let ((known (gethash old cache)))
-               (cond
-                ((and known (eq new (car known)))
-                 (setq same (cdr known)
-                       new old))
-                ((and (consp old) (consp new)
-                      (eq (car old) (car new)))
-                 (push (cons old new) pending)
-                 (setq old (cdr old)
-                       new (cdr new)))
-                (t (setq same nil)))))
-           (dolist (pair pending)
-             (puthash (car pair) (cons (cdr pair) same) cache))
-           same))))
 
 (cl-defstruct tessera-thread-layout
   "Compose ordinary entry layouts for thread HEAD and CHILD members."
@@ -509,37 +366,55 @@ returning one, shared by both lines."
   glyph-slots-align
   main-leading-segments extra-leading-segments leading-width)
 
-;;;; Backend registration
+(cl-defstruct (tessera--rendered-segment
+               (:constructor tessera--make-rendered-segment))
+  "Store one rendered segment and its width policy."
+  string
+  width
+  pixel-width
+  target-width
+  grow
+  min-width
+  max-width
+  truncate
+  priority
+  optional
+  visible
+  point)
 
-(cl-defstruct (tessera--entry-backend
-               (:constructor tessera--make-entry-backend))
-  "Store a validated backend entry definition."
-  name
-  context
-  segments
-  glyph-slots
-  layouts
-  thread-layout
-  month-date
-  month-unread-p
-  month-glyph
-  month-warning-segment
-  month-goto)
+;;;; Shared validation and buffer utilities
 
-(defvar tessera--entry-backends (make-hash-table :test #'eq)
-  "Registered Tessera entry backends.")
+(defun tessera--save-settings (variables)
+  "Snapshot current values and buffer locality of VARIABLES."
+  (mapcar (lambda (variable)
+            (list variable (local-variable-p variable)
+                  (symbol-value variable)))
+          variables))
 
-(defvar tessera--segment-properties
-  '(:grow :min-width :max-width :truncate :priority :optional :point)
-  "Properties accepted in a layout segment reference.")
+(defun tessera--restore-settings (settings)
+  "Restore a SETTINGS snapshot in the current buffer."
+  (dolist (setting settings)
+    (pcase-let ((`(,variable ,local ,value) setting))
+      (if local
+          (set (make-local-variable variable) value)
+        (kill-local-variable variable)))))
 
-(defvar tessera--glyph-slot-properties
-  '(:reserve :optional)
-  "Properties accepted in a layout glyph slot reference.")
-
-(defvar tessera--glyph-variant-properties
-  '(:glyph :mouse-face :help-echo :keymap :pointer :follow-link)
-  "Properties accepted in a glyph variant specification.")
+(defun tessera--map-mode-buffers (mode function)
+  "Call FUNCTION in every live buffer derived from MODE.
+When MODE is nil, visit every live buffer.
+Continue after errors or quits, then signal the first condition."
+  (let (condition-data)
+    (dolist (buffer (buffer-list))
+      (when (buffer-live-p buffer)
+        (condition-case condition
+            (with-current-buffer buffer
+              (when (or (null mode) (derived-mode-p mode))
+                (funcall function)))
+          ((error quit)
+           (unless condition-data
+             (setq condition-data condition))))))
+    (when condition-data
+      (signal (car condition-data) (cdr condition-data)))))
 
 (defun tessera--ensure-list (value description)
   "Ensure VALUE is a proper list described by DESCRIPTION."
@@ -564,6 +439,87 @@ returning one, shared by both lines."
     (error "%s contains invalid properties" description))
   (tessera--ensure-unique
    (cl-loop for (key _) on plist by #'cddr collect key) description))
+
+(defun tessera--run-change-functions (hook option)
+  "Notify every callback on HOOK about OPTION.
+Continue after errors or quits, then signal the first condition."
+  (let (condition-data)
+    (run-hook-wrapped
+     hook
+     (lambda (function)
+       (condition-case condition
+           (funcall function option)
+         ((error quit)
+          (unless condition-data
+            (setq condition-data condition))))
+       nil))
+    (when condition-data
+      (signal (car condition-data) (cdr condition-data)))))
+
+(defun tessera--valid-time (value)
+  "Return VALUE as an Emacs time value, or nil when invalid."
+  (when value
+    (condition-case nil
+        (let ((time (time-convert value 'list)))
+          (ignore (decode-time time))
+          time)
+      (error nil))))
+
+;;;; Glyph configuration
+
+(defface tessera-glyph-accent-face
+  '((t :inherit font-lock-keyword-face :weight bold))
+  "Theme emphasis for new, unread, and distinctive content."
+  :group 'tessera)
+
+(defface tessera-glyph-attention-face
+  '((t :inherit warning :weight bold))
+  "Theme warning color for important or pending actions."
+  :group 'tessera)
+
+(defface tessera-glyph-informational-face
+  '((t :inherit font-lock-type-face))
+  "Theme information color for attributes and correspondence."
+  :group 'tessera)
+
+(defface tessera-glyph-muted-face
+  '((t :inherit shadow))
+  "Face used for muted Tessera content."
+  :group 'tessera)
+
+(defface tessera-glyph-negative-face
+  '((t :inherit error))
+  "Theme error color for failures and destructive actions."
+  :group 'tessera)
+
+(defface tessera-glyph-neutral-face
+  '((t :inherit default))
+  "Face used for neutral Tessera content."
+  :group 'tessera)
+
+(defface tessera-glyph-positive-face
+  '((t :inherit success))
+  "Theme success color for completed actions and availability."
+  :group 'tessera)
+
+(defface tessera-glyph-warning-face
+  '((t :inherit warning))
+  "Theme warning color for urgent or uncertain states."
+  :group 'tessera)
+
+(defvar tessera--glyph-change-functions nil
+  "Functions called with a changed glyph option, or nil for all.
+Modes install these callbacks only while enabled.")
+
+(defun tessera--run-glyph-change-functions (option)
+  "Notify every glyph callback about OPTION."
+  (tessera--run-change-functions
+   'tessera--glyph-change-functions option))
+
+(defun tessera--glyph-string-p (value)
+  "Return non-nil for nonempty, single-line display text VALUE."
+  (and (stringp value) (> (string-width value) 0)
+       (not (string-match-p "[[:cntrl:]]" value))))
 
 (defun tessera--validate-glyph (glyph description)
   "Validate GLYPH described by DESCRIPTION."
@@ -591,43 +547,6 @@ returning one, shared by both lines."
       (error "%s has an invalid :face: %S" description face))
     (unless (memq (tessera-glyph-hidden glyph) '(nil t))
       (error "%s has an invalid :hidden value" description))))
-
-;;;; Glyph configuration
-
-(defvar tessera--glyph-change-functions nil
-  "Functions called with a changed glyph option, or nil for all.
-Modes install these callbacks only while enabled.")
-
-(defun tessera--run-change-functions (hook option)
-  "Notify every callback on HOOK about OPTION.
-Continue after errors or quits, then signal the first condition."
-  (let (condition-data)
-    (run-hook-wrapped
-     hook
-     (lambda (function)
-       (condition-case condition
-           (funcall function option)
-         ((error quit)
-          (unless condition-data
-            (setq condition-data condition))))
-       nil))
-    (when condition-data
-      (signal (car condition-data) (cdr condition-data)))))
-
-(defun tessera--run-glyph-change-functions (option)
-  "Notify every glyph callback about OPTION."
-  (tessera--run-change-functions
-   'tessera--glyph-change-functions option))
-
-(defun tessera--run-month-change-functions (option)
-  "Notify every month callback about OPTION."
-  (tessera--run-change-functions
-   'tessera--month-change-functions option))
-
-(defun tessera--glyph-string-p (value)
-  "Return non-nil for nonempty, single-line display text VALUE."
-  (and (stringp value) (> (string-width value) 0)
-       (not (string-match-p "[[:cntrl:]]" value))))
 
 (define-widget 'tessera-glyph-spec 'plist
   "Overrides for the named fields of a Tessera glyph."
@@ -745,6 +664,31 @@ Validate before changing the option or notifying active adapters."
   (set-default symbol value)
   (tessera--run-glyph-change-functions symbol))
 
+(defcustom tessera-glyph-style 'unicode
+  "Preferred visual style for Tessera glyphs."
+  :type '(choice
+          (const :tag "ASCII" ascii)
+          (const :tag "Unicode" unicode)
+          (const :tag "Nerd Icons" nerd-icons))
+  :safe #'symbolp
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-glyph-appearance
+  :group 'tessera)
+
+(defcustom tessera-glyph-color t
+  "Color treatment applied to Tessera glyphs.
+
+A nil value inherits the surrounding foreground.  A t value uses
+the glyph's semantic face.  A color string applies that foreground
+to every glyph."
+  :type '(choice
+          (const :tag "Monochrome" nil)
+          (const :tag "Semantic colors" t)
+          (color :tag "Uniform color"))
+  :initialize #'custom-initialize-default
+  :set #'tessera--set-glyph-appearance
+  :group 'tessera)
+
 (defvar tessera--thread-glyph-defaults
   '((branch :ascii "+-" :unicode "├─" :face tessera-glyph-muted-face)
     (last :ascii "`-" :unicode "└─" :face tessera-glyph-muted-face)
@@ -838,6 +782,38 @@ installing the library or changing `load-path'."
     (tessera--validate-glyph-appearance option (symbol-value option)))
   (setq tessera--nerd-icons-availability nil)
   (tessera--run-glyph-change-functions nil))
+
+;;;; Backend validation and registration
+
+(cl-defstruct (tessera--entry-backend
+               (:constructor tessera--make-entry-backend))
+  "Store a validated backend entry definition."
+  name
+  context
+  segments
+  glyph-slots
+  layouts
+  thread-layout
+  month-date
+  month-unread-p
+  month-glyph
+  month-warning-segment
+  month-goto)
+
+(defvar tessera--entry-backends (make-hash-table :test #'eq)
+  "Registered Tessera entry backends.")
+
+(defvar tessera--segment-properties
+  '(:grow :min-width :max-width :truncate :priority :optional :point)
+  "Properties accepted in a layout segment reference.")
+
+(defvar tessera--glyph-slot-properties
+  '(:reserve :optional)
+  "Properties accepted in a layout glyph slot reference.")
+
+(defvar tessera--glyph-variant-properties
+  '(:glyph :mouse-face :help-echo :keymap :pointer :follow-link)
+  "Properties accepted in a glyph variant specification.")
 
 (defun tessera--validate-glyph-variant (variant slot-name)
   "Validate VARIANT belonging to SLOT-NAME and return its glyph."
@@ -1097,6 +1073,86 @@ Return BACKEND."
       (puthash backend definition tessera--entry-backends)))
   backend)
 
+(defun tessera--find-entry-backend (backend)
+  "Return the registered definition for BACKEND."
+  (or (gethash backend tessera--entry-backends)
+      (error "Unknown Tessera entry backend `%s'" backend)))
+
+(defun tessera--find-entry-layout (definition &optional context)
+  "Return the layout for DEFINITION and optional CONTEXT."
+  (let ((thread (and context (tessera-entry-context-thread context)))
+        (layout (tessera--entry-backend-thread-layout definition)))
+    (if (and thread layout)
+        (if (tessera-thread-context-first thread)
+            (tessera-thread-layout-head layout)
+          (tessera-thread-layout-child layout))
+      (or (cdr (assq tessera-entry-layout
+                     (tessera--entry-backend-layouts definition)))
+          (error "Backend `%s' has no layout `%s'"
+                 (tessera--entry-backend-name definition)
+                 tessera-entry-layout)))))
+
+;;;; Thread contexts and prefixes
+
+(defun tessera-thread-context-path (context)
+  "Return CONTEXT's branch path in root-to-child order.
+Built contexts share reversed paths.  Materialize the public list
+only when requested, rather than copying every ancestor per row.
+Treat the returned list as read-only; update this place with `setf'."
+  (or (tessera-thread-context-forward-path context)
+      (setf (tessera-thread-context-forward-path context)
+            (reverse (tessera-thread-context-reverse-path context)))))
+
+(gv-define-setter tessera-thread-context-path (value context)
+  `(let ((node ,context)
+         (path ,value))
+     (setf (tessera-thread-context-forward-path node) path
+           (tessera-thread-context-reverse-path node) (reverse path))
+     path))
+
+(defun tessera--thread-path-tail (context)
+  "Return CONTEXT's branch path in child-to-root order."
+  (tessera-thread-context-reverse-path context))
+
+(defun tessera-thread-context-key (context)
+  "Return the fields affecting CONTEXT's displayed row, or nil.
+Counts affect the head only.  All ancestor branches affect the
+displayed tree, including those outside the current window."
+  (when context
+    (let ((first (tessera-thread-context-first context)))
+      (list first (tessera-thread-context-last context)
+            (and first (tessera-thread-context-total context))
+            (and first (tessera-thread-context-unread context))
+            (tessera--thread-path-tail context)))))
+
+(defun tessera-thread-context-key-equal-p (left right &optional cache)
+  "Return non-nil when thread keys LEFT and RIGHT describe equal rows.
+CACHE, when non-nil, is an `eq' hash table shared by one refresh.
+Reuse ancestor comparisons for shared paths.  Discard CACHE before
+changing paths or starting another refresh."
+  (if (null cache)
+      (equal left right)
+    (and (equal (butlast left) (butlast right))
+         (let ((old (car (last left)))
+               (new (car (last right)))
+               (same t)
+               pending)
+           (while (and same (not (eq old new)))
+             (let ((known (gethash old cache)))
+               (cond
+                ((and known (eq new (car known)))
+                 (setq same (cdr known)
+                       new old))
+                ((and (consp old) (consp new)
+                      (eq (car old) (car new)))
+                 (push (cons old new) pending)
+                 (setq old (cdr old)
+                       new (cdr new)))
+                (t (setq same nil)))))
+           (dolist (pair pending)
+             (puthash (car pair) (cons (cdr pair) same) cache))
+           same))))
+
 (defun tessera-thread-build-contexts (entries)
   "Build shared thread contexts from ordered native ENTRIES.
 Each entry is (ID PARENT UNREAD VISIBLE).  IDs are compared with
@@ -1148,42 +1204,6 @@ from IDs to contexts with counts, branch paths, and boundaries."
                       (tessera-thread-context-reverse-path
                        parent))))))
     contexts))
-
-;;;; Rendering support
-
-(defvar-local tessera--month-enabled nil
-  "Non-nil when month grouping participates in this buffer.")
-
-(defvar-local tessera--month-thread-date nil
-  "Effective thread date policy in the current buffer.")
-
-(defun tessera--valid-time (value)
-  "Return VALUE as an Emacs time value, or nil when invalid."
-  (when value
-    (condition-case nil
-        (let ((time (time-convert value 'list)))
-          (ignore (decode-time time))
-          time)
-      (error nil))))
-
-(defun tessera--find-entry-backend (backend)
-  "Return the registered definition for BACKEND."
-  (or (gethash backend tessera--entry-backends)
-      (error "Unknown Tessera entry backend `%s'" backend)))
-
-(defun tessera--find-entry-layout (definition &optional context)
-  "Return the layout for DEFINITION and optional CONTEXT."
-  (let ((thread (and context (tessera-entry-context-thread context)))
-        (layout (tessera--entry-backend-thread-layout definition)))
-    (if (and thread layout)
-        (if (tessera-thread-context-first thread)
-            (tessera-thread-layout-head layout)
-          (tessera-thread-layout-child layout))
-      (or (cdr (assq tessera-entry-layout
-                     (tessera--entry-backend-layouts definition)))
-          (error "Backend `%s' has no layout `%s'"
-                 (tessera--entry-backend-name definition)
-                 tessera-entry-layout)))))
 
 (defun tessera-thread-count (context)
   "Return the unread/total count of the thread in CONTEXT."
@@ -1287,6 +1307,8 @@ layout overlays; the context always retains its full ancestry."
         ancestors "")
        branch))))
 
+;;;; Rendering support
+
 (defun tessera--make-entry-context
     (definition object window)
   "Build a context for OBJECT, DEFINITION, and WINDOW."
@@ -1348,51 +1370,45 @@ RIGHT-OFFSET is a column count or a one-element pixel count list."
         (setq position next))))
   string)
 
-;;;; Segment rendering
+(defun tessera--string-pixel-width (string &optional buffer)
+  "Measure STRING in pixels with BUFFER's display properties.
+BUFFER defaults to the current buffer.  Use the selected frame.
+Keep measurement independent of line prefixes and line numbers."
+  (if (string-empty-p string)
+      0
+    (let* ((source (or buffer (current-buffer)))
+           (remapping (buffer-local-value
+                       'face-remapping-alist source))
+           (aliases (buffer-local-value
+                     'char-property-alias-alist source))
+           (properties (buffer-local-value
+                        'default-text-properties source)))
+      (with-current-buffer
+          (get-buffer-create " *tessera-pixel-width*" t)
+        (let ((face-remapping-alist remapping)
+              (char-property-alias-alist aliases)
+              (default-text-properties properties)
+              (buffer-undo-list t)
+              (inhibit-read-only t)
+              (inhibit-modification-hooks t)
+              (deactivate-mark nil))
+          (unwind-protect
+              (progn
+                (insert string)
+                (add-text-properties
+                 (point-min) (point-max)
+                 '(display-line-numbers-disable t
+                                                line-prefix ""
+                                                wrap-prefix ""))
+                (car (buffer-text-pixel-size nil nil t)))
+            (erase-buffer)))))))
 
-(cl-defstruct (tessera--rendered-segment
-               (:constructor tessera--make-rendered-segment))
-  "Store one rendered segment and its width policy."
-  string
-  width
-  pixel-width
-  target-width
-  grow
-  min-width
-  max-width
-  truncate
-  priority
-  optional
-  visible
-  point)
-
-(defun tessera--month-warning-segment-p
-    (definition context name)
-  "Return non-nil when NAME carries CONTEXT's date warning.
-DEFINITION supplies the backend warning selector."
-  (when-let* ((selector
-               (tessera--entry-backend-month-warning-segment
-                definition)))
-    (eq name
-        (condition-case nil
-            (funcall selector context)
-          (error nil)))))
-
-(defun tessera--month-warning-prefix (context)
-  "Return the inert missing-date warning prefix for CONTEXT."
-  (let* ((glyph
-          (tessera-glyph-resolve
-           'undated tessera--month-glyph-defaults
-           tessera-month-glyphs))
-         (text (tessera-glyph-render glyph context)))
-    (unless (string-empty-p text)
-      (remove-text-properties
-       0 (length text)
-       '(keymap nil follow-link nil pointer nil mouse-face nil)
-       text)
-      (put-text-property 0 (length text) 'help-echo
-                         "Missing or invalid date" text)
-      (concat text (tessera--space 1)))))
+(defun tessera--pixel-space (width)
+  "Return a decorative space occupying WIDTH pixels."
+  (if (> width 0)
+      (propertize " " 'display `(space :width (,width))
+                  'tessera--layout-space t)
+    ""))
 
 (defun tessera--entry-pixel-width (text context)
   "Measure TEXT in graphical CONTEXT, or return nil on a terminal."
@@ -1411,180 +1427,6 @@ DEFINITION supplies the backend warning selector."
                 (window-frame
                  (tessera-entry-context-window context))))
     (string-width text)))
-
-(defun tessera--render-segment (reference definition context)
-  "Render segment REFERENCE using DEFINITION and CONTEXT."
-  (if (eq (car-safe reference) :slots)
-      (tessera--render-slot-group (cdr reference) definition context)
-    (let* ((name (tessera--reference-name reference "segment"))
-           (provider
-            (cdr (assq name
-                       (tessera--entry-backend-segments definition))))
-           (value (funcall provider context))
-           (warning
-            (and tessera--month-enabled
-                 (tessera-entry-context-month-undated context)
-                 (tessera--month-warning-segment-p
-                  definition context name)
-                 (tessera--month-warning-prefix context))))
-      (unless (or (null value) (stringp value))
-        (error "Segment provider `%s' returned `%S'" name value))
-      (when (and value (string-match-p "[\n\r]" value))
-        (error "Segment provider `%s' returned multiline text" name))
-      (when value
-        (setq value (copy-sequence value))
-        (when warning
-          (unless (string-empty-p value)
-            (put-text-property
-             0 1 'tessera--month-original t value))
-          (setq value (concat warning value)))
-        (let* ((properties (and (consp reference) (cdr reference)))
-               (pixels (tessera--entry-pixel-width value context))
-               (width (if pixels
-                          (ceiling
-                           pixels (frame-char-width
-                                   (window-frame
-                                    (tessera-entry-context-window
-                                     context))))
-                        (string-width value)))
-               (maximum (plist-get properties :max-width))
-               (truncate (plist-get properties :truncate)))
-          (tessera--make-rendered-segment
-           :string value
-           :width width
-           :pixel-width pixels
-           :target-width (if (and maximum truncate)
-                             (min width maximum)
-                           width)
-           :grow (plist-get properties :grow)
-           :min-width (or (plist-get properties :min-width) 0)
-           :max-width maximum
-           :truncate truncate
-           :priority (or (plist-get properties :priority) 0)
-           :optional (plist-get properties :optional)
-           :point (plist-get properties :point)
-           :visible t))))))
-
-(defun tessera--render-segments (references definition context)
-  "Render REFERENCES using DEFINITION and CONTEXT."
-  (delq nil
-        (mapcar (lambda (reference)
-                  (tessera--render-segment
-                   reference definition context))
-                references)))
-
-(defun tessera--visible-segments (segments)
-  "Return the visible members of SEGMENTS."
-  (cl-remove-if-not #'tessera--rendered-segment-visible segments))
-
-(defun tessera--segments-width (segments)
-  "Return the allocated width of visible SEGMENTS."
-  (let ((visible (tessera--visible-segments segments)))
-    (+ (cl-loop for segment in visible
-                sum (tessera--rendered-segment-target-width segment))
-       (* tessera-entry-segment-gap
-          (max 0 (1- (length visible)))))))
-
-(defun tessera--single-line-width (left right slot-width)
-  "Return the allocated line width for LEFT, RIGHT, and SLOT-WIDTH."
-  (+ (* 2 tessera-safe-gap)
-     tessera-entry-left-padding
-     slot-width
-     (if (and (> slot-width 0)
-              (tessera--visible-segments left))
-         tessera-entry-segment-gap
-       0)
-     (tessera--segments-width left)
-     tessera-flex-gap-min-width
-     (tessera--segments-width right)
-     tessera-entry-right-padding))
-
-(defun tessera--segments-by-priority (segments predicate)
-  "Return SEGMENTS matching PREDICATE from low to high priority."
-  (cl-stable-sort
-   (cl-remove-if-not predicate (copy-sequence segments))
-   #'<
-   :key #'tessera--rendered-segment-priority))
-
-(defun tessera--shrink-segments (segments overflow predicate)
-  "Shrink SEGMENTS by up to OVERFLOW columns when PREDICATE allows it.
-Return the number of columns still overflowing."
-  (dolist (segment (tessera--segments-by-priority segments predicate))
-    (when (> overflow 0)
-      (let* ((target (tessera--rendered-segment-target-width segment))
-             (minimum (min target
-                           (tessera--rendered-segment-min-width
-                            segment)))
-             (reduction (min overflow (- target minimum))))
-        (setf (tessera--rendered-segment-target-width segment)
-              (- target reduction))
-        (setq overflow (- overflow reduction)))))
-  overflow)
-
-(defun tessera--grow-segments (segments spare-width)
-  "Give visible growing SEGMENTS up to SPARE-WIDTH columns."
-  (dolist (segment
-           (cl-stable-sort
-            (cl-remove-if-not
-             (lambda (candidate)
-               (and (tessera--rendered-segment-visible candidate)
-                    (tessera--rendered-segment-grow candidate)))
-             (copy-sequence segments))
-            #'>
-            :key #'tessera--rendered-segment-priority))
-    (when (> spare-width 0)
-      (let* ((target (tessera--rendered-segment-target-width segment))
-             (natural (tessera--rendered-segment-width segment))
-             (maximum (tessera--rendered-segment-max-width segment))
-             (desired
-              (if (and maximum
-                       (tessera--rendered-segment-truncate segment))
-                  (min natural maximum)
-                natural))
-             (increase (min spare-width (- desired target))))
-        (setf (tessera--rendered-segment-target-width segment)
-              (+ target increase))
-        (setq spare-width (- spare-width increase)))))
-  spare-width)
-
-(defun tessera--allocate-segment-widths
-    (left right slot-width available-width)
-  "Fit LEFT and RIGHT segments beside SLOT-WIDTH in AVAILABLE-WIDTH."
-  (let* ((segments (append left right))
-         (overflow
-          (max 0
-               (- (tessera--single-line-width left right slot-width)
-                  available-width))))
-    (setq overflow
-          (tessera--shrink-segments
-           segments overflow
-           (lambda (segment)
-             (and (tessera--rendered-segment-visible segment)
-                  (tessera--rendered-segment-grow segment)
-                  (tessera--rendered-segment-truncate segment)))))
-    (dolist (segment
-             (tessera--segments-by-priority
-              segments
-              (lambda (candidate)
-                (and (tessera--rendered-segment-visible candidate)
-                     (tessera--rendered-segment-optional
-                      candidate)))))
-      (when (> overflow 0)
-        (setf (tessera--rendered-segment-visible segment) nil)
-        (setq overflow
-              (max 0 (- (tessera--single-line-width
-                         left right slot-width)
-                        available-width)))))
-    (when (= overflow 0)
-      (tessera--grow-segments
-       segments
-       (- available-width
-          (tessera--single-line-width left right slot-width))))
-    (tessera--shrink-segments
-     segments overflow
-     (lambda (segment)
-       (and (tessera--rendered-segment-visible segment)
-            (tessera--rendered-segment-truncate segment))))))
 
 (defun tessera--ellipsis (width)
   "Return the configured truncation marker within WIDTH columns.
@@ -1627,61 +1469,71 @@ Use a period if the marker's first character is too wide to fit."
                  (- natural-width right-width)))))
             (_ string))))))))
 
-(defun tessera--render-segment-group (segments &optional context)
-  "Return visible SEGMENTS as one rendered string.
-Graphical CONTEXT supplies pixel measurements for truncation."
-  (mapconcat
-   (lambda (segment)
-     (let* ((window (and context
-                         (tessera-entry-context-window context)))
-            (unit (and (window-live-p window)
-                       (display-graphic-p (window-frame window))
-                       (frame-char-width (window-frame window))))
-            (method (tessera--rendered-segment-truncate segment))
-            (text
-             (copy-sequence
-              (if (and unit method
-                       (< (tessera--rendered-segment-target-width
-                           segment)
-                          (tessera--rendered-segment-width segment)))
-                  (tessera--truncate-string-pixels
-                   (tessera--rendered-segment-string segment)
-                   (* unit
-                      (tessera--rendered-segment-target-width
-                       segment))
-                   (lambda (text)
-                     (tessera--entry-pixel-width text context))
-                   nil method
-                   (tessera--rendered-segment-pixel-width segment))
-                (if unit
-                    (tessera--rendered-segment-string segment)
-                  (tessera--truncate-string
-                   (tessera--rendered-segment-string segment)
-                   (tessera--rendered-segment-target-width segment)
-                   method))))))
-       (when (and (tessera--rendered-segment-point segment)
-                  (not (string-empty-p text)))
-         (let ((position
-                (or (text-property-any
-                     0 (length text) 'tessera--month-original t text)
-                    0)))
-           (when (< position (length text))
-             (put-text-property
-              position (1+ position) 'tessera-entry-point t text))))
-       (tessera--prepare-hover text)))
-   (tessera--visible-segments segments)
-   (tessera--space tessera-entry-segment-gap)))
-
-(defun tessera--segment-group-pixel-width (segments text context)
-  "Measure SEGMENTS' TEXT in CONTEXT, reusing natural pixel widths."
-  (let* ((visible (tessera--visible-segments segments))
-         (single (and (null (cdr visible)) (car visible))))
-    (or (and single
-             (or (not (tessera--rendered-segment-truncate single))
-                 (>= (tessera--rendered-segment-target-width single)
-                     (tessera--rendered-segment-width single)))
-             (tessera--rendered-segment-pixel-width single))
-        (tessera--entry-pixel-width text context))))
+(defun tessera--truncate-string-pixels
+    (string width &optional measure ending method natural-width)
+  "Truncate STRING to fit within WIDTH pixels.
+MEASURE measures styled text, defaulting to pixel width.
+ENDING, when non-nil, is a suffix inheriting the final retained
+character's properties.  Keep at least one character in that case.
+Otherwise use `tessera-entry-ellipsis' with STRING's first face.
+METHOD is `head', `middle', or `tail' (the default).
+ENDING is supported only with tail truncation.
+NATURAL-WIDTH is STRING's already measured pixel width, if known."
+  (setq measure (or measure #'tessera--string-pixel-width))
+  (if (<= (or natural-width (funcall measure string)) width)
+      string
+    (let ((ellipsis (copy-sequence
+                     (or ending tessera-entry-ellipsis)))
+          ranges fitted)
+      (if (and ending (not (string-empty-p ending)))
+          (let ((start 0))
+            ;; A smaller suffix font can make a longer prefix fit.
+            ;; Search each constant-property span separately, starting
+            ;; at the right, to retain the longest fitting prefix.
+            (while (< start (length string))
+              (let ((end (next-property-change
+                          start string (length string))))
+                (push (cons start end) ranges)
+                (setq start end))))
+        (setq ranges (list (cons 0 (length string))))
+        (when (> (length string) 0)
+          (add-text-properties
+           0 (length ellipsis) (text-properties-at 0 string)
+           ellipsis))
+        (while (and (> (funcall measure ellipsis) width)
+                    (> (length ellipsis) 0))
+          (setq ellipsis
+                (substring ellipsis 0 (1- (length ellipsis)))))
+        (setq fitted ellipsis))
+      (while ranges
+        (let* ((range (pop ranges))
+               (low (car range))
+               (high (cdr range))
+               (suffix (if ending
+                           (apply #'propertize ending
+                                  (text-properties-at low string))
+                         ellipsis))
+               match)
+          (while (< low high)
+            (let* ((middle (/ (+ low high 1) 2))
+                   (candidate
+                    (pcase method
+                      ('head
+                       (concat suffix (substring string (- middle))))
+                      ('middle
+                       (concat (substring string 0 (/ (1+ middle) 2))
+                               suffix
+                               (substring
+                                string
+                                (- (length string) (/ middle 2)))))
+                      (_ (concat (substring string 0 middle)
+                                 suffix)))))
+              (if (<= (funcall measure candidate) width)
+                  (setq low middle match candidate)
+                (setq high (1- middle)))))
+          (when match
+            (setq fitted match ranges nil))))
+      (or fitted ""))))
 
 (defun tessera--prepare-hover (text)
   "Give each mouse-face span in TEXT a private face value.
@@ -1877,39 +1729,6 @@ render as an empty string."
             ('right remaining))))
     (cons left (- remaining left))))
 
-(defun tessera--string-pixel-width (string &optional buffer)
-  "Measure STRING in pixels with BUFFER's display properties.
-BUFFER defaults to the current buffer.  Use the selected frame.
-Keep measurement independent of line prefixes and line numbers."
-  (if (string-empty-p string)
-      0
-    (let* ((source (or buffer (current-buffer)))
-           (remapping (buffer-local-value
-                       'face-remapping-alist source))
-           (aliases (buffer-local-value
-                     'char-property-alias-alist source))
-           (properties (buffer-local-value
-                        'default-text-properties source)))
-      (with-current-buffer
-          (get-buffer-create " *tessera-pixel-width*" t)
-        (let ((face-remapping-alist remapping)
-              (char-property-alias-alist aliases)
-              (default-text-properties properties)
-              (buffer-undo-list t)
-              (inhibit-read-only t)
-              (inhibit-modification-hooks t)
-              (deactivate-mark nil))
-          (unwind-protect
-              (progn
-                (insert string)
-                (add-text-properties
-                 (point-min) (point-max)
-                 '(display-line-numbers-disable t
-                                                line-prefix ""
-                                                wrap-prefix ""))
-                (car (buffer-text-pixel-size nil nil t)))
-            (erase-buffer)))))))
-
 (defun tessera--fit-glyph-width (text width &optional buffer)
   "Fit TEXT within WIDTH pixels, returning its final pixel width.
 Shrink only oversized glyphs, preserving their other properties.
@@ -1986,13 +1805,6 @@ Return nil when the selector returns nil and OMIT-EMPTY is non-nil."
                   text
                   (funcall space (cdr padding)))))))))
 
-(defun tessera--pixel-space (width)
-  "Return a decorative space occupying WIDTH pixels."
-  (if (> width 0)
-      (propertize " " 'display `(space :width (,width))
-                  'tessera--layout-space t)
-    ""))
-
 (defun tessera--reserve-glyph-slot (slot rendered context)
   "Return a blank occupying RENDERED SLOT's display width in CONTEXT."
   (let ((frame (tessera--glyph-frame context)))
@@ -2064,6 +1876,266 @@ keep their individual positions.  Each selector runs once."
        :max-width width
        :priority 0
        :visible t))))
+
+;;;; Segment rendering
+
+(defun tessera--month-warning-segment-p
+    (definition context name)
+  "Return non-nil when NAME carries CONTEXT's date warning.
+DEFINITION supplies the backend warning selector."
+  (when-let* ((selector
+               (tessera--entry-backend-month-warning-segment
+                definition)))
+    (eq name
+        (condition-case nil
+            (funcall selector context)
+          (error nil)))))
+
+(defun tessera--month-warning-prefix (context)
+  "Return the inert missing-date warning prefix for CONTEXT."
+  (let* ((glyph
+          (tessera-glyph-resolve
+           'undated tessera--month-glyph-defaults
+           tessera-month-glyphs))
+         (text (tessera-glyph-render glyph context)))
+    (unless (string-empty-p text)
+      (remove-text-properties
+       0 (length text)
+       '(keymap nil follow-link nil pointer nil mouse-face nil)
+       text)
+      (put-text-property 0 (length text) 'help-echo
+                         "Missing or invalid date" text)
+      (concat text (tessera--space 1)))))
+
+(defun tessera--render-segment (reference definition context)
+  "Render segment REFERENCE using DEFINITION and CONTEXT."
+  (if (eq (car-safe reference) :slots)
+      (tessera--render-slot-group (cdr reference) definition context)
+    (let* ((name (tessera--reference-name reference "segment"))
+           (provider
+            (cdr (assq name
+                       (tessera--entry-backend-segments definition))))
+           (value (funcall provider context))
+           (warning
+            (and tessera--month-enabled
+                 (tessera-entry-context-month-undated context)
+                 (tessera--month-warning-segment-p
+                  definition context name)
+                 (tessera--month-warning-prefix context))))
+      (unless (or (null value) (stringp value))
+        (error "Segment provider `%s' returned `%S'" name value))
+      (when (and value (string-match-p "[\n\r]" value))
+        (error "Segment provider `%s' returned multiline text" name))
+      (when value
+        (setq value (copy-sequence value))
+        (when warning
+          (unless (string-empty-p value)
+            (put-text-property
+             0 1 'tessera--month-original t value))
+          (setq value (concat warning value)))
+        (let* ((properties (and (consp reference) (cdr reference)))
+               (pixels (tessera--entry-pixel-width value context))
+               (width (if pixels
+                          (ceiling
+                           pixels (frame-char-width
+                                   (window-frame
+                                    (tessera-entry-context-window
+                                     context))))
+                        (string-width value)))
+               (maximum (plist-get properties :max-width))
+               (truncate (plist-get properties :truncate)))
+          (tessera--make-rendered-segment
+           :string value
+           :width width
+           :pixel-width pixels
+           :target-width (if (and maximum truncate)
+                             (min width maximum)
+                           width)
+           :grow (plist-get properties :grow)
+           :min-width (or (plist-get properties :min-width) 0)
+           :max-width maximum
+           :truncate truncate
+           :priority (or (plist-get properties :priority) 0)
+           :optional (plist-get properties :optional)
+           :point (plist-get properties :point)
+           :visible t))))))
+
+(defun tessera--render-segments (references definition context)
+  "Render REFERENCES using DEFINITION and CONTEXT."
+  (delq nil
+        (mapcar (lambda (reference)
+                  (tessera--render-segment
+                   reference definition context))
+                references)))
+
+(defun tessera--visible-segments (segments)
+  "Return the visible members of SEGMENTS."
+  (cl-remove-if-not #'tessera--rendered-segment-visible segments))
+
+(defun tessera--segments-width (segments)
+  "Return the allocated width of visible SEGMENTS."
+  (let ((visible (tessera--visible-segments segments)))
+    (+ (cl-loop for segment in visible
+                sum (tessera--rendered-segment-target-width segment))
+       (* tessera-entry-segment-gap
+          (max 0 (1- (length visible)))))))
+
+(defun tessera--single-line-width (left right slot-width)
+  "Return the allocated line width for LEFT, RIGHT, and SLOT-WIDTH."
+  (+ (* 2 tessera-safe-gap)
+     tessera-entry-left-padding
+     slot-width
+     (if (and (> slot-width 0)
+              (tessera--visible-segments left))
+         tessera-entry-segment-gap
+       0)
+     (tessera--segments-width left)
+     tessera-flex-gap-min-width
+     (tessera--segments-width right)
+     tessera-entry-right-padding))
+
+(defun tessera--segments-by-priority (segments predicate)
+  "Return SEGMENTS matching PREDICATE from low to high priority."
+  (cl-stable-sort
+   (cl-remove-if-not predicate (copy-sequence segments))
+   #'<
+   :key #'tessera--rendered-segment-priority))
+
+(defun tessera--shrink-segments (segments overflow predicate)
+  "Shrink SEGMENTS by up to OVERFLOW columns when PREDICATE allows it.
+Return the number of columns still overflowing."
+  (dolist (segment (tessera--segments-by-priority segments predicate))
+    (when (> overflow 0)
+      (let* ((target (tessera--rendered-segment-target-width segment))
+             (minimum (min target
+                           (tessera--rendered-segment-min-width
+                            segment)))
+             (reduction (min overflow (- target minimum))))
+        (setf (tessera--rendered-segment-target-width segment)
+              (- target reduction))
+        (setq overflow (- overflow reduction)))))
+  overflow)
+
+(defun tessera--grow-segments (segments spare-width)
+  "Give visible growing SEGMENTS up to SPARE-WIDTH columns."
+  (dolist (segment
+           (cl-stable-sort
+            (cl-remove-if-not
+             (lambda (candidate)
+               (and (tessera--rendered-segment-visible candidate)
+                    (tessera--rendered-segment-grow candidate)))
+             (copy-sequence segments))
+            #'>
+            :key #'tessera--rendered-segment-priority))
+    (when (> spare-width 0)
+      (let* ((target (tessera--rendered-segment-target-width segment))
+             (natural (tessera--rendered-segment-width segment))
+             (maximum (tessera--rendered-segment-max-width segment))
+             (desired
+              (if (and maximum
+                       (tessera--rendered-segment-truncate segment))
+                  (min natural maximum)
+                natural))
+             (increase (min spare-width (- desired target))))
+        (setf (tessera--rendered-segment-target-width segment)
+              (+ target increase))
+        (setq spare-width (- spare-width increase)))))
+  spare-width)
+
+(defun tessera--allocate-segment-widths
+    (left right slot-width available-width)
+  "Fit LEFT and RIGHT segments beside SLOT-WIDTH in AVAILABLE-WIDTH."
+  (let* ((segments (append left right))
+         (overflow
+          (max 0
+               (- (tessera--single-line-width left right slot-width)
+                  available-width))))
+    (setq overflow
+          (tessera--shrink-segments
+           segments overflow
+           (lambda (segment)
+             (and (tessera--rendered-segment-visible segment)
+                  (tessera--rendered-segment-grow segment)
+                  (tessera--rendered-segment-truncate segment)))))
+    (dolist (segment
+             (tessera--segments-by-priority
+              segments
+              (lambda (candidate)
+                (and (tessera--rendered-segment-visible candidate)
+                     (tessera--rendered-segment-optional
+                      candidate)))))
+      (when (> overflow 0)
+        (setf (tessera--rendered-segment-visible segment) nil)
+        (setq overflow
+              (max 0 (- (tessera--single-line-width
+                         left right slot-width)
+                        available-width)))))
+    (when (= overflow 0)
+      (tessera--grow-segments
+       segments
+       (- available-width
+          (tessera--single-line-width left right slot-width))))
+    (tessera--shrink-segments
+     segments overflow
+     (lambda (segment)
+       (and (tessera--rendered-segment-visible segment)
+            (tessera--rendered-segment-truncate segment))))))
+
+(defun tessera--render-segment-group (segments &optional context)
+  "Return visible SEGMENTS as one rendered string.
+Graphical CONTEXT supplies pixel measurements for truncation."
+  (mapconcat
+   (lambda (segment)
+     (let* ((window (and context
+                         (tessera-entry-context-window context)))
+            (unit (and (window-live-p window)
+                       (display-graphic-p (window-frame window))
+                       (frame-char-width (window-frame window))))
+            (method (tessera--rendered-segment-truncate segment))
+            (text
+             (copy-sequence
+              (if (and unit method
+                       (< (tessera--rendered-segment-target-width
+                           segment)
+                          (tessera--rendered-segment-width segment)))
+                  (tessera--truncate-string-pixels
+                   (tessera--rendered-segment-string segment)
+                   (* unit
+                      (tessera--rendered-segment-target-width
+                       segment))
+                   (lambda (text)
+                     (tessera--entry-pixel-width text context))
+                   nil method
+                   (tessera--rendered-segment-pixel-width segment))
+                (if unit
+                    (tessera--rendered-segment-string segment)
+                  (tessera--truncate-string
+                   (tessera--rendered-segment-string segment)
+                   (tessera--rendered-segment-target-width segment)
+                   method))))))
+       (when (and (tessera--rendered-segment-point segment)
+                  (not (string-empty-p text)))
+         (let ((position
+                (or (text-property-any
+                     0 (length text) 'tessera--month-original t text)
+                    0)))
+           (when (< position (length text))
+             (put-text-property
+              position (1+ position) 'tessera-entry-point t text))))
+       (tessera--prepare-hover text)))
+   (tessera--visible-segments segments)
+   (tessera--space tessera-entry-segment-gap)))
+
+(defun tessera--segment-group-pixel-width (segments text context)
+  "Measure SEGMENTS' TEXT in CONTEXT, reusing natural pixel widths."
+  (let* ((visible (tessera--visible-segments segments))
+         (single (and (null (cdr visible)) (car visible))))
+    (or (and single
+             (or (not (tessera--rendered-segment-truncate single))
+                 (>= (tessera--rendered-segment-target-width single)
+                     (tessera--rendered-segment-width single)))
+             (tessera--rendered-segment-pixel-width single))
+        (tessera--entry-pixel-width text context))))
 
 ;;;; Entry rendering
 
@@ -2373,6 +2445,112 @@ span using the face of the character under the pointer."
      content)
     content))
 
+(defun tessera-entry-render
+    (backend object &optional window prefix)
+  "Render OBJECT registered for BACKEND in WINDOW.
+
+The result contains one logical line of content and layout metadata.
+After inserting it and the native terminating newline, call
+`tessera-entry-apply-layout' to display padding and alignment.
+WINDOW defaults to a window displaying the current buffer.
+PREFIX is optional non-displaying native text placed before content;
+it does not participate in width allocation.  It also anchors layout
+outside content hover ranges.  Without PREFIX, use one zero-width
+space for that anchor."
+  (when (and window (not (window-live-p window)))
+    (error "Cannot render an entry for a dead window"))
+  (let* ((definition (tessera--find-entry-backend backend))
+         (target-window (or window
+                            (get-buffer-window (current-buffer))))
+         (context
+          (tessera--make-entry-context
+           definition object target-window))
+         (layout (tessera--find-entry-layout definition context))
+         (thread (and (tessera--entry-backend-thread-layout
+                       definition)
+                      (tessera-entry-context-thread context)))
+         (tessera-entry-top-padding
+          (if thread
+              (if (tessera-thread-context-first thread)
+                  tessera-thread-outer-top-padding
+                tessera-thread-inner-top-padding)
+            tessera-entry-top-padding))
+         (tessera-entry-bottom-padding
+          (if thread
+              (if (tessera-thread-context-last thread)
+                  tessera-thread-outer-bottom-padding
+                tessera-thread-inner-bottom-padding)
+            tessera-entry-bottom-padding)))
+    (let ((entry
+           (tessera--entry-content
+            (tessera--render-entry-lines layout definition context)
+            prefix)))
+      (put-text-property 0 (length entry)
+                         'tessera-entry-context context entry)
+      entry)))
+
+;;;; Entry layout overlays
+
+(defvar-local tessera--current-entry nil
+  "Current entry's boundary markers, layout, and saved decorations.")
+
+(defun tessera-entry-clear-layout (&optional start end)
+  "Remove Tessera layout overlays between START and END.
+Omitted bounds select the whole accessible buffer."
+  (when (and tessera--current-entry
+             (< (or start (point-min))
+                (nth 1 tessera--current-entry))
+             (> (or end (point-max))
+                (nth 0 tessera--current-entry)))
+    (tessera-entry-clear-current))
+  (remove-overlays start end 'tessera-entry-overlay t))
+
+(defun tessera-entry-layout-applied-p (start)
+  "Return non-nil if START's current layout is still attached."
+  (let ((layout (get-text-property start 'tessera--entry-layout))
+        (overlay (get-text-property start 'tessera--layout-overlay)))
+    (and (overlayp overlay) (overlay-buffer overlay)
+         (eq layout (overlay-get overlay 'tessera--entry-layout)))))
+
+(defun tessera-entry-apply-layout (start end)
+  "Attach rendered entry layout to buffer content from START to END.
+END excludes the client's terminating newline, which must already
+exist when bottom padding is requested.  Reapplying replaces only
+Tessera overlays within this entry.  Native content properties stay
+on buffer text, and all decorative spaces live in overlay strings."
+  (let* ((layout (get-text-property start 'tessera--entry-layout))
+         (bottom (cadr layout))
+         (terminator (eq (char-after end) ?\n))
+         (limit (if terminator (1+ end) end))
+         anchor)
+    (when (and bottom (> bottom 0) (not terminator))
+      (error "Entry bottom padding needs a terminating newline"))
+    (tessera-entry-clear-layout start limit)
+    (dolist (placement (car layout))
+      (pcase-let* ((`(,offset ,property ,string) placement)
+                   (position (+ start offset))
+                   (overlay (make-overlay position (1+ position))))
+        (unless anchor (setq anchor overlay))
+        (overlay-put overlay 'tessera-entry-overlay t)
+        (overlay-put overlay 'evaporate t)
+        ;; Place entry decoration after native boundary headings.
+        (overlay-put overlay 'priority 1)
+        (overlay-put
+         overlay property
+         (tessera--inert-layout-string string))))
+    (when (and bottom (> bottom 0))
+      (let ((overlay (make-overlay start limit)))
+        (unless anchor (setq anchor overlay))
+        (overlay-put overlay 'tessera-entry-overlay t)
+        (overlay-put overlay 'evaporate t)
+        (overlay-put overlay 'after-string
+                     (tessera--padding-string bottom))))
+    (when anchor
+      (overlay-put anchor 'tessera--entry-layout layout)
+      (with-silent-modifications
+        (put-text-property start (1+ start)
+                           'tessera--layout-overlay anchor)))))
+
 ;;;; Month grouping
 
 (cl-defstruct tessera--month-entry
@@ -2424,6 +2602,8 @@ span using the face of the character under the pointer."
     (define-key map [mouse-1] #'tessera--month-mouse-toggle)
     map)
   "Mouse-only keymap installed on month heading surfaces.")
+
+;;;; Month display ownership
 
 (defun tessera--month-invisibility-present-p ()
   "Return non-nil when the month category is already active."
@@ -2477,6 +2657,8 @@ temporarily disabled."
   (if enabled
       (tessera-month-sync)
     (tessera--month-clear-display)))
+
+;;;; Month entries and group construction
 
 (defun tessera--month-entry-at (position)
   "Return the rendered entry context at POSITION, or nil."
@@ -2692,6 +2874,8 @@ first following valid month.  Return non-nil when any date exists."
       (puthash (tessera--month-group-key group) nil
                tessera--month-folds))))
 
+;;;; Month heading rendering
+
 (defun tessera--month-definition (group)
   "Return the registered backend definition for GROUP."
   (let* ((entry (car (tessera--month-group-entries group)))
@@ -2737,72 +2921,6 @@ first following valid month.  Return non-nil when any date exists."
                 read
                 (unless (string-empty-p read) " ")
                 (number-to-string read-count))))))
-
-(defun tessera--truncate-string-pixels
-    (string width &optional measure ending method natural-width)
-  "Truncate STRING to fit within WIDTH pixels.
-MEASURE measures styled text, defaulting to pixel width.
-ENDING, when non-nil, is a suffix inheriting the final retained
-character's properties.  Keep at least one character in that case.
-Otherwise use `tessera-entry-ellipsis' with STRING's first face.
-METHOD is `head', `middle', or `tail' (the default).
-ENDING is supported only with tail truncation.
-NATURAL-WIDTH is STRING's already measured pixel width, if known."
-  (setq measure (or measure #'tessera--string-pixel-width))
-  (if (<= (or natural-width (funcall measure string)) width)
-      string
-    (let ((ellipsis (copy-sequence
-                     (or ending tessera-entry-ellipsis)))
-          ranges fitted)
-      (if (and ending (not (string-empty-p ending)))
-          (let ((start 0))
-            ;; A smaller suffix font can make a longer prefix fit.
-            ;; Search each constant-property span separately, starting
-            ;; at the right, to retain the longest fitting prefix.
-            (while (< start (length string))
-              (let ((end (next-property-change
-                          start string (length string))))
-                (push (cons start end) ranges)
-                (setq start end))))
-        (setq ranges (list (cons 0 (length string))))
-        (when (> (length string) 0)
-          (add-text-properties
-           0 (length ellipsis) (text-properties-at 0 string)
-           ellipsis))
-        (while (and (> (funcall measure ellipsis) width)
-                    (> (length ellipsis) 0))
-          (setq ellipsis
-                (substring ellipsis 0 (1- (length ellipsis)))))
-        (setq fitted ellipsis))
-      (while ranges
-        (let* ((range (pop ranges))
-               (low (car range))
-               (high (cdr range))
-               (suffix (if ending
-                           (apply #'propertize ending
-                                  (text-properties-at low string))
-                         ellipsis))
-               match)
-          (while (< low high)
-            (let* ((middle (/ (+ low high 1) 2))
-                   (candidate
-                    (pcase method
-                      ('head
-                       (concat suffix (substring string (- middle))))
-                      ('middle
-                       (concat (substring string 0 (/ (1+ middle) 2))
-                               suffix
-                               (substring
-                                string
-                                (- (length string) (/ middle 2)))))
-                      (_ (concat (substring string 0 middle)
-                                 suffix)))))
-              (if (<= (funcall measure candidate) width)
-                  (setq low middle match candidate)
-                (setq high (1- middle)))))
-          (when match
-            (setq fitted match ranges nil))))
-      (or fitted ""))))
 
 (defun tessera--month-style-text (text face)
   "Return a copy of TEXT styled with month FACE.
@@ -2919,6 +3037,8 @@ Use a default width when WINDOW is nil and the buffer is hidden."
              group collapsed width unit t window)))
       (tessera--month-compose-header
        group collapsed width unit nil window))))
+
+;;;; Month folds and display synchronization
 
 (defun tessera--month-suppress-overlay-strings (start end fold)
   "Hide decorative overlay strings between START and END.
@@ -3092,6 +3212,8 @@ Preserve any narrowing while including records outside it."
             (message
              (concat "Tessera month grouping disabled: "
                      "months are not contiguous"))))))))
+
+;;;; Month navigation and interaction
 
 (defun tessera--month-event-key (event)
   "Return the month key stored under mouse EVENT."
@@ -3448,9 +3570,6 @@ positions retain their character offset.  Release the saved marker."
 
 ;;;; Current entry highlighting
 
-(defvar-local tessera--current-entry nil
-  "Current entry's boundary markers, layout, and saved decorations.")
-
 (defun tessera--current-entry-start ()
   "Return the current highlighted entry's start, or nil."
   (when tessera--current-entry
@@ -3577,108 +3696,7 @@ entry before moving the highlight.  This function is suitable for
                     (tessera--current-entry-decorations
                      start end)))))))
 
-(defun tessera-entry-clear-layout (&optional start end)
-  "Remove Tessera layout overlays between START and END.
-Omitted bounds select the whole accessible buffer."
-  (when (and tessera--current-entry
-             (< (or start (point-min))
-                (nth 1 tessera--current-entry))
-             (> (or end (point-max))
-                (nth 0 tessera--current-entry)))
-    (tessera-entry-clear-current))
-  (remove-overlays start end 'tessera-entry-overlay t))
-
-(defun tessera-entry-layout-applied-p (start)
-  "Return non-nil if START's current layout is still attached."
-  (let ((layout (get-text-property start 'tessera--entry-layout))
-        (overlay (get-text-property start 'tessera--layout-overlay)))
-    (and (overlayp overlay) (overlay-buffer overlay)
-         (eq layout (overlay-get overlay 'tessera--entry-layout)))))
-
-(defun tessera-entry-apply-layout (start end)
-  "Attach rendered entry layout to buffer content from START to END.
-END excludes the client's terminating newline, which must already
-exist when bottom padding is requested.  Reapplying replaces only
-Tessera overlays within this entry.  Native content properties stay
-on buffer text, and all decorative spaces live in overlay strings."
-  (let* ((layout (get-text-property start 'tessera--entry-layout))
-         (bottom (cadr layout))
-         (terminator (eq (char-after end) ?\n))
-         (limit (if terminator (1+ end) end))
-         anchor)
-    (when (and bottom (> bottom 0) (not terminator))
-      (error "Entry bottom padding needs a terminating newline"))
-    (tessera-entry-clear-layout start limit)
-    (dolist (placement (car layout))
-      (pcase-let* ((`(,offset ,property ,string) placement)
-                   (position (+ start offset))
-                   (overlay (make-overlay position (1+ position))))
-        (unless anchor (setq anchor overlay))
-        (overlay-put overlay 'tessera-entry-overlay t)
-        (overlay-put overlay 'evaporate t)
-        ;; Place entry decoration after native boundary headings.
-        (overlay-put overlay 'priority 1)
-        (overlay-put
-         overlay property
-         (tessera--inert-layout-string string))))
-    (when (and bottom (> bottom 0))
-      (let ((overlay (make-overlay start limit)))
-        (unless anchor (setq anchor overlay))
-        (overlay-put overlay 'tessera-entry-overlay t)
-        (overlay-put overlay 'evaporate t)
-        (overlay-put overlay 'after-string
-                     (tessera--padding-string bottom))))
-    (when anchor
-      (overlay-put anchor 'tessera--entry-layout layout)
-      (with-silent-modifications
-        (put-text-property start (1+ start)
-                           'tessera--layout-overlay anchor)))))
-
-(defun tessera-entry-render
-    (backend object &optional window prefix)
-  "Render OBJECT registered for BACKEND in WINDOW.
-
-The result contains one logical line of content and layout metadata.
-After inserting it and the native terminating newline, call
-`tessera-entry-apply-layout' to display padding and alignment.
-WINDOW defaults to a window displaying the current buffer.
-PREFIX is optional non-displaying native text placed before content;
-it does not participate in width allocation.  It also anchors layout
-outside content hover ranges.  Without PREFIX, use one zero-width
-space for that anchor."
-  (when (and window (not (window-live-p window)))
-    (error "Cannot render an entry for a dead window"))
-  (let* ((definition (tessera--find-entry-backend backend))
-         (target-window (or window
-                            (get-buffer-window (current-buffer))))
-         (context
-          (tessera--make-entry-context
-           definition object target-window))
-         (layout (tessera--find-entry-layout definition context))
-         (thread (and (tessera--entry-backend-thread-layout
-                       definition)
-                      (tessera-entry-context-thread context)))
-         (tessera-entry-top-padding
-          (if thread
-              (if (tessera-thread-context-first thread)
-                  tessera-thread-outer-top-padding
-                tessera-thread-inner-top-padding)
-            tessera-entry-top-padding))
-         (tessera-entry-bottom-padding
-          (if thread
-              (if (tessera-thread-context-last thread)
-                  tessera-thread-outer-bottom-padding
-                tessera-thread-inner-bottom-padding)
-            tessera-entry-bottom-padding)))
-    (let ((entry
-           (tessera--entry-content
-            (tessera--render-entry-lines layout definition context)
-            prefix)))
-      (put-text-property 0 (length entry)
-                         'tessera-entry-context context entry)
-      entry)))
-
-;;;; Header lines
+;;;; Header line options and faces
 
 (defgroup tessera-header-line nil
   "Shared header lines for native views."
@@ -3821,6 +3839,8 @@ Native view glyph overrides take precedence for shared IDs."
   :set #'tessera--set-header-line-glyphs
   :group 'tessera-header-line)
 
+;;;; Header line state
+
 (cl-defstruct tessera-header-line-context
   "Describe a header's VIEW, BUFFER, WINDOW, cached STATE and NOW.
 STATE is a view-owned plist.  Providers must not modify this context
@@ -3842,6 +3862,16 @@ or its state.  NOW is the current Emacs time value."
 (defvar-local tessera--header-line-dirty nil)
 (defvar-local tessera--header-line-string nil)
 (put 'tessera--header-line-string 'risky-local-variable t)
+
+(defvar tessera--header-line-action-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [header-line down-mouse-1] #'ignore)
+    (define-key map [header-line mouse-1]
+                #'tessera--header-line-click)
+    map)
+  "Keymap for native header actions.")
+
+;;;; Header line fields and providers
 
 (defun tessera-header-line-duration (seconds)
   "Format nonnegative SECONDS as whole minutes, hours, or days."
@@ -3903,14 +3933,6 @@ precedes the default value face.  Existing VALUE properties survive."
     (when (and (window-live-p window) (commandp command))
       (with-selected-window window
         (call-interactively command)))))
-
-(defvar tessera--header-line-action-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [header-line down-mouse-1] #'ignore)
-    (define-key map [header-line mouse-1]
-                #'tessera--header-line-click)
-    map)
-  "Keymap for native header actions.")
 
 (defun tessera-header-line-button (text command)
   "Return a copy of TEXT invoking COMMAND on Mouse-1."
@@ -4050,6 +4072,8 @@ CONTEXT's STATE supplies these keys and a descriptive :scope."
                 (format
                  "Feeds: %d.\nDistinct feeds among displayed entries."
                  feeds)))))))
+
+;;;; Header line composition
 
 (defun tessera--header-line-region (role text context)
   "Copy and decorate ROLE's TEXT for CONTEXT; nil hides the region."
@@ -4200,6 +4224,8 @@ CONTEXT's STATE supplies these keys and a descriptive :scope."
                   tessera--header-line-dirty nil)))
       (when (eq header-line-format tessera--header-line-format)
         (tessera--restore-settings tessera--header-line-native)))))
+
+;;;; Header line lifecycle
 
 (defun tessera-header-line-refresh ()
   "Recompute the current active view's header data and redisplay it.

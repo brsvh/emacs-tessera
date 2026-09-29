@@ -20,6 +20,8 @@
 (require 'tessera-mu4e-headers)
 (require 'tessera-elfeed-search)
 
+;;;; Fixtures and inspection helpers
+
 (defun tessera-month-tests--context (object buffer window)
   "Return a test entry context for OBJECT in BUFFER and WINDOW."
   (make-tessera-entry-context
@@ -142,16 +144,6 @@
           (overlay-get overlay 'after-string) face)))
    (overlays-in start end)))
 
-(ert-deftest tessera-month-default-heading-appearance ()
-  (should (= (default-value 'tessera-month-left-padding) 2))
-  (should (= (default-value 'tessera-month-bottom-padding) 0.5))
-  (should
-   (equal (face-attribute 'tessera-month-face :inherit)
-          '(font-lock-keyword-face default)))
-  (should
-   (eq (face-attribute 'tessera-month-face :weight nil t)
-       'bold)))
-
 (defun tessera-month-tests--string-month-keys (string)
   "Return month keys in their displayed order in STRING."
   (let ((position 0)
@@ -208,34 +200,25 @@
        (tessera-month-sync)
        ,@body)))
 
-(ert-deftest tessera-month-navigation-enters-nearest-visible-entry ()
+;;;; Options and validation
+
+(ert-deftest tessera-month-default-heading-appearance ()
+  (should (= (default-value 'tessera-month-left-padding) 2))
+  (should (= (default-value 'tessera-month-bottom-padding) 0.5))
+  (should
+   (equal (face-attribute 'tessera-month-face :inherit)
+          '(font-lock-keyword-face default)))
+  (should
+   (eq (face-attribute 'tessera-month-face :weight nil t)
+       'bold)))
+
+(ert-deftest tessera-month-configure-rejects-invalid-policy ()
   (with-temp-buffer
-    (insert (make-string 30 ?x))
-    (setq tessera--month-visible-entries
-          (vconcat
-           (cl-loop for start from 5 to 25 by 10
-                    collect (make-tessera--month-entry
-                             :start start :end (+ start 4)))))
-    (pcase-dolist (`(,position ,direction ,count ,expected)
-                   '((1 1 1 5) (1 -1 1 nil)
-                     (7 1 1 15) (7 -1 1 nil)
-                     (11 1 1 15) (11 -1 1 5)
-                     (11 1 2 25) (11 -1 2 nil)
-                     (16 1 1 25) (16 -1 1 5)
-                     (21 1 1 25) (21 -1 1 15)
-                     (29 1 1 nil) (29 -1 1 25)
-                     (31 -1 2 15) (31 -1 4 nil)))
-      (goto-char position)
-      (should (eql (tessera--month-visible-entry-position
-                    direction count)
-                   expected)))
-    (narrow-to-region 11 29)
-    (goto-char (point-min))
-    (should-not (tessera--month-visible-entry-position -1 1))
-    (should (= (tessera--month-visible-entry-position 1 1) 15))
-    (goto-char (point-max))
-    (should (= (tessera--month-visible-entry-position -1 1) 25))
-    (should-not (tessera--month-visible-entry-position -1 3))))
+    (dolist (enabled '(nil t))
+      (should-error (tessera-month-configure enabled nil))
+      (should-not tessera--month-enabled))))
+
+;;;; Group construction
 
 (ert-deftest tessera-month-groups-contiguous-entries ()
   (tessera-month-tests--with-buffer
@@ -261,6 +244,84 @@
                  (overlays-in (point-min) (point-max))))
                2))))
 
+(ert-deftest tessera-month-absorbs-undated-entry-and-warns ()
+  (tessera-month-tests--with-buffer
+      (list
+       (list :title "No date")
+       (list :title "April"
+             :time (tessera-month-tests--time 2026 4 20))
+       (list :title "Also no date"))
+    (should (= (length tessera--month-groups) 1))
+    (should (equal (tessera--month-group-key
+                    (car tessera--month-groups))
+                   '(2026 4)))
+    (goto-char (point-min))
+    (should (search-forward "!No date" nil t))
+    (should (search-forward "!Also no date" nil t))))
+
+(ert-deftest tessera-month-disables-noncontiguous-order ()
+  (tessera-month-tests--with-buffer
+      (list
+       (list :title "April one"
+             :time (tessera-month-tests--time 2026 4 20))
+       (list :title "March"
+             :time (tessera-month-tests--time 2026 3 20))
+       (list :title "April two"
+             :time (tessera-month-tests--time 2026 4 2)))
+    (should-not tessera--month-groups)
+    (should tessera--month-order-warning)
+    (should-not
+     (cl-find-if
+      (lambda (overlay)
+        (overlay-get overlay 'tessera-month-overlay))
+      (overlays-in (point-min) (point-max))))))
+
+(ert-deftest tessera-month-thread-date-selects-root-or-latest ()
+  (tessera-month-tests--with-buffer
+      (tessera-month-tests--cross-month-thread)
+    (should (equal (tessera--month-group-key
+                    (car tessera--month-groups))
+                   '(2026 4)))
+    (setq-local tessera--month-thread-date 'root)
+    (tessera-month-sync)
+    (should (equal (tessera--month-group-key
+                    (car tessera--month-groups))
+                   '(2026 3)))
+    (should (= (tessera--month-group-total
+                (car tessera--month-groups))
+               2))))
+
+(ert-deftest tessera-month-native-fold-keeps-thread-date ()
+  (tessera-month-tests--with-buffer
+      (tessera-month-tests--cross-month-thread)
+    (goto-char (point-min))
+    (forward-line 1)
+    (let ((fold (make-overlay
+                 (line-beginning-position)
+                 (min (point-max)
+                      (1+ (line-end-position))))))
+      (overlay-put fold 'invisible 'native-fold)
+      (add-to-invisibility-spec 'native-fold)
+      (tessera-month-sync)
+      (should (equal (tessera--month-group-key
+                      (car tessera--month-groups))
+                     '(2026 4)))
+      (setq-local tessera--month-thread-date 'root)
+      (tessera-month-sync)
+      (should (equal (tessera--month-group-key
+                      (car tessera--month-groups))
+                     '(2026 3))))))
+
+(ert-deftest tessera-month-prunes-folds-without-dated-results ()
+  (dolist (objects '(nil ((:title "Undated"))))
+    (tessera-month-tests--with-buffer objects
+      (puthash '(2026 4) t tessera--month-folds)
+      (tessera-month-sync)
+      (should-not tessera--month-groups)
+      (should (= (hash-table-count tessera--month-folds) 0)))))
+
+;;;; Heading appearance and width
+
 (ert-deftest tessera-month-statistics-face-overrides-base ()
   (let* ((text
           (tessera--month-style-text
@@ -274,168 +335,6 @@
     (should (equal (get-text-property 2 'face text)
                    '(tessera-month-statistics-face
                      tessera-month-face)))))
-
-(ert-deftest tessera-month-fold-shows-counts-and-hides-entries ()
-  (tessera-month-tests--with-buffer
-      (list
-       (list :title "April unread"
-             :time (tessera-month-tests--time 2026 4 20)
-             :unread t)
-       (list :title "April read"
-             :time (tessera-month-tests--time 2026 4 2))
-       (list :title "March"
-             :time (tessera-month-tests--time 2026 3 10)))
-    (goto-char (tessera--month-group-start
-                (cadr tessera--month-groups)))
-    (tessera--month-toggle '(2026 4))
-    (should (gethash '(2026 4) tessera--month-folds))
-    (let* ((group (car tessera--month-groups))
-           (next (cadr tessera--month-groups))
-           (fold
-            (cl-find-if
-             (lambda (overlay)
-               (eq (overlay-get overlay
-                                'tessera-month-overlay)
-                   'fold))
-             (overlays-in
-              (tessera--month-group-start group)
-              (1+ (tessera--month-group-start group)))))
-           (header
-            (tessera-month-tests--header-for-key '(2026 4)))
-           (text (overlay-get header 'before-string)))
-      (should (= (overlay-end fold)
-                 (tessera--month-group-end group)))
-      (should (= (overlay-start header)
-                 (tessera--month-group-start next)))
-      (should (string-match-p "U 1.*R 1" text))
-      (let ((position
-             (cl-loop for position below (length text)
-                      when
-                      (equal (get-text-property
-                              position 'tessera-month-key text)
-                             '(2026 4))
-                      return position)))
-        (should position)
-        (should
-         (equal (get-text-property position 'follow-link text)
-                [mouse-1])))
-      (should-not
-       (tessera-month-entry-visible-p
-        (tessera--month-group-start group))))))
-
-(ert-deftest tessera-month-toggle-restores-highlight-and-point ()
-  (tessera-month-tests--with-buffer
-      (list
-       (list :title "April"
-             :time (tessera-month-tests--time 2026 4 20))
-       (list :title "March"
-             :time (tessera-month-tests--time 2026 3 20)))
-    (let* ((april (car tessera--month-groups))
-           (april-start (tessera--month-group-start april))
-           (april-end
-            (save-excursion
-              (goto-char april-start)
-              (line-end-position))))
-      (goto-char april-start)
-      (goto-char (tessera-entry-point))
-      (tessera-entry-highlight-current)
-      (should
-       (tessera-month-tests--overlay-face-p
-        april-start (line-end-position)
-        'tessera-entry-current-face))
-      (tessera--month-toggle '(2026 4))
-      (tessera-entry-highlight-current)
-      (tessera--month-toggle '(2026 4))
-      (should (= (point) (tessera-entry-point)))
-      (should-not
-       (text-property-not-all
-        april-start april-end
-        'tessera--current-face nil))
-      (should-not
-       (tessera-month-tests--overlay-face-p
-        april-start april-end
-        'tessera-entry-current-face)))))
-
-(ert-deftest tessera-month-mouse-toggle-deactivates-region ()
-  (should
-   (eq (lookup-key tessera--month-header-map [down-mouse-1])
-       #'tessera--month-mouse-toggle))
-  (should-not
-   (lookup-key tessera--month-header-map [drag-mouse-1]))
-  (tessera-month-tests--with-buffer
-      (list
-       (list :title "April"
-             :time (tessera-month-tests--time 2026 4 20))
-       (list :title "March"
-             :time (tessera-month-tests--time 2026 3 20)))
-    (let ((buffer (current-buffer)))
-      (save-window-excursion
-        (let ((window (selected-window)))
-          (set-window-buffer window buffer)
-          (goto-char (point-min))
-          (setq-local transient-mark-mode t)
-          (push-mark (point-max) t t)
-          (should mark-active)
-          (tessera-tests--click-month '(2026 4))
-          (should (gethash '(2026 4) tessera--month-folds))
-          (tessera-tests--click-month '(2026 4))
-          (should-not (gethash '(2026 4) tessera--month-folds))
-          (should-not mark-active)
-          (should deactivate-mark))))))
-
-(ert-deftest tessera-month-consecutive-folds-share-safe-anchor ()
-  (tessera-month-tests--with-buffer
-      (list
-       (list :title "May"
-             :time (tessera-month-tests--time 2026 5 20))
-       (list :title "April"
-             :time (tessera-month-tests--time 2026 4 20))
-       (list :title "March"
-             :time (tessera-month-tests--time 2026 3 20)))
-    (goto-char (tessera--month-group-start
-                (car (last tessera--month-groups))))
-    (tessera--month-toggle '(2026 5))
-    (tessera--month-toggle '(2026 4))
-    (let* ((target (tessera--month-group-start
-                    (car (last tessera--month-groups))))
-           (headers
-            (cl-remove-if-not
-             (lambda (overlay)
-               (eq (overlay-get overlay 'tessera-month-overlay)
-                   'header))
-             (overlays-in target (1+ target))))
-           (header (car headers)))
-      (should (= (length headers) 1))
-      (should (= (overlay-get header 'priority) 0))
-      (should
-       (equal
-        (tessera-month-tests--string-month-keys
-         (overlay-get header 'before-string))
-        '((2026 5) (2026 4) (2026 3)))))))
-
-(ert-deftest tessera-month-folded-headings-reuse-visible-anchor ()
-  (tessera-month-tests--with-buffer
-      (cl-loop for year from 1900 below 2000
-               collect (list :title "Entry"
-                             :time (tessera-month-tests--time
-                                    year 1 1)))
-    (dolist (group (butlast tessera--month-groups))
-      (puthash (tessera--month-group-key group)
-               t tessera--month-folds))
-    (let ((anchor (symbol-function 'tessera--month-group-anchor))
-          (calls 0))
-      (cl-letf (((symbol-function 'tessera--month-group-anchor)
-                 (lambda (group)
-                   (cl-incf calls)
-                   (funcall anchor group))))
-        (tessera--month-redisplay))
-      (should (= calls 1)))
-    (let ((header (tessera-month-tests--header-for-key '(1900 1))))
-      (should
-       (equal (tessera-month-tests--string-month-keys
-               (overlay-get header 'before-string))
-              (mapcar #'tessera--month-group-key
-                      tessera--month-groups))))))
 
 (ert-deftest tessera-month-heading-skips-native-invisible-prefix ()
   (tessera-month-tests--with-buffer
@@ -513,269 +412,6 @@
       (should-not (overlay-buffer header))
       (should (tessera-month-tests--header-for-key '(2026 4))))))
 
-(ert-deftest tessera-month-refuses-to-fold-last-expanded-group ()
-  (tessera-month-tests--with-buffer
-      (list
-       (list :title "Only"
-             :time (tessera-month-tests--time 2026 4 20)))
-    (tessera--month-toggle '(2026 4))
-    (should-not (gethash '(2026 4) tessera--month-folds))))
-
-(ert-deftest tessera-month-absorbs-undated-entry-and-warns ()
-  (tessera-month-tests--with-buffer
-      (list
-       (list :title "No date")
-       (list :title "April"
-             :time (tessera-month-tests--time 2026 4 20))
-       (list :title "Also no date"))
-    (should (= (length tessera--month-groups) 1))
-    (should (equal (tessera--month-group-key
-                    (car tessera--month-groups))
-                   '(2026 4)))
-    (goto-char (point-min))
-    (should (search-forward "!No date" nil t))
-    (should (search-forward "!Also no date" nil t))))
-
-(ert-deftest tessera-month-disables-noncontiguous-order ()
-  (tessera-month-tests--with-buffer
-      (list
-       (list :title "April one"
-             :time (tessera-month-tests--time 2026 4 20))
-       (list :title "March"
-             :time (tessera-month-tests--time 2026 3 20))
-       (list :title "April two"
-             :time (tessera-month-tests--time 2026 4 2)))
-    (should-not tessera--month-groups)
-    (should tessera--month-order-warning)
-    (should-not
-     (cl-find-if
-      (lambda (overlay)
-        (overlay-get overlay 'tessera-month-overlay))
-      (overlays-in (point-min) (point-max))))))
-
-(ert-deftest tessera-month-thread-date-selects-root-or-latest ()
-  (tessera-month-tests--with-buffer
-      (tessera-month-tests--cross-month-thread)
-    (should (equal (tessera--month-group-key
-                    (car tessera--month-groups))
-                   '(2026 4)))
-    (setq-local tessera--month-thread-date 'root)
-    (tessera-month-sync)
-    (should (equal (tessera--month-group-key
-                    (car tessera--month-groups))
-                   '(2026 3)))
-    (should (= (tessera--month-group-total
-                (car tessera--month-groups))
-               2))))
-
-(ert-deftest tessera-month-native-fold-keeps-thread-date ()
-  (tessera-month-tests--with-buffer
-      (tessera-month-tests--cross-month-thread)
-    (goto-char (point-min))
-    (forward-line 1)
-    (let ((fold (make-overlay
-                 (line-beginning-position)
-                 (min (point-max)
-                      (1+ (line-end-position))))))
-      (overlay-put fold 'invisible 'native-fold)
-      (add-to-invisibility-spec 'native-fold)
-      (tessera-month-sync)
-      (should (equal (tessera--month-group-key
-                      (car tessera--month-groups))
-                     '(2026 4)))
-      (setq-local tessera--month-thread-date 'root)
-      (tessera-month-sync)
-      (should (equal (tessera--month-group-key
-                      (car tessera--month-groups))
-                     '(2026 3))))))
-
-(ert-deftest tessera-month-fold-state-survives-and-prunes ()
-  (tessera-month-tests--with-buffer
-      (list
-       (list :title "April"
-             :time (tessera-month-tests--time 2026 4 20))
-       (list :title "March"
-             :time (tessera-month-tests--time 2026 3 20)))
-    (goto-char (tessera--month-group-start
-                (cadr tessera--month-groups)))
-    (tessera--month-toggle '(2026 4))
-    (tessera-month-configure nil 'latest)
-    (should (gethash '(2026 4) tessera--month-folds))
-    (tessera-month-configure t 'latest)
-    (should (gethash '(2026 4) tessera--month-folds))
-    (tessera--month-clear-display)
-    (let ((inhibit-read-only t))
-      (delete-region (point-min) (point-max)))
-    (tessera-month-tests--insert
-     (list
-      (list :title "March"
-            :time (tessera-month-tests--time 2026 3 20))))
-    (goto-char (point-min))
-    (tessera-month-sync)
-    (should-not (gethash '(2026 4) tessera--month-folds))
-    (should (equal (mapcar #'tessera--month-group-key
-                           tessera--month-groups)
-                   '((2026 3))))))
-
-(ert-deftest tessera-month-preserves-native-invisibility-category ()
-  (tessera-month-tests--with-buffer
-      (list
-       (list :title "April"
-             :time (tessera-month-tests--time 2026 4 20)))
-    (tessera-month-clear)
-    (setq-local buffer-invisibility-spec
-                '(tessera-month-hidden))
-    (tessera-month-configure t 'latest)
-    (should-not tessera--month-invisibility-installed)
-    (tessera-month-clear)
-    (should
-     (memq 'tessera-month-hidden buffer-invisibility-spec))))
-
-(ert-deftest tessera-month-sync-and-clear-preserve-narrowing ()
-  (tessera-month-tests--with-buffer
-      (list
-       (list :title "April"
-             :time (tessera-month-tests--time 2026 4 20))
-       (list :title "March"
-             :time (tessera-month-tests--time 2026 3 20)))
-    (narrow-to-region (point-min) (line-end-position))
-    (let ((end (point-max)))
-      (tessera-month-sync)
-      (should (= (length tessera--month-groups) 2))
-      (should (= (point-max) end)))
-    (tessera-month-clear)
-    (widen)
-    (should-not
-     (cl-find-if
-      (lambda (overlay)
-        (overlay-get overlay 'tessera-month-overlay))
-      (overlays-in (point-min) (point-max))))))
-
-(ert-deftest tessera-month-fold-and-redraw-preserve-narrowing ()
-  (tessera-month-tests--with-buffer
-      (cl-loop for month from 5 downto 2
-               collect
-               (list :title (number-to-string month)
-                     :time (tessera-month-tests--time
-                            2026 month 20)))
-    (let ((start (tessera--month-group-start
-                  (nth 1 tessera--month-groups)))
-          (end (tessera--month-group-end
-                (nth 2 tessera--month-groups))))
-      (narrow-to-region start end)
-      (goto-char start)
-      (tessera--month-toggle '(2026 4))
-      (should (gethash '(2026 4) tessera--month-folds))
-      (should (= (line-beginning-position)
-                 (tessera--month-group-start
-                  (nth 2 tessera--month-groups))))
-      ;; May and February are expanded but inaccessible.
-      (tessera--month-toggle '(2026 3))
-      (should-not (gethash '(2026 3) tessera--month-folds))
-      (tessera--month-refresh-headings)
-      (goto-char start)
-      (tessera-month-reveal-point)
-      (should-not (gethash '(2026 4) tessera--month-folds))
-      (should (= (point) start))
-      (tessera--month-toggle '(2026 4))
-      (let ((fold
-             (cl-find-if
-              (lambda (overlay)
-                (eq (overlay-get overlay 'tessera-month-overlay)
-                    'fold))
-              tessera--month-overlays)))
-        (tessera--month-open-isearch fold))
-      (should-not (gethash '(2026 4) tessera--month-folds))
-      (should (= (point-min) start))
-      (should (= (point-max) end))
-      (should (= (length tessera--month-groups) 4))
-      ;; A restriction can start partway through its only entry.
-      (narrow-to-region (1+ start) (+ start 2))
-      (goto-char (point-min))
-      (tessera--month-toggle '(2026 4))
-      (should-not (gethash '(2026 4) tessera--month-folds)))))
-
-(ert-deftest tessera-month-goto-falls-back-after-native-miss ()
-  (tessera-month-tests--with-buffer
-      (list
-       (list :title "April"
-             :time (tessera-month-tests--time 2026 4 20))
-       (list :title "March"
-             :time (tessera-month-tests--time 2026 3 20)))
-    (setf (tessera--entry-backend-month-goto
-           (gethash 'tessera-month-tests tessera--entry-backends))
-          (lambda (_context) nil))
-    (cl-letf (((symbol-function 'tessera--month-scan-entries)
-               (lambda () (ert-fail "Fold rescanned entries"))))
-      (tessera--month-toggle '(2026 4)))
-    (should (= (line-beginning-position)
-               (tessera--month-group-start
-                (cadr tessera--month-groups))))
-    (should (= (point) (tessera-entry-point)))))
-
-(ert-deftest tessera-month-configure-rejects-invalid-policy ()
-  (with-temp-buffer
-    (dolist (enabled '(nil t))
-      (should-error (tessera-month-configure enabled nil))
-      (should-not tessera--month-enabled))))
-
-(ert-deftest tessera-month-prunes-folds-without-dated-results ()
-  (dolist (objects '(nil ((:title "Undated"))))
-    (tessera-month-tests--with-buffer objects
-      (puthash '(2026 4) t tessera--month-folds)
-      (tessera-month-sync)
-      (should-not tessera--month-groups)
-      (should (= (hash-table-count tessera--month-folds) 0)))))
-
-(ert-deftest tessera-month-click-rejects-drag-and-unrelated-input ()
-  (let* ((window (selected-window))
-         (position (list window 1 '(0 . 0) 0))
-         (drag (list 'drag-mouse-1 position position))
-         (outside (list 'mouse-1
-                        (list (minibuffer-window) 1 '(0 . 0) 0))))
-    (pcase-dolist
-        (`(,events ,remaining)
-         (list (list (list drag) nil)
-               (list (list (list 'double-drag-mouse-1
-                                 position position)) nil)
-               (list (list (list 'triple-drag-mouse-1
-                                 position position)) nil)
-               (list (list outside) nil)
-               (list (list ?n) (list ?n))
-               (list (list (list 'wheel-up position))
-                     (list (list 'wheel-up position)))))
-      (let ((unread-command-events
-             (mapcar (lambda (event) (cons t event)) events)))
-        (should-not (tessera--month-click-release-p window))
-        (should (equal unread-command-events
-                       (mapcar (lambda (event) (cons t event))
-                               remaining)))))))
-
-(ert-deftest tessera-month-click-accepts-native-click-after-motion ()
-  (let* ((window (selected-window))
-         (position (list window 1 '(0 . 0) 0)))
-    (dolist (release '(mouse-1 double-mouse-1 triple-mouse-1))
-      (let ((unread-command-events
-             (mapcar (lambda (event) (cons t event))
-                     (list (list 'mouse-movement position)
-                           (list release position)))))
-        (should (tessera--month-click-release-p window))
-        (should-not unread-command-events)))))
-
-(ert-deftest tessera-month-repeated-clicks-toggle-once-per-release ()
-  (tessera-month-tests--with-buffer
-      (list (list :title "April"
-                  :time (tessera-month-tests--time 2026 4 20))
-            (list :title "March"
-                  :time (tessera-month-tests--time 2026 3 20)))
-    (save-window-excursion
-      (set-window-buffer (selected-window) (current-buffer))
-      (tessera--month-window-change)
-      (dotimes (index 3)
-        (tessera-tests--click-month '(2026 4) (1+ index))
-        (should (eq (gethash '(2026 4) tessera--month-folds)
-                    (zerop (% index 2))))))))
-
 (ert-deftest tessera-month-headings-fit-each-window-on-resize ()
   (tessera-month-tests--with-buffer
       (list (list :title "April"
@@ -846,6 +482,386 @@
        (text-property-any
         (point-min) (point-max) 'face
         'tessera-month-undated-face)))))
+
+;;;; Fold state and visibility
+
+(ert-deftest tessera-month-fold-shows-counts-and-hides-entries ()
+  (tessera-month-tests--with-buffer
+      (list
+       (list :title "April unread"
+             :time (tessera-month-tests--time 2026 4 20)
+             :unread t)
+       (list :title "April read"
+             :time (tessera-month-tests--time 2026 4 2))
+       (list :title "March"
+             :time (tessera-month-tests--time 2026 3 10)))
+    (goto-char (tessera--month-group-start
+                (cadr tessera--month-groups)))
+    (tessera--month-toggle '(2026 4))
+    (should (gethash '(2026 4) tessera--month-folds))
+    (let* ((group (car tessera--month-groups))
+           (next (cadr tessera--month-groups))
+           (fold
+            (cl-find-if
+             (lambda (overlay)
+               (eq (overlay-get overlay
+                                'tessera-month-overlay)
+                   'fold))
+             (overlays-in
+              (tessera--month-group-start group)
+              (1+ (tessera--month-group-start group)))))
+           (header
+            (tessera-month-tests--header-for-key '(2026 4)))
+           (text (overlay-get header 'before-string)))
+      (should (= (overlay-end fold)
+                 (tessera--month-group-end group)))
+      (should (= (overlay-start header)
+                 (tessera--month-group-start next)))
+      (should (string-match-p "U 1.*R 1" text))
+      (let ((position
+             (cl-loop for position below (length text)
+                      when
+                      (equal (get-text-property
+                              position 'tessera-month-key text)
+                             '(2026 4))
+                      return position)))
+        (should position)
+        (should
+         (equal (get-text-property position 'follow-link text)
+                [mouse-1])))
+      (should-not
+       (tessera-month-entry-visible-p
+        (tessera--month-group-start group))))))
+
+(ert-deftest tessera-month-consecutive-folds-share-safe-anchor ()
+  (tessera-month-tests--with-buffer
+      (list
+       (list :title "May"
+             :time (tessera-month-tests--time 2026 5 20))
+       (list :title "April"
+             :time (tessera-month-tests--time 2026 4 20))
+       (list :title "March"
+             :time (tessera-month-tests--time 2026 3 20)))
+    (goto-char (tessera--month-group-start
+                (car (last tessera--month-groups))))
+    (tessera--month-toggle '(2026 5))
+    (tessera--month-toggle '(2026 4))
+    (let* ((target (tessera--month-group-start
+                    (car (last tessera--month-groups))))
+           (headers
+            (cl-remove-if-not
+             (lambda (overlay)
+               (eq (overlay-get overlay 'tessera-month-overlay)
+                   'header))
+             (overlays-in target (1+ target))))
+           (header (car headers)))
+      (should (= (length headers) 1))
+      (should (= (overlay-get header 'priority) 0))
+      (should
+       (equal
+        (tessera-month-tests--string-month-keys
+         (overlay-get header 'before-string))
+        '((2026 5) (2026 4) (2026 3)))))))
+
+(ert-deftest tessera-month-folded-headings-reuse-visible-anchor ()
+  (tessera-month-tests--with-buffer
+      (cl-loop for year from 1900 below 2000
+               collect (list :title "Entry"
+                             :time (tessera-month-tests--time
+                                    year 1 1)))
+    (dolist (group (butlast tessera--month-groups))
+      (puthash (tessera--month-group-key group)
+               t tessera--month-folds))
+    (let ((anchor (symbol-function 'tessera--month-group-anchor))
+          (calls 0))
+      (cl-letf (((symbol-function 'tessera--month-group-anchor)
+                 (lambda (group)
+                   (cl-incf calls)
+                   (funcall anchor group))))
+        (tessera--month-redisplay))
+      (should (= calls 1)))
+    (let ((header (tessera-month-tests--header-for-key '(1900 1))))
+      (should
+       (equal (tessera-month-tests--string-month-keys
+               (overlay-get header 'before-string))
+              (mapcar #'tessera--month-group-key
+                      tessera--month-groups))))))
+
+(ert-deftest tessera-month-refuses-to-fold-last-expanded-group ()
+  (tessera-month-tests--with-buffer
+      (list
+       (list :title "Only"
+             :time (tessera-month-tests--time 2026 4 20)))
+    (tessera--month-toggle '(2026 4))
+    (should-not (gethash '(2026 4) tessera--month-folds))))
+
+(ert-deftest tessera-month-fold-state-survives-and-prunes ()
+  (tessera-month-tests--with-buffer
+      (list
+       (list :title "April"
+             :time (tessera-month-tests--time 2026 4 20))
+       (list :title "March"
+             :time (tessera-month-tests--time 2026 3 20)))
+    (goto-char (tessera--month-group-start
+                (cadr tessera--month-groups)))
+    (tessera--month-toggle '(2026 4))
+    (tessera-month-configure nil 'latest)
+    (should (gethash '(2026 4) tessera--month-folds))
+    (tessera-month-configure t 'latest)
+    (should (gethash '(2026 4) tessera--month-folds))
+    (tessera--month-clear-display)
+    (let ((inhibit-read-only t))
+      (delete-region (point-min) (point-max)))
+    (tessera-month-tests--insert
+     (list
+      (list :title "March"
+            :time (tessera-month-tests--time 2026 3 20))))
+    (goto-char (point-min))
+    (tessera-month-sync)
+    (should-not (gethash '(2026 4) tessera--month-folds))
+    (should (equal (mapcar #'tessera--month-group-key
+                           tessera--month-groups)
+                   '((2026 3))))))
+
+(ert-deftest tessera-month-preserves-native-invisibility-category ()
+  (tessera-month-tests--with-buffer
+      (list
+       (list :title "April"
+             :time (tessera-month-tests--time 2026 4 20)))
+    (tessera-month-clear)
+    (setq-local buffer-invisibility-spec
+                '(tessera-month-hidden))
+    (tessera-month-configure t 'latest)
+    (should-not tessera--month-invisibility-installed)
+    (tessera-month-clear)
+    (should
+     (memq 'tessera-month-hidden buffer-invisibility-spec))))
+
+;;;; Navigation and mouse interaction
+
+(ert-deftest tessera-month-navigation-enters-nearest-visible-entry ()
+  (with-temp-buffer
+    (insert (make-string 30 ?x))
+    (setq tessera--month-visible-entries
+          (vconcat
+           (cl-loop for start from 5 to 25 by 10
+                    collect (make-tessera--month-entry
+                             :start start :end (+ start 4)))))
+    (pcase-dolist (`(,position ,direction ,count ,expected)
+                   '((1 1 1 5) (1 -1 1 nil)
+                     (7 1 1 15) (7 -1 1 nil)
+                     (11 1 1 15) (11 -1 1 5)
+                     (11 1 2 25) (11 -1 2 nil)
+                     (16 1 1 25) (16 -1 1 5)
+                     (21 1 1 25) (21 -1 1 15)
+                     (29 1 1 nil) (29 -1 1 25)
+                     (31 -1 2 15) (31 -1 4 nil)))
+      (goto-char position)
+      (should (eql (tessera--month-visible-entry-position
+                    direction count)
+                   expected)))
+    (narrow-to-region 11 29)
+    (goto-char (point-min))
+    (should-not (tessera--month-visible-entry-position -1 1))
+    (should (= (tessera--month-visible-entry-position 1 1) 15))
+    (goto-char (point-max))
+    (should (= (tessera--month-visible-entry-position -1 1) 25))
+    (should-not (tessera--month-visible-entry-position -1 3))))
+
+(ert-deftest tessera-month-toggle-restores-highlight-and-point ()
+  (tessera-month-tests--with-buffer
+      (list
+       (list :title "April"
+             :time (tessera-month-tests--time 2026 4 20))
+       (list :title "March"
+             :time (tessera-month-tests--time 2026 3 20)))
+    (let* ((april (car tessera--month-groups))
+           (april-start (tessera--month-group-start april))
+           (april-end
+            (save-excursion
+              (goto-char april-start)
+              (line-end-position))))
+      (goto-char april-start)
+      (goto-char (tessera-entry-point))
+      (tessera-entry-highlight-current)
+      (should
+       (tessera-month-tests--overlay-face-p
+        april-start (line-end-position)
+        'tessera-entry-current-face))
+      (tessera--month-toggle '(2026 4))
+      (tessera-entry-highlight-current)
+      (tessera--month-toggle '(2026 4))
+      (should (= (point) (tessera-entry-point)))
+      (should-not
+       (text-property-not-all
+        april-start april-end
+        'tessera--current-face nil))
+      (should-not
+       (tessera-month-tests--overlay-face-p
+        april-start april-end
+        'tessera-entry-current-face)))))
+
+(ert-deftest tessera-month-mouse-toggle-deactivates-region ()
+  (should
+   (eq (lookup-key tessera--month-header-map [down-mouse-1])
+       #'tessera--month-mouse-toggle))
+  (should-not
+   (lookup-key tessera--month-header-map [drag-mouse-1]))
+  (tessera-month-tests--with-buffer
+      (list
+       (list :title "April"
+             :time (tessera-month-tests--time 2026 4 20))
+       (list :title "March"
+             :time (tessera-month-tests--time 2026 3 20)))
+    (let ((buffer (current-buffer)))
+      (save-window-excursion
+        (let ((window (selected-window)))
+          (set-window-buffer window buffer)
+          (goto-char (point-min))
+          (setq-local transient-mark-mode t)
+          (push-mark (point-max) t t)
+          (should mark-active)
+          (tessera-tests--click-month '(2026 4))
+          (should (gethash '(2026 4) tessera--month-folds))
+          (tessera-tests--click-month '(2026 4))
+          (should-not (gethash '(2026 4) tessera--month-folds))
+          (should-not mark-active)
+          (should deactivate-mark))))))
+
+(ert-deftest tessera-month-goto-falls-back-after-native-miss ()
+  (tessera-month-tests--with-buffer
+      (list
+       (list :title "April"
+             :time (tessera-month-tests--time 2026 4 20))
+       (list :title "March"
+             :time (tessera-month-tests--time 2026 3 20)))
+    (setf (tessera--entry-backend-month-goto
+           (gethash 'tessera-month-tests tessera--entry-backends))
+          (lambda (_context) nil))
+    (cl-letf (((symbol-function 'tessera--month-scan-entries)
+               (lambda () (ert-fail "Fold rescanned entries"))))
+      (tessera--month-toggle '(2026 4)))
+    (should (= (line-beginning-position)
+               (tessera--month-group-start
+                (cadr tessera--month-groups))))
+    (should (= (point) (tessera-entry-point)))))
+
+(ert-deftest tessera-month-click-rejects-drag-and-unrelated-input ()
+  (let* ((window (selected-window))
+         (position (list window 1 '(0 . 0) 0))
+         (drag (list 'drag-mouse-1 position position))
+         (outside (list 'mouse-1
+                        (list (minibuffer-window) 1 '(0 . 0) 0))))
+    (pcase-dolist
+        (`(,events ,remaining)
+         (list (list (list drag) nil)
+               (list (list (list 'double-drag-mouse-1
+                                 position position)) nil)
+               (list (list (list 'triple-drag-mouse-1
+                                 position position)) nil)
+               (list (list outside) nil)
+               (list (list ?n) (list ?n))
+               (list (list (list 'wheel-up position))
+                     (list (list 'wheel-up position)))))
+      (let ((unread-command-events
+             (mapcar (lambda (event) (cons t event)) events)))
+        (should-not (tessera--month-click-release-p window))
+        (should (equal unread-command-events
+                       (mapcar (lambda (event) (cons t event))
+                               remaining)))))))
+
+(ert-deftest tessera-month-click-accepts-native-click-after-motion ()
+  (let* ((window (selected-window))
+         (position (list window 1 '(0 . 0) 0)))
+    (dolist (release '(mouse-1 double-mouse-1 triple-mouse-1))
+      (let ((unread-command-events
+             (mapcar (lambda (event) (cons t event))
+                     (list (list 'mouse-movement position)
+                           (list release position)))))
+        (should (tessera--month-click-release-p window))
+        (should-not unread-command-events)))))
+
+(ert-deftest tessera-month-repeated-clicks-toggle-once-per-release ()
+  (tessera-month-tests--with-buffer
+      (list (list :title "April"
+                  :time (tessera-month-tests--time 2026 4 20))
+            (list :title "March"
+                  :time (tessera-month-tests--time 2026 3 20)))
+    (save-window-excursion
+      (set-window-buffer (selected-window) (current-buffer))
+      (tessera--month-window-change)
+      (dotimes (index 3)
+        (tessera-tests--click-month '(2026 4) (1+ index))
+        (should (eq (gethash '(2026 4) tessera--month-folds)
+                    (zerop (% index 2))))))))
+
+;;;; Buffer restrictions
+
+(ert-deftest tessera-month-sync-and-clear-preserve-narrowing ()
+  (tessera-month-tests--with-buffer
+      (list
+       (list :title "April"
+             :time (tessera-month-tests--time 2026 4 20))
+       (list :title "March"
+             :time (tessera-month-tests--time 2026 3 20)))
+    (narrow-to-region (point-min) (line-end-position))
+    (let ((end (point-max)))
+      (tessera-month-sync)
+      (should (= (length tessera--month-groups) 2))
+      (should (= (point-max) end)))
+    (tessera-month-clear)
+    (widen)
+    (should-not
+     (cl-find-if
+      (lambda (overlay)
+        (overlay-get overlay 'tessera-month-overlay))
+      (overlays-in (point-min) (point-max))))))
+
+(ert-deftest tessera-month-fold-and-redraw-preserve-narrowing ()
+  (tessera-month-tests--with-buffer
+      (cl-loop for month from 5 downto 2
+               collect
+               (list :title (number-to-string month)
+                     :time (tessera-month-tests--time
+                            2026 month 20)))
+    (let ((start (tessera--month-group-start
+                  (nth 1 tessera--month-groups)))
+          (end (tessera--month-group-end
+                (nth 2 tessera--month-groups))))
+      (narrow-to-region start end)
+      (goto-char start)
+      (tessera--month-toggle '(2026 4))
+      (should (gethash '(2026 4) tessera--month-folds))
+      (should (= (line-beginning-position)
+                 (tessera--month-group-start
+                  (nth 2 tessera--month-groups))))
+      ;; May and February are expanded but inaccessible.
+      (tessera--month-toggle '(2026 3))
+      (should-not (gethash '(2026 3) tessera--month-folds))
+      (tessera--month-refresh-headings)
+      (goto-char start)
+      (tessera-month-reveal-point)
+      (should-not (gethash '(2026 4) tessera--month-folds))
+      (should (= (point) start))
+      (tessera--month-toggle '(2026 4))
+      (let ((fold
+             (cl-find-if
+              (lambda (overlay)
+                (eq (overlay-get overlay 'tessera-month-overlay)
+                    'fold))
+              tessera--month-overlays)))
+        (tessera--month-open-isearch fold))
+      (should-not (gethash '(2026 4) tessera--month-folds))
+      (should (= (point-min) start))
+      (should (= (point-max) end))
+      (should (= (length tessera--month-groups) 4))
+      ;; A restriction can start partway through its only entry.
+      (narrow-to-region (1+ start) (+ start 2))
+      (goto-char (point-min))
+      (tessera--month-toggle '(2026 4))
+      (should-not (gethash '(2026 4) tessera--month-folds)))))
+
+;;;; Refresh scope and callbacks
 
 (ert-deftest tessera-month-callbacks-finish-after-condition ()
   (dolist (condition '(error quit))

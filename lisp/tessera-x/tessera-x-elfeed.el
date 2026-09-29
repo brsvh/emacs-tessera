@@ -104,7 +104,7 @@ limit.  This bounds parsing input, not the preceding HTTP transfer."
   :type '(choice (const :tag "Unlimited" nil) natnum)
   :group 'tessera-x-elfeed)
 
-;;;; Context snapshots
+;;;; Request state
 
 (cl-defstruct tessera-x-elfeed--request
   "Bounded HTTP work for a context snapshot."
@@ -113,6 +113,8 @@ limit.  This bounds parsing input, not the preceding HTTP transfer."
 (cl-defstruct tessera-x-elfeed--fetch
   "One HTTP transfer, completed at most once."
   request item buffer timer done)
+
+;;;; Entry metadata and selection
 
 (defun tessera-x-elfeed--item (entry)
   "Snapshot ENTRY and its stored feed content."
@@ -155,6 +157,60 @@ limit.  This bounds parsing input, not the preceding HTTP transfer."
         (push item (gethash key groups))))
     (cl-mapcan (lambda (key) (nreverse (gethash key groups)))
                (nreverse order))))
+
+;;;; Linked content decoding
+
+(defun tessera-x-elfeed--bom-charset ()
+  "Return the coding system identified by the HTTP body's BOM."
+  (save-excursion
+    (goto-char url-http-end-of-headers)
+    (cond
+     ((looking-at "\xEF\xBB\xBF") 'utf-8-with-signature)
+     ((looking-at "\xFE\xFF") 'utf-16be-with-signature)
+     ((looking-at "\xFF\xFE") 'utf-16le-with-signature))))
+
+(defun tessera-x-elfeed--meta-charset (meta)
+  "Return the coding system declared by the HTML META element."
+  (let* ((pragma (dom-attr meta 'http-equiv))
+         (content (dom-attr meta 'content))
+         (charset
+          (or (dom-attr meta 'charset)
+              (and pragma content
+                   (equal (downcase pragma) "content-type")
+                   (mail-content-type-get
+                    (mail-header-parse-content-type content)
+                    'charset)))))
+    (when charset
+      (mm-charset-to-coding-system
+       (intern (downcase (string-trim charset)))))))
+
+(defun tessera-x-elfeed--document-charset (type)
+  "Return the coding system declared in the HTTP body of TYPE.
+Inspect HTML metadata only within the first 1024 body bytes."
+  (when (member type '("text/html" "application/xhtml+xml"))
+    (save-excursion
+      (save-restriction
+        (narrow-to-region url-http-end-of-headers (point-max))
+        (goto-char (point-min))
+        (let ((size (- (point-max) (point-min))))
+          (or (and (equal type "application/xhtml+xml")
+                   (save-excursion
+                     (sgml-xml-auto-coding-function size)))
+              (let* ((bytes
+                      (buffer-substring-no-properties
+                       (point-min)
+                       (min (+ (point-min) 1024) (point-max))))
+                     ;; Preserve ASCII before decoding the body.
+                     (document
+                      (with-temp-buffer
+                        (insert (decode-coding-string
+                                 bytes 'iso-latin-1))
+                        (libxml-parse-html-region
+                         (point-min) (point-max)))))
+                (seq-some #'tessera-x-elfeed--meta-charset
+                          (dom-by-tag document 'meta)))))))))
+
+;;;; Fetch lifecycle and callbacks
 
 (defun tessera-x-elfeed--stop-fetch (fetch)
   "Release FETCH's timer, response buffers and redirected transfers."
@@ -214,56 +270,6 @@ limit.  This bounds parsing input, not the preceding HTTP transfer."
 (defun tessera-x-elfeed--timeout (fetch)
   "Complete timed out FETCH using its stored feed content."
   (tessera-x-elfeed--complete fetch nil "HTTP timeout"))
-
-(defun tessera-x-elfeed--bom-charset ()
-  "Return the coding system identified by the HTTP body's BOM."
-  (save-excursion
-    (goto-char url-http-end-of-headers)
-    (cond
-     ((looking-at "\xEF\xBB\xBF") 'utf-8-with-signature)
-     ((looking-at "\xFE\xFF") 'utf-16be-with-signature)
-     ((looking-at "\xFF\xFE") 'utf-16le-with-signature))))
-
-(defun tessera-x-elfeed--meta-charset (meta)
-  "Return the coding system declared by the HTML META element."
-  (let* ((pragma (dom-attr meta 'http-equiv))
-         (content (dom-attr meta 'content))
-         (charset
-          (or (dom-attr meta 'charset)
-              (and pragma content
-                   (equal (downcase pragma) "content-type")
-                   (mail-content-type-get
-                    (mail-header-parse-content-type content)
-                    'charset)))))
-    (when charset
-      (mm-charset-to-coding-system
-       (intern (downcase (string-trim charset)))))))
-
-(defun tessera-x-elfeed--document-charset (type)
-  "Return the coding system declared in the HTTP body of TYPE.
-Inspect HTML metadata only within the first 1024 body bytes."
-  (when (member type '("text/html" "application/xhtml+xml"))
-    (save-excursion
-      (save-restriction
-        (narrow-to-region url-http-end-of-headers (point-max))
-        (goto-char (point-min))
-        (let ((size (- (point-max) (point-min))))
-          (or (and (equal type "application/xhtml+xml")
-                   (save-excursion
-                     (sgml-xml-auto-coding-function size)))
-              (let* ((bytes
-                      (buffer-substring-no-properties
-                       (point-min)
-                       (min (+ (point-min) 1024) (point-max))))
-                     ;; Preserve ASCII before decoding the body.
-                     (document
-                      (with-temp-buffer
-                        (insert (decode-coding-string
-                                 bytes 'iso-latin-1))
-                        (libxml-parse-html-region
-                         (point-min) (point-max)))))
-                (seq-some #'tessera-x-elfeed--meta-charset
-                          (dom-by-tag document 'meta)))))))))
 
 (defun tessera-x-elfeed--response (status fetch)
   "Handle URL STATUS for FETCH without selecting its source."
@@ -371,6 +377,8 @@ Inspect HTML metadata only within the first 1024 body bytes."
                   (tessera-x-elfeed--request-queue request))
         (tessera-x-context-finish context)))))
 
+;;;; Context construction
+
 (defun tessera-x-elfeed--build-context (entries scope local-only)
   "Build a context from ENTRIES in SCOPE.
 Suppress HTTP retrieval when LOCAL-ONLY is set."
@@ -400,6 +408,8 @@ Suppress HTTP retrieval when LOCAL-ONLY is set."
           (tessera-x-context-cleanup context))
     (tessera-x-elfeed--dispatch request)
     context))
+
+;;;; Context commands
 
 ;;;###autoload
 (defun tessera-x-elfeed-prepare-context ()
