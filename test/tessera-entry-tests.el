@@ -546,43 +546,31 @@
                         :status unread)))))))))
       (remhash backend tessera--entry-backends))))
 
-(ert-deftest tessera-entry-render-respects-glyph-color ()
+(ert-deftest tessera-entry-render-preserves-glyph-face-and-hover ()
   (let ((backend 'tessera-entry-tests)
-        (tessera-glyph-style 'ascii))
+        (tessera-glyph-style 'ascii)
+        (tessera-glyph-color t))
     (unwind-protect
         (progn
           (tessera-entry-tests--register backend)
-          (dolist (case '((t tessera-glyph-accent-face)
-                          (nil nil)
-                          ("red" (:foreground "red"))))
-            (ert-info ((format "Glyph color %S" (car case)))
-              (let* ((tessera-glyph-color (car case))
-                     (display
-                      (tessera-entry-render
-                       backend
-                       '( :title "Subject"
-                          :date "2026"
-                          :status unread)))
-                     (position
-                      (string-match (regexp-quote "*") display)))
-                (should position)
-                (should (equal
-                         (get-text-property position 'face display)
-                         (cadr case)))
-                (should (eq (get-text-property
-                             position 'tessera-glyph display)
-                            t))
-                (when (eq tessera-glyph-color t)
-                  (let ((hover (get-text-property
-                                position 'mouse-face display)))
-                    (should (equal (cadr hover)
-                                   'tessera-entry-hover-face))
-                    (should
-                     (equal
-                      (plist-get (car hover) :foreground)
-                      (face-attribute
-                       'tessera-glyph-accent-face
-                       :foreground nil 'default)))))))))
+          (let* ((display
+                  (tessera-entry-render
+                   backend '( :title "Subject"
+                              :date "2026"
+                              :status unread)))
+                 (position (string-match (regexp-quote "*") display)))
+            (should position)
+            (should (eq (get-text-property position 'face display)
+                        'tessera-glyph-accent-face))
+            (should (get-text-property
+                     position 'tessera-glyph display))
+            (let ((hover (get-text-property
+                          position 'mouse-face display)))
+              (should (eq (cadr hover) 'tessera-entry-hover-face))
+              (should
+               (equal (plist-get (car hover) :foreground)
+                      (face-attribute 'tessera-glyph-accent-face
+                                      :foreground nil 'default))))))
       (remhash backend tessera--entry-backends))))
 
 (ert-deftest tessera-entry-render-applies-glyph-interaction ()

@@ -31,6 +31,9 @@ truncation accounts for the face of the ellipsis, including custom fonts
 and fields containing different font sizes.  Feed update notifications visit
 only registered Elfeed headers and combine changes during batch dispatch.
 
+Mu4e query information follows the current Headers buffer.  Mail update and
+context changes refresh headers without recounting unchanged message lists.
+
 ** Entry layouts follow buffer-local font scaling.
 Gnus Summary, mu4e Headers, and Elfeed Search refresh cached entry widths
 and truncation after font remapping changes, including
@@ -38,6 +41,7 @@ and truncation after font remapping changes, including
 prefix at each font size.  In graphical windows, entry width allocation
 and truncation use measured text widths, including font scaling and mixed
 faces.  Spacing options retain their character-column units.
+Elfeed preserves buffer narrowing when font changes redraw the entries.
 
 ** Interactive month groups in entry views.
 Gnus Summary, mu4e Headers, and Elfeed Search entries are grouped beneath

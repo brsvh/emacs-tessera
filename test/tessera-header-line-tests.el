@@ -358,7 +358,6 @@
 
 (ert-deftest tessera-header-mu4e-count-excludes-footer ()
   (let* ((message '(:docid 17 :flags (unread)))
-         (mu4e--search-last-query "subject:100%")
          (mu4e~headers-docid-pre "\376"))
     (tessera-header-tests--with-buffer
       (insert (propertize "\37617 Message\n" 'msg message
@@ -366,8 +365,73 @@
               (propertize "Repeated properties\nEnd\n" 'msg message))
       (let ((state (tessera-mu4e-headers--header-line-state)))
         (should (= (plist-get state :shown) 1))
-        (should (= (plist-get state :unread) 1))
-        (should (equal (plist-get state :query) "subject:100%"))))))
+        (should (= (plist-get state :unread) 1))))))
+
+(ert-deftest tessera-header-mu4e-query-belongs-to-buffer ()
+  (let ((mu4e--search-last-query "subject:other-buffer"))
+    (dolist (query '("maildir:/Inbox" "subject:100%"))
+      (tessera-header-tests--with-buffer
+        (setq-local list-buffers-directory query)
+        (let* ((state (tessera-mu4e-headers--header-line-state))
+               (text (tessera-mu4e-headers-header-line-info
+                      (tessera-header-tests--context state))))
+          (should (equal (plist-get state :query) query))
+          (should (equal text (concat "Query: " query)))
+          (should (equal (get-text-property 0 'help-echo text)
+                         (concat "Search query:\n" query))))))))
+
+(ert-deftest tessera-header-mu4e-events-keep-unaffected-counts ()
+  (let ((mu4e-update-pre-hook nil)
+        (mu4e-index-updated-hook nil)
+        (mu4e-context-changed-hook nil)
+        (mu4e-message-changed-hook nil)
+        (mu4e-headers-found-hook nil)
+        (tessera--header-line-buffers nil)
+        (tessera--header-line-timer nil)
+        (reads (make-hash-table :test #'eq))
+        first second notified)
+    (tessera-header-tests--with-buffer
+      (setq first (current-buffer))
+      (tessera-header-tests--with-buffer
+        (setq second (current-buffer))
+        (dolist (buffer (list first second))
+          (with-current-buffer buffer
+            (setq major-mode 'mu4e-headers-mode)
+            (setq-local tessera-mu4e-headers--active t)
+            (tessera--header-line-enable
+             'mu4e-headers
+             (lambda ()
+               (cl-incf (gethash (current-buffer) reads 0))
+               (tessera-mu4e-headers--header-line-state))
+             nil)))
+        (tessera-mu4e-headers--header-line-track t)
+        (cl-letf (((symbol-function 'buffer-list)
+                   (lambda (&rest _) (ert-fail "Global scan")))
+                  ((symbol-function 'force-mode-line-update)
+                   (lambda (&rest _)
+                     (cl-pushnew (current-buffer) notified))))
+          (run-hooks 'mu4e-update-pre-hook 'mu4e-index-updated-hook
+                     'mu4e-context-changed-hook)
+          (should (= (length notified) 2))
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (tessera--header-line-prepare)
+              (should (= (gethash buffer reads) 1))))
+          (setq notified nil)
+          (with-current-buffer first
+            (insert (propertize
+                     (concat mu4e~headers-docid-pre "17 Message\n")
+                     'msg '(:docid 17 :flags (unread))))
+            (run-hooks 'mu4e-message-changed-hook
+                       'mu4e-headers-found-hook))
+          (should (equal notified (list first)))
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (tessera--header-line-prepare)
+              (should (= (gethash buffer reads)
+                         (if (eq buffer first) 2 1)))
+              (should (= (plist-get tessera--header-line-state :shown)
+                         (if (eq buffer first) 1 0))))))))))
 
 (ert-deftest tessera-header-mu4e-uses-native-index-timestamp ()
   (let ((mu4e-index-update-status

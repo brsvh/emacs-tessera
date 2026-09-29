@@ -153,6 +153,8 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
   :group 'tessera-elfeed-search)
 
 (declare-function elfeed-add-properties "elfeed-lib")
+(declare-function elfeed--position-save "elfeed-lib")
+(declare-function elfeed--position-restore "elfeed-lib")
 (declare-function elfeed-entry-date "elfeed-db")
 (declare-function elfeed-entry-enclosures "elfeed-db")
 (declare-function elfeed-entry-feed "elfeed-db")
@@ -613,8 +615,35 @@ Return nil when the requested logical Elfeed entry does not exist."
   (when tessera-elfeed-search--active
     (unless (equal face-remapping-alist
                    tessera-elfeed-search--face-remapping)
-      ;; Resize preserves the current query results and selection.
-      (elfeed-search--update-immediately (current-buffer) :resize))
+      (let ((bounds
+             (when (buffer-narrowed-p)
+               (let ((positions (list (point-min) (point-max))))
+                 (save-excursion
+                   (save-restriction
+                     (widen)
+                     (mapcar
+                      (lambda (position)
+                        (goto-char position)
+                        (elfeed--position-save 'elfeed-entry))
+                      positions)))))))
+        ;; Native redraw erases the buffer, so restriction markers
+        ;; would collapse.  Restore boundaries by entry instead.
+        (unwind-protect
+            (progn
+              (widen)
+              (elfeed-search--update-immediately
+               (current-buffer) :resize))
+          (when bounds
+            (save-excursion
+              (let ((positions
+                     (mapcar
+                      (lambda (position)
+                        (elfeed--position-restore
+                         'elfeed-entry position)
+                        (point))
+                      bounds)))
+                (narrow-to-region
+                 (car positions) (cadr positions))))))))
     (tessera-elfeed-search--sync-months)))
 
 (defun tessera-elfeed-search--update-entries (function &rest entries)

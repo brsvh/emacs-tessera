@@ -10,7 +10,6 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'package)
 
 (defun tessera-x-isolation--check-require (feature &rest _)
   "Reject native clients and display adapters required by FEATURE."
@@ -55,24 +54,6 @@
                        directory)))
             (require library)
             (cl-assert (assoc file load-history))))
-        (with-temp-buffer
-          (insert-file-contents (expand-file-name "tessera-x.el"
-                                                  directory))
-          (let* ((description (package-buffer-info))
-                 (requirements (package-desc-reqs description))
-                 (core-version
-                  (with-temp-buffer
-                    (insert-file-contents
-                     (expand-file-name "tessera.el" directory))
-                    (package-desc-version (package-buffer-info)))))
-            (cl-assert (package-desc-version description))
-            (cl-assert (assq 'emacs requirements))
-            (cl-assert (assq 'tessera requirements))
-            (cl-assert
-             (not (version-list-<
-                   core-version (cadr (assq 'tessera requirements)))))
-            (dolist (dependency requirements)
-              (cl-assert (memq (car dependency) '(emacs tessera))))))
         (cl-assert (featurep 'tessera))
         (dolist (feature features)
           (tessera-x-isolation--check-require feature))

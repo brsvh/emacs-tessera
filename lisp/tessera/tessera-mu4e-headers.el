@@ -387,7 +387,6 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (declare-function mu4e~headers-field-for-docid "mu4e-headers")
 (declare-function mu4e-headers-find-if "mu4e-headers")
 (declare-function mu4e-headers-find-if-next "mu4e-headers")
-(declare-function mu4e-headers-view-message "mu4e-view")
 (declare-function mu4e-thread-message-folded-p "mu4e-thread")
 
 ;;;; Message state and face composition
@@ -1639,7 +1638,6 @@ return an absolute Emacs time value or nil, without scheduling work."
      (statistics
       . tessera-mu4e-headers-header-line-statistics-function))))
 
-(defvar mu4e--search-last-query)
 (defvar mu4e-index-update-status)
 (defvar mu4e--server-indexing)
 (defvar mu4e--update-buffer)
@@ -1668,7 +1666,7 @@ return an absolute Emacs time value or nil, without scheduling work."
           (forward-line 1))))
     (list :shown (hash-table-count messages)
           :unread unread
-          :query mu4e--search-last-query
+          :query list-buffers-directory
           :scope (concat "All inserted messages, including folded "
                          "and off-screen messages; "
                          "excludes the footer.")
@@ -1712,24 +1710,36 @@ return an absolute Emacs time value or nil, without scheduling work."
            "not retrieval success.")))
 
 (defun tessera-mu4e-headers--header-line-notify (&rest _ignored)
-  "Invalidate header data after native search or state changes."
-  (tessera--map-mode-buffers
-   'mu4e-headers-mode
-   (lambda ()
-     (when tessera-mu4e-headers--active
-       (tessera--header-line-changed)
-       (force-mode-line-update)))))
+  "Redraw update and context information without recounting messages."
+  (dolist (buffer tessera--header-line-buffers)
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (and (eq tessera--header-line-view 'mu4e-headers)
+                   tessera-mu4e-headers--active
+                   tessera-header-line-enabled)
+          (force-mode-line-update))))))
+
+(defun tessera-mu4e-headers--header-line-changed (&rest _ignored)
+  "Invalidate counts and query data in the affected headers buffer."
+  (when-let* ((buffer (mu4e-get-headers-buffer)))
+    (with-current-buffer buffer
+      (when tessera-mu4e-headers--active
+        (tessera--header-line-changed)
+        (force-mode-line-update)))))
 
 (defun tessera-mu4e-headers--header-line-track (enable)
   "Observe native updates and context changes when ENABLE is non-nil."
-  (dolist (hook '(mu4e-update-pre-hook
-                  mu4e-index-updated-hook
-                  mu4e-message-changed-hook
-                  mu4e-headers-found-hook
-                  mu4e-context-changed-hook))
-    (if enable
-        (add-hook hook #'tessera-mu4e-headers--header-line-notify)
-      (remove-hook hook #'tessera-mu4e-headers--header-line-notify))))
+  (pcase-dolist
+      (`(,function . ,hooks)
+       '((tessera-mu4e-headers--header-line-notify
+          mu4e-update-pre-hook mu4e-index-updated-hook
+          mu4e-context-changed-hook)
+         (tessera-mu4e-headers--header-line-changed
+          mu4e-message-changed-hook mu4e-headers-found-hook)))
+    (dolist (hook hooks)
+      (if enable
+          (add-hook hook function)
+        (remove-hook hook function)))))
 
 (provide 'tessera-mu4e-headers)
 ;;; tessera-mu4e-headers.el ends here

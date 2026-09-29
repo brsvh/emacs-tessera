@@ -23,36 +23,6 @@
 
 (tessera-elfeed-search--register)
 
-(ert-deftest tessera-elfeed-search-refreshes-after-font-remapping ()
-  (with-temp-buffer
-    (setq major-mode 'elfeed-search-mode)
-    (let ((redraws 0)
-          (tessera-header-line-enabled nil))
-      (cl-letf (((symbol-function 'elfeed-search-update)
-                 (lambda (_method)
-                   (when tessera-elfeed-search--active
-                     (tessera-elfeed-search--apply-layout))))
-                ((symbol-function 'elfeed-search--update-immediately)
-                 (lambda (buffer method)
-                   (should (eq buffer (current-buffer)))
-                   (should (eq method :resize))
-                   (cl-incf redraws)
-                   (tessera-elfeed-search--apply-layout))))
-        (unwind-protect
-            (progn
-              (tessera-elfeed-search--enable)
-              (text-scale-set 2)
-              (run-hooks 'post-command-hook)
-              (tessera-elfeed-search--prepare)
-              (should (= redraws 1))
-              (setf (cadr (assq 'default face-remapping-alist)) 1.5)
-              (tessera-elfeed-search--prepare)
-              (run-hooks 'post-command-hook)
-              (should (= redraws 2)))
-          (tessera-elfeed-search--disable))
-        (should-not (memq #'tessera-elfeed-search--prepare
-                          pre-redisplay-functions))))))
-
 (defun tessera-elfeed-search-tests--entry
     (&optional tags enclosures id)
   "Return an Elfeed entry with TAGS, ENCLOSURES, and optional ID."
@@ -85,6 +55,70 @@ Return the entries, also recording them as native search results."
     (insert "\n"))
   (tessera-elfeed-search--apply-layout)
   elfeed-search-entries)
+
+(ert-deftest tessera-elfeed-search-refreshes-after-font-remapping ()
+  (let* ((elfeed-db '(:version 4))
+         (elfeed-db-feeds (make-hash-table :test #'equal))
+         (feed-id "https://example.invalid/feed")
+         (tessera-glyph-style 'ascii)
+         (tessera-elfeed-search-month-grouping nil))
+    (puthash feed-id (elfeed-feed--create :id feed-id :title "Feed")
+             elfeed-db-feeds)
+    (dolist (narrowed '(nil t))
+      (with-temp-buffer
+        (setq major-mode 'elfeed-search-mode)
+        (setq-local tessera-elfeed-search--active t
+                    elfeed-search-filter ""
+                    elfeed-search-print-entry-function
+                    #'tessera-elfeed-search-print-entry
+                    elfeed-search-update-hook
+                    '(tessera-elfeed-search--apply-layout))
+        (let* ((entries
+                (tessera-elfeed-search-tests--insert-entries
+                 '(9 9 8 8)))
+               (selected (nth 1 entries))
+               (marked (nth 2 entries))
+               (redraws 0)
+               (native (symbol-function
+                        'elfeed-search--update-immediately)))
+          (goto-char (point-min))
+          (forward-line 1)
+          (when narrowed
+            (narrow-to-region (point) (line-beginning-position 3)))
+          (goto-char (+ (tessera-entry-point) 3))
+          (set-mark (line-beginning-position 2))
+          (setq mark-active t)
+          (cl-letf (((symbol-function
+                      'elfeed-search--update-immediately)
+                     (lambda (&rest args)
+                       (cl-incf redraws)
+                       (apply native args))))
+            (text-scale-set 2)
+            (tessera-elfeed-search--prepare)
+            (tessera-elfeed-search--prepare)
+            (should (= redraws 1))
+            (setf (cadr (assq 'default face-remapping-alist)) 1.5)
+            (tessera-elfeed-search--prepare)
+            (tessera-elfeed-search--prepare)
+            (should (= redraws 2)))
+          (should (eq (buffer-narrowed-p) narrowed))
+          (should (= (count-lines (point-min) (point-max))
+                     (if narrowed 2 4)))
+          (should (eq (get-text-property (point) 'elfeed-entry)
+                      selected))
+          (should (eq (get-text-property (mark) 'elfeed-entry)
+                      marked))
+          (should mark-active)
+          (should (equal elfeed-search-entries entries))
+          (should (equal elfeed-search-filter ""))
+          (when narrowed
+            (should (eq (get-text-property
+                         (point-min) 'elfeed-entry) selected))
+            (save-restriction
+              (let ((end (point-max)))
+                (widen)
+                (should (eq (get-text-property end 'elfeed-entry)
+                            (nth 3 entries)))))))))))
 
 (ert-deftest tessera-elfeed-search-undated-fields-remain-readable ()
   (dolist (date '(nil invalid 0))
