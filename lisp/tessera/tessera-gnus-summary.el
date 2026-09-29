@@ -667,17 +667,11 @@ parents and adopted roots.  Threading follows `gnus-show-threads'."
             (forward-line 1)))))
     (setq tessera-gnus-summary--threads
           (tessera-thread-build-contexts (nreverse entries))
-          tessera-gnus-summary--thread-width 8)
-    (maphash
-     (lambda (_id node)
-       (when (tessera-thread-context-first node)
-         (setq tessera-gnus-summary--thread-width
-               (max tessera-gnus-summary--thread-width
-                    (length (format
-                             "%d/%d"
-                             (tessera-thread-context-unread node)
-                             (tessera-thread-context-total node)))))))
-     tessera-gnus-summary--threads)))
+          tessera-gnus-summary--thread-width
+          (tessera--thread-leading-width
+           tessera-gnus-summary--threads 8
+           'tessera-gnus-summary-thread-count-face
+           'tessera-gnus-summary-thread-unread-count-face))))
 
 ;;;; Entry context and state
 
@@ -1952,7 +1946,7 @@ single-line text with optional face, help and keymap properties."
   :group 'tessera-gnus-summary)
 
 (defcustom tessera-gnus-summary-header-line-statistics-function
-  #'tessera-gnus-summary-header-line-statistics
+  #'tessera-header-line-statistics
   "Function rendering the statistics header region, or nil to hide it.
 The function receives a `tessera-header-line-context' and returns
 single-line text with optional face, help and keymap properties."
@@ -1978,10 +1972,6 @@ return an absolute Emacs time value or nil, without scheduling work."
      (extra . tessera-gnus-summary-header-line-extra-function)
      (statistics
       . tessera-gnus-summary-header-line-statistics-function))))
-
-(defun tessera-gnus-summary-header-line-statistics (context)
-  "Return this view's cached statistics for CONTEXT."
-  (tessera-header-line-statistics context))
 
 (defface tessera-gnus-summary-header-line-group-face
   '((t :weight bold :slant italic))

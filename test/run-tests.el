@@ -108,9 +108,7 @@
       (let ((name (file-name-base file)))
         (when (if (equal tessera-tests--package "tessera-x")
                   (equal name "tessera-x-tests")
-                (not (member name '("tessera-x-tests"
-                                    "tessera-build-tests"
-                                    "tessera-elfmt-tests"))))
+                (not (equal name "tessera-x-tests")))
           (require (intern name) file))))
     (ert-run-tests-batch-and-exit)))
 ;;; run-tests.el ends here

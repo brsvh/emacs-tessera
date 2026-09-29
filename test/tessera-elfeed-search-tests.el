@@ -18,9 +18,40 @@
 (require 'tessera-elfeed)
 
 (require 'elfeed-search)
+(require 'face-remap)
 (require 'tessera-elfeed-search)
 
 (tessera-elfeed-search--register)
+
+(ert-deftest tessera-elfeed-search-refreshes-after-font-remapping ()
+  (with-temp-buffer
+    (setq major-mode 'elfeed-search-mode)
+    (let ((redraws 0)
+          (tessera-header-line-enabled nil))
+      (cl-letf (((symbol-function 'elfeed-search-update)
+                 (lambda (_method)
+                   (when tessera-elfeed-search--active
+                     (tessera-elfeed-search--apply-layout))))
+                ((symbol-function 'elfeed-search--update-immediately)
+                 (lambda (buffer method)
+                   (should (eq buffer (current-buffer)))
+                   (should (eq method :resize))
+                   (cl-incf redraws)
+                   (tessera-elfeed-search--apply-layout))))
+        (unwind-protect
+            (progn
+              (tessera-elfeed-search--enable)
+              (text-scale-set 2)
+              (run-hooks 'post-command-hook)
+              (tessera-elfeed-search--prepare)
+              (should (= redraws 1))
+              (setf (cadr (assq 'default face-remapping-alist)) 1.5)
+              (tessera-elfeed-search--prepare)
+              (run-hooks 'post-command-hook)
+              (should (= redraws 2)))
+          (tessera-elfeed-search--disable))
+        (should-not (memq #'tessera-elfeed-search--prepare
+                          pre-redisplay-functions))))))
 
 (defun tessera-elfeed-search-tests--entry
     (&optional tags enclosures id)
@@ -170,46 +201,41 @@ Return the entries, also recording them as native search results."
          (elfeed-db-feeds (make-hash-table :test #'equal))
          (feed (elfeed-feed--create :id (elfeed-entry-feed-id entry)))
          (tessera-entry-layout 'two-line)
-         (tessera-glyph-style 'ascii)
-         (allocator
-          (symbol-function 'tessera--allocate-segment-widths)))
+         (tessera-glyph-style 'ascii))
     (puthash (elfeed-entry-feed-id entry) feed elfeed-db-feeds)
     (dolist (title (list "Short Feed" (make-string 60 ?F)
-                         (make-string 120 ?F)
-                         (make-string 60 ?界)))
+                         (make-string 120 ?F) (make-string 60 ?界)))
       (setf (elfeed-feed-title feed) title)
       (dolist (width '(30 60 80 160))
-        (let ((lines 0) title-width feed-width)
-          (cl-letf
-              (((symbol-function 'window-body-width)
-                (lambda (&rest _) width))
-               ((symbol-function 'tessera--allocate-segment-widths)
-                (lambda (left right slots available)
-                  (funcall allocator left right slots available)
-                  (cl-incf lines)
-                  (should (<= (tessera--single-line-width
-                               left right slots)
-                              available))
-                  (when (= lines 1)
-                    (setq title-width
-                          (tessera--rendered-segment-target-width
-                           (car left))
-                          feed-width
-                          (tessera--rendered-segment-target-width
-                           (car right)))))))
-            (let ((text (tessera-entry-render
-                         'elfeed-search entry (selected-window))))
-              (should (= lines 2))
-              (when (< feed-width (string-width title))
-                (should (= title-width 4)))
-              (when (= width 160)
-                (should (string-match-p
-                         (elfeed-entry-title entry) text))
-                (should (string-match-p title text)))
-              (when (and (= width 80) (= (string-width title) 60))
-                (should (string-match-p title text))
-                (should-not (string-match-p
-                             (elfeed-entry-title entry) text))))))))))
+        (cl-letf (((symbol-function 'window-body-width)
+                   (lambda (&rest _) width))
+                  ((symbol-function 'display-graphic-p) #'ignore))
+          (let ((text (tessera-entry-render
+                       'elfeed-search entry (selected-window))))
+            (when (> (string-width title) width)
+              (should (string-match-p "…" text)))
+            (when (= width 160)
+              (should (string-match-p
+                       (elfeed-entry-title entry) text))
+              (should (string-match-p title text)))
+            (when (and (= width 80) (= (string-width title) 60))
+              (should (string-match-p title text))
+              (should-not (string-match-p
+                           (elfeed-entry-title entry) text))))))
+      (when (display-graphic-p)
+        (dolist (scale '(1.0 2.0))
+          (let* ((face-remapping-alist
+                  `((default (:height ,scale))))
+                 (definition
+                  (tessera--find-entry-backend 'elfeed-search))
+                 (context (tessera--make-entry-context
+                           definition entry (selected-window)))
+                 (layout (tessera--find-entry-layout
+                          definition context))
+                 (text (tessera--render-entry-lines
+                        layout definition context)))
+            (should (<= (tessera-tests--pixel-width text)
+                        (window-body-width nil t)))))))))
 
 (ert-deftest tessera-elfeed-search-shrinks-second-line-in-order ()
   (let* ((entry
@@ -325,13 +351,13 @@ Return the entries, also recording them as native search results."
                    elfeed-search-update-hook))
           (should (memq #'tessera-elfeed-search--post-command
                         post-command-hook))
-          (should (memq #'tessera-elfeed-search--sync-months
+          (should (memq #'tessera-elfeed-search--prepare
                         pre-redisplay-functions))
           (tessera-elfeed-search--disable)
           (should-not (memq #'tessera-elfeed-search--post-command
                             post-command-hook))
           (should-not tessera--current-entry)
-          (should-not (memq #'tessera-elfeed-search--sync-months
+          (should-not (memq #'tessera-elfeed-search--prepare
                             pre-redisplay-functions))
           (should (eq (local-variable-p
                        'elfeed-search-print-entry-function) local))

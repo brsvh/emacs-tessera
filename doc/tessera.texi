@@ -1701,9 +1701,10 @@ underline.  The unread variant retains unread emphasis.
 @chapter Refreshing the Display
 @cindex refreshing
   Gnus and mu4e track native changes, theme changes, and shared
-appearance options during their normal update cycles.  Buffer-local
-font scaling also refreshes entry widths and truncation.  After manually
-changing individual faces, use @kbd{M-x tessera-refresh-glyphs} to
+appearance options during their normal update cycles.  All three entry
+views refresh widths and truncation after buffer-local font scaling.
+Thread counts and status slots keep their shared alignment.  After
+manually changing individual faces, use @kbd{M-x tessera-refresh-glyphs} to
 refresh resolved hover colors as well as text faces.
 
   In an active Elfeed Search buffer, force a local display update after
@@ -2466,15 +2467,11 @@ to @code{nil}.  Mu4e defaults to
 context name without a label.
 @end defopt
 
-@findex tessera-elfeed-search-header-line-statistics
-@findex tessera-gnus-summary-header-line-statistics
-@findex tessera-mu4e-headers-header-line-statistics
 @defopt tessera-elfeed-search-header-line-statistics-function
 @defoptx tessera-gnus-summary-header-line-statistics-function
 @defoptx tessera-mu4e-headers-header-line-statistics-function
-The statistics provider for each view.  The corresponding
-@code{tessera-@var{view}-header-line-statistics} function is the
-default.
+The statistics provider for each view.  All three options default to
+@code{tessera-header-line-statistics}.
 It formats the cached population described in @ref{Header Contents}.
 @end defopt
 

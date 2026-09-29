@@ -10,6 +10,67 @@
 (require 'tessera-gnus-summary)
 (require 'tessera-gnus-test-support)
 (require 'tessera-mu4e-headers)
+(require 'tessera-test-support)
+
+(ert-deftest tessera-thread-graphical-counts-align-with-slots ()
+  (skip-unless (display-graphic-p))
+  (with-temp-buffer
+    (save-window-excursion
+      (set-window-buffer (selected-window) (current-buffer))
+      (let* ((threads (tessera-thread-build-contexts
+                       '((1 nil nil t) (2 nil t t))))
+             (context (make-tessera-entry-context
+                       :buffer (current-buffer)
+                       :window (selected-window)))
+             (face '(:height 1.13))
+             (unread-face '(:height 1.31))
+             (definition
+              (tessera--make-entry-backend
+               :segments
+               (list
+                (cons 'label (lambda (_) "Label"))
+                (cons 'count
+                      (lambda (ctx)
+                        (let ((text (tessera-thread-count ctx)))
+                          (put-text-property
+                           0 (length text) 'face
+                           (if (> (tessera-thread-context-unread
+                                   (tessera-entry-context-thread ctx))
+                                  0)
+                               unread-face face) text)
+                          text))))
+               :glyph-slots
+               (list (make-tessera-glyph-slot
+                      :name 'status :width 8 :selector #'ignore)))))
+        (maphash (lambda (_id node)
+                   (setf (tessera-thread-context-total node) 161))
+                 threads)
+        (dolist (scale '(1.0 2.0 3.0))
+          (let* ((face-remapping-alist
+                  `((default (:height ,scale))))
+                 (width (tessera--thread-leading-width
+                         threads 8 face unread-face))
+                 (slots (tessera--render-line
+                         '((status :reserve t)) '(label) nil
+                         definition context nil nil width)))
+            (maphash
+             (lambda (_id node)
+               (setf (tessera-entry-context-thread context) node)
+               (let ((head (tessera--render-line
+                            nil '(label) nil definition context
+                            nil '(count) width)))
+                 (should
+                  (equal (substring-no-properties
+                          (tessera--entry-content head))
+                         (concat " " (tessera-thread-count context)
+                                 "Label")))
+                 (should
+                  (= (tessera-tests--pixel-width
+                      (substring head 0 (string-match "Label" head)))
+                     (tessera-tests--pixel-width
+                      (substring slots 0
+                                 (string-match "Label" slots)))))))
+             threads)))))))
 
 (ert-deftest tessera-gnus-narrowing-keeps-thread-contexts ()
   (let ((gnus-show-threads t))

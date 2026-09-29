@@ -486,8 +486,7 @@ make test
 #+end_src
 
 Select one package with ~make test PACKAGE=tessera~ or
-~make test PACKAGE=tessera-x~.  Core tests do not load Tessera X.  Run
-build and formatter regressions separately with ~make test-tools~.
+~make test PACKAGE=tessera-x~.  Core tests do not load Tessera X.
 
 The target uses ~EMACS~ (default: ~emacs~) with ~-Q --batch~.  If external
 libraries are not already available, provide their directories explicitly:

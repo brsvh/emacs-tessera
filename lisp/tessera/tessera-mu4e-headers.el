@@ -957,17 +957,12 @@ visibility settings.  Pending operations also show their target."
                   sum (tessera-glyph-slot-width
                        (cl-find name slots
                                 :key #'tessera-glyph-slot-name))))))
-    (when mu4e-search-threads
-      (maphash
-       (lambda (_id thread)
-         (when (tessera-thread-context-first thread)
-           (let ((count
-                  (format "%d/%d"
-                          (tessera-thread-context-unread thread)
-                          (tessera-thread-context-total thread))))
-             (setq width (max width (length count))))))
-       tessera-mu4e-headers--threads))
-    width))
+    (if mu4e-search-threads
+        (tessera--thread-leading-width
+         tessera-mu4e-headers--threads width
+         'tessera-mu4e-headers-thread-count-face
+         'tessera-mu4e-headers-thread-unread-count-face)
+      width)))
 
 (defun tessera-mu4e-headers--sync-line
     (native &optional force thread-paths)
@@ -1617,7 +1612,7 @@ single-line text with optional face, help and keymap properties."
   :group 'tessera-mu4e-headers)
 
 (defcustom tessera-mu4e-headers-header-line-statistics-function
-  #'tessera-mu4e-headers-header-line-statistics
+  #'tessera-header-line-statistics
   "Function rendering the statistics header region, or nil to hide it.
 The function receives a `tessera-header-line-context' and returns
 single-line text with optional face, help and keymap properties."
@@ -1643,10 +1638,6 @@ return an absolute Emacs time value or nil, without scheduling work."
      (extra . tessera-mu4e-headers-header-line-extra-function)
      (statistics
       . tessera-mu4e-headers-header-line-statistics-function))))
-
-(defun tessera-mu4e-headers-header-line-statistics (context)
-  "Return this view's cached statistics for CONTEXT."
-  (tessera-header-line-statistics context))
 
 (defvar mu4e--search-last-query)
 (defvar mu4e-index-update-status)
@@ -1731,9 +1722,11 @@ return an absolute Emacs time value or nil, without scheduling work."
 
 (defun tessera-mu4e-headers--header-line-track (enable)
   "Observe native updates and context changes when ENABLE is non-nil."
-  (dolist (hook '(mu4e-update-pre-hook mu4e-index-updated-hook
-                                       mu4e-message-changed-hook mu4e-headers-found-hook
-                                       mu4e-context-changed-hook))
+  (dolist (hook '(mu4e-update-pre-hook
+                  mu4e-index-updated-hook
+                  mu4e-message-changed-hook
+                  mu4e-headers-found-hook
+                  mu4e-context-changed-hook))
     (if enable
         (add-hook hook #'tessera-mu4e-headers--header-line-notify)
       (remove-hook hook #'tessera-mu4e-headers--header-line-notify))))

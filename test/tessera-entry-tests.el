@@ -181,6 +181,35 @@
                     "ABCDE" 0 #'string-width nil method)
                    ""))))
 
+(ert-deftest tessera-entry-reuses-natural-pixel-width ()
+  (with-temp-buffer
+    (let* ((text "abcdefghij")
+           (context (make-tessera-entry-context
+                     :buffer (current-buffer)
+                     :window (selected-window)))
+           (definition (tessera--make-entry-backend
+                        :segments (list (cons 'title
+                                              (lambda (_) text))))))
+      (dolist (width '(4 20))
+        (let ((measurements 0))
+          (cl-letf (((symbol-function 'display-graphic-p)
+                     (lambda (&rest _) t))
+                    ((symbol-function 'frame-char-width)
+                     (lambda (&rest _) 10))
+                    ((symbol-function 'tessera--entry-pixel-width)
+                     (lambda (value _context)
+                       (when (equal value text)
+                         (cl-incf measurements))
+                       (* 10 (string-width value)))))
+            (let* ((segment
+                    (tessera--render-segment
+                     `(title :max-width ,width :truncate tail)
+                     definition context))
+                   (rendered (tessera--render-segment-group
+                              (list segment) context)))
+              (should (<= (string-width rendered) width))
+              (should (= measurements 1)))))))))
+
 (ert-deftest tessera-entry-graphical-layout-fits-remapped-text ()
   (skip-unless (display-graphic-p))
   (let ((backend 'tessera-entry-tests)

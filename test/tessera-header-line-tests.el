@@ -105,6 +105,27 @@
       (should (= calls 2))
       (should (= (plist-get tessera--header-line-state :shown) 7)))))
 
+(ert-deftest tessera-header-reuses-widths-within-one-render ()
+  (let ((tessera-header-tests--action (lambda (_) "Same"))
+        (tessera-header-tests--info (lambda (_) "Same"))
+        (measure (symbol-function 'tessera--header-line-width)))
+    (tessera-header-tests--with-buffer
+      (tessera-header-tests--enable #'ignore)
+      (dolist (scale '(1.0 2.0))
+        (let ((face-remapping-alist `((default (:height ,scale))))
+              seen)
+          (cl-letf (((symbol-function 'tessera--header-line-width)
+                     (lambda (text)
+                       (should-not
+                        (cl-member
+                         text seen
+                         :test #'equal-including-properties))
+                       (push text seen)
+                       (funcall measure text))))
+            (tessera--header-line-render (selected-window)))
+          ;; Identical characters in different region faces differ.
+          (should (= 2 (cl-count "Same" seen :test #'equal))))))))
+
 (ert-deftest tessera-header-graphical-format-preserves-percent ()
   (skip-unless (display-graphic-p))
   (let ((tessera-header-tests--info (lambda (_) "100% complete")))

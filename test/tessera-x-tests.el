@@ -21,7 +21,7 @@
 
 (defvar gnus-registry-db)
 
-(ert-deftest tessera-x-compiles-and-loads-without-native-clients ()
+(ert-deftest tessera-x-loads-without-native-clients ()
   (with-temp-buffer
     (let ((status
            (call-process

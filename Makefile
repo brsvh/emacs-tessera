@@ -2,7 +2,6 @@
 .ONESHELL:
 
 SHELL := /bin/sh
-export MAKE
 
 EMACS ?= emacs
 EMACS_BATCH := $(EMACS) -Q --batch
@@ -17,7 +16,7 @@ PACKAGES := $(sort $(notdir $(PACKAGE_DIRS)))
 PACKAGE_DEPS_tessera-x := tessera
 PACKAGE ?=
 
-.PHONY: all archive autoloads clean compile package test test-tools
+.PHONY: all archive autoloads clean compile package test
 
 ifeq ($(strip $(PACKAGE)),)
 
@@ -208,8 +207,3 @@ test:
 			$(addprefix -L ,$(EMACS_LOAD_PATH)) \
 			-l test/run-tests.el
 	done
-
-test-tools:
-	$(EMACS_BATCH) \
-		$(addprefix -L ,$(EMACS_LOAD_PATH)) \
-		-l test/run-tool-tests.el

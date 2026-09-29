@@ -214,6 +214,26 @@
           (elfmt--normalize-indentation))
       (elfmt--restore-indent-specs saved-properties))))
 
+(defun elfmt--check-line-width ()
+  "Reject lines beyond EditorConfig's limit, except the first line."
+  (let* ((setting (gethash 'max_line_length
+                           editorconfig-properties-hash))
+         (limit (cond ((integerp setting) setting)
+                      ((and (stringp setting)
+                            (string-match-p "\\`[0-9]+\\'" setting))
+                       (string-to-number setting)))))
+    (when (and limit (> limit 0))
+      (save-excursion
+        (goto-char (point-min))
+        (forward-line 1)
+        (while (not (eobp))
+          (end-of-line)
+          (when (> (current-column) limit)
+            (elfmt--signal
+             "line %d exceeds %d columns after formatting"
+             (line-number-at-pos) limit))
+          (forward-line 1))))))
+
 (defun elfmt--format-file (file)
   "Format the Emacs Lisp FILE in place."
   (let ((buffer nil)
@@ -229,6 +249,7 @@
                 (elfmt--check-mode file-name)
                 (elfmt--apply-editorconfig)
                 (elfmt--indent-buffer)
+                (elfmt--check-line-width)
                 (save-buffer)))
           (when (buffer-live-p buffer)
             (kill-buffer buffer)))

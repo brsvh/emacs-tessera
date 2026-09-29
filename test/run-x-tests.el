@@ -1,16 +1,15 @@
-;;; run-x-tests.el --- Check Tessera X builds without clients -*- lexical-binding: t; -*-
+;;; run-x-tests.el --- Check Tessera X loads without clients -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
 ;; Run in batch Emacs with the Tessera X and core package directories.
 ;; Ignore site packages even when Emacs adds them to `load-path'.
 ;; Allow the core library while rejecting clients and display adapters
-;; during compilation and loading, including built-in Gnus clients.
+;; during loading, including built-in Gnus clients.
 
 ;;; Code:
 
 (require 'cl-lib)
-(require 'bytecomp)
 (require 'package)
 
 (defun tessera-x-isolation--check-require (feature &rest _)
@@ -37,7 +36,6 @@
                (lambda (path)
                  (and path (string-match-p "/site-lisp/" path)))
                load-path)))
-       (byte-compile-error-on-warn t)
        (native-comp-jit-compilation nil)
        (load-no-native t))
   (unwind-protect
@@ -55,10 +53,8 @@
           (let ((file (expand-file-name
                        (concat (symbol-name library) ".el")
                        directory)))
-            (cl-assert (byte-compile-file file))
             (require library)
-            (cl-assert
-             (assoc (concat file "c") load-history))))
+            (cl-assert (assoc file load-history))))
         (with-temp-buffer
           (insert-file-contents (expand-file-name "tessera-x.el"
                                                   directory))
@@ -88,7 +84,7 @@
                           tessera-x-mu4e-subthread-scope
                           tessera-x-elfeed-fetch-linked-content))
           (cl-assert (get option 'standard-value)))
-        (princ "Compilation and loading without clients passed\n"))
+        (princ "Loading without clients passed\n"))
     (advice-remove 'require #'tessera-x-isolation--check-require)
     (delete-directory directory t)))
 

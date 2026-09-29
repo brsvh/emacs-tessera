@@ -162,6 +162,7 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 (declare-function elfeed-search--faces "elfeed-search")
 (declare-function elfeed-search-format-date "elfeed-search")
 (declare-function elfeed-search-update "elfeed-search")
+(declare-function elfeed-search--update-immediately "elfeed-search")
 
 (defvar elfeed-search-print-entry-function)
 (defvar elfeed-search-update-hook)
@@ -174,6 +175,9 @@ active views.  After `setq', call `tessera-refresh-glyphs'."
 
 (defvar-local tessera-elfeed-search--months-dirty nil
   "Non-nil after entry rendering invalidates month metadata.")
+
+(defvar-local tessera-elfeed-search--face-remapping nil
+  "Font remapping used for the last complete entry rendering.")
 
 (defvar-local tessera-elfeed-search--saved-settings nil
   "Original values and locality of settings replaced by Tessera.")
@@ -590,7 +594,9 @@ Return nil when the requested logical Elfeed entry does not exist."
           (tessera-entry-apply-layout (point) (line-end-position))
           (forward-line 1))))
     (tessera-elfeed-search--style-separators)
-    (setq tessera-elfeed-search--months-dirty t)
+    (setq tessera-elfeed-search--months-dirty t
+          tessera-elfeed-search--face-remapping
+          (copy-tree face-remapping-alist))
     (tessera-elfeed-search--sync-months)
     (tessera-entry-highlight-current)))
 
@@ -602,6 +608,15 @@ Return nil when the requested logical Elfeed entry does not exist."
      (tessera-elfeed-search--month-enabled-p) 'latest)
     (setq tessera-elfeed-search--months-dirty nil)))
 
+(defun tessera-elfeed-search--prepare (&optional _window)
+  "Redraw changed fonts and synchronize months before display."
+  (when tessera-elfeed-search--active
+    (unless (equal face-remapping-alist
+                   tessera-elfeed-search--face-remapping)
+      ;; Resize preserves the current query results and selection.
+      (elfeed-search--update-immediately (current-buffer) :resize))
+    (tessera-elfeed-search--sync-months)))
+
 (defun tessera-elfeed-search--update-entries (function &rest entries)
   "Call native update FUNCTION for ENTRIES, then synchronize months.
 Batch updates rebuild month metadata once, before native actions
@@ -612,7 +627,7 @@ can navigate using the changed records."
 
 (defun tessera-elfeed-search--post-command ()
   "Reveal a hidden target and update the current entry face."
-  (tessera-elfeed-search--sync-months)
+  (tessera-elfeed-search--prepare)
   (tessera-month-reveal-point)
   (tessera-entry-highlight-current))
 
@@ -653,7 +668,7 @@ navigation registration."
   (remove-hook 'post-command-hook
                #'tessera-elfeed-search--post-command t)
   (remove-hook 'pre-redisplay-functions
-               #'tessera-elfeed-search--sync-months t)
+               #'tessera-elfeed-search--prepare t)
   (remove-hook 'change-major-mode-hook
                #'tessera-elfeed-search--disable t)
   (remove-hook 'kill-buffer-hook
@@ -663,6 +678,7 @@ navigation registration."
   (tessera-entry-clear-layout)
   (tessera-elfeed-search--restore-separators)
   (setq tessera-elfeed-search--saved-settings nil
+        tessera-elfeed-search--face-remapping nil
         tessera-elfeed-search--months-dirty nil
         tessera-elfeed-search--month-separator-hidden nil)
   (when release-navigation
@@ -691,7 +707,7 @@ navigation registration."
             (add-hook 'post-command-hook
                       #'tessera-elfeed-search--post-command nil t)
             (add-hook 'pre-redisplay-functions
-                      #'tessera-elfeed-search--sync-months nil t)
+                      #'tessera-elfeed-search--prepare nil t)
             (add-hook 'change-major-mode-hook
                       #'tessera-elfeed-search--disable nil t)
             (add-hook 'kill-buffer-hook
@@ -786,7 +802,7 @@ single-line text with optional face, help and keymap properties."
   :group 'tessera-elfeed-search)
 
 (defcustom tessera-elfeed-search-header-line-statistics-function
-  #'tessera-elfeed-search-header-line-statistics
+  #'tessera-header-line-statistics
   "Function rendering the statistics header region, or nil to hide it.
 The function receives a `tessera-header-line-context' and returns
 single-line text with optional face, help and keymap properties."
@@ -812,10 +828,6 @@ return an absolute Emacs time value or nil, without scheduling work."
      (extra . tessera-elfeed-search-header-line-extra-function)
      (statistics
       . tessera-elfeed-search-header-line-statistics-function))))
-
-(defun tessera-elfeed-search-header-line-statistics (context)
-  "Return this view's cached statistics for CONTEXT."
-  (tessera-header-line-statistics context))
 
 (declare-function elfeed-update "elfeed")
 (declare-function elfeed-entry-id "elfeed-db")
@@ -929,12 +941,13 @@ parsing, native hooks, or request ordering."
                     (run-hook-with-args-until-success
                      'elfeed-fetch-functions feed
                      (lambda (result)
-                       (let* (success parse-failed
-                                      (elfeed-parse-error-hook
-                                       (cons (lambda (failed-url _error)
-                                               (when (equal failed-url url)
-                                                 (setq parse-failed t)))
-                                             elfeed-parse-error-hook)))
+                       (let* ((success nil)
+                              (parse-failed nil)
+                              (elfeed-parse-error-hook
+                               (cons (lambda (failed-url _error)
+                                       (when (equal failed-url url)
+                                         (setq parse-failed t)))
+                                     elfeed-parse-error-hook)))
                          (unwind-protect
                              (prog1 (funcall callback result)
                                (setq success

@@ -1195,6 +1195,34 @@ from IDs to contexts with counts, branch paths, and boundaries."
                'tessera-glyph-accent-face 'tessera-glyph-muted-face)
      'help-echo "Unread / total, including folded messages")))
 
+(defun tessera--thread-leading-width
+    (threads minimum face unread-face)
+  "Measure THREADS' counts in FACE or UNREAD-FACE, at least MINIMUM.
+Return frame columns, using this buffer's font remapping and window.
+Measure each distinct count once per rebuild."
+  (let ((context (make-tessera-entry-context
+                  :buffer (current-buffer)
+                  :window (get-buffer-window (current-buffer))))
+        (seen (make-hash-table :test #'equal))
+        (width minimum))
+    (maphash
+     (lambda (_id thread)
+       (when (tessera-thread-context-first thread)
+         (let* ((unread (tessera-thread-context-unread thread))
+                (total (tessera-thread-context-total thread))
+                (key (cons unread total)))
+           (unless (gethash key seen)
+             (puthash key t seen)
+             (setq width
+                   (max width
+                        (tessera--entry-text-width
+                         (propertize (format "%d/%d" unread total)
+                                     'face (if (> unread 0)
+                                               unread-face face))
+                         context)))))))
+     threads)
+    width))
+
 (defvar tessera--thread-prefix-paths
   (make-hash-table :test #'eq :weakness 'key)
   "Bounded forward paths cached by shared reverse path identity.
@@ -1327,6 +1355,7 @@ RIGHT-OFFSET is a column count or a one-element pixel count list."
   "Store one rendered segment and its width policy."
   string
   width
+  pixel-width
   target-width
   grow
   min-width
@@ -1374,6 +1403,15 @@ DEFINITION supplies the backend warning selector."
         (tessera--string-pixel-width
          text (tessera-entry-context-buffer context))))))
 
+(defun tessera--entry-text-width (text context)
+  "Return TEXT's width in frame columns for CONTEXT."
+  (if-let* ((pixels (tessera--entry-pixel-width text context)))
+      (ceiling pixels
+               (frame-char-width
+                (window-frame
+                 (tessera-entry-context-window context))))
+    (string-width text)))
+
 (defun tessera--render-segment (reference definition context)
   "Render segment REFERENCE using DEFINITION and CONTEXT."
   (if (eq (car-safe reference) :slots)
@@ -1403,17 +1441,18 @@ DEFINITION supplies the backend warning selector."
         (let* ((properties (and (consp reference) (cdr reference)))
                (pixels (tessera--entry-pixel-width value context))
                (width (if pixels
-                          (ceiling pixels
-                                   (frame-char-width
-                                    (window-frame
-                                     (tessera-entry-context-window
-                                      context))))
+                          (ceiling
+                           pixels (frame-char-width
+                                   (window-frame
+                                    (tessera-entry-context-window
+                                     context))))
                         (string-width value)))
                (maximum (plist-get properties :max-width))
                (truncate (plist-get properties :truncate)))
           (tessera--make-rendered-segment
            :string value
            :width width
+           :pixel-width pixels
            :target-width (if (and maximum truncate)
                              (min width maximum)
                            width)
@@ -1601,7 +1640,10 @@ Graphical CONTEXT supplies pixel measurements for truncation."
             (method (tessera--rendered-segment-truncate segment))
             (text
              (copy-sequence
-              (if (and unit method)
+              (if (and unit method
+                       (< (tessera--rendered-segment-target-width
+                           segment)
+                          (tessera--rendered-segment-width segment)))
                   (tessera--truncate-string-pixels
                    (tessera--rendered-segment-string segment)
                    (* unit
@@ -1609,11 +1651,14 @@ Graphical CONTEXT supplies pixel measurements for truncation."
                        segment))
                    (lambda (text)
                      (tessera--entry-pixel-width text context))
-                   nil method)
-                (tessera--truncate-string
-                 (tessera--rendered-segment-string segment)
-                 (tessera--rendered-segment-target-width segment)
-                 method)))))
+                   nil method
+                   (tessera--rendered-segment-pixel-width segment))
+                (if unit
+                    (tessera--rendered-segment-string segment)
+                  (tessera--truncate-string
+                   (tessera--rendered-segment-string segment)
+                   (tessera--rendered-segment-target-width segment)
+                   method))))))
        (when (and (tessera--rendered-segment-point segment)
                   (not (string-empty-p text)))
          (let ((position
@@ -1626,6 +1671,17 @@ Graphical CONTEXT supplies pixel measurements for truncation."
        (tessera--prepare-hover text)))
    (tessera--visible-segments segments)
    (tessera--space tessera-entry-segment-gap)))
+
+(defun tessera--segment-group-pixel-width (segments text context)
+  "Measure SEGMENTS' TEXT in CONTEXT, reusing natural pixel widths."
+  (let* ((visible (tessera--visible-segments segments))
+         (single (and (null (cdr visible)) (car visible))))
+    (or (and single
+             (or (not (tessera--rendered-segment-truncate single))
+                 (>= (tessera--rendered-segment-target-width single)
+                     (tessera--rendered-segment-width single)))
+             (tessera--rendered-segment-pixel-width single))
+        (tessera--entry-pixel-width text context))))
 
 (defun tessera--prepare-hover (text)
   "Give each mouse-face span in TEXT a private face value.
@@ -2130,8 +2186,21 @@ LEADING-WIDTH supplies the shared minimum width of that area."
                       (funcall leading-width context)
                     (or leading-width 0)))
          (slot-width (max minimum (or (cdr slot-area) 0)))
+         (leading-pixels
+          (and leading
+               (tessera--segment-group-pixel-width
+                leading (car slot-area) context)))
          (padding
-          (tessera--space (- slot-width (or (cdr slot-area) 0))))
+          (if leading-pixels
+              (propertize
+               " " 'display
+               `(space :width
+                       (,(- (* slot-width
+                               (frame-char-width
+                                (window-frame window)))
+                            leading-pixels)))
+               'tessera--layout-space t)
+            (tessera--space (- slot-width (or (cdr slot-area) 0)))))
          (slots (if (eq glyph-align 'left)
                     (concat (car slot-area) padding)
                   (concat padding (car slot-area))))
@@ -2160,10 +2229,8 @@ LEADING-WIDTH supplies the shared minimum width of that area."
                   (with-selected-window window
                     ;; Fallback fonts need not occupy whole columns.
                     (list (+ (* margin (frame-char-width))
-                             (tessera--string-pixel-width
-                              right-string
-                              (tessera-entry-context-buffer
-                               context))))))
+                             (tessera--segment-group-pixel-width
+                              right right-string context)))))
               (+ margin (tessera--segments-width right))))
            (left-string
             (if (window-live-p window)
@@ -2672,16 +2739,17 @@ first following valid month.  Return non-nil when any date exists."
                 (number-to-string read-count))))))
 
 (defun tessera--truncate-string-pixels
-    (string width &optional measure ending method)
+    (string width &optional measure ending method natural-width)
   "Truncate STRING to fit within WIDTH pixels.
 MEASURE measures styled text, defaulting to pixel width.
 ENDING, when non-nil, is a suffix inheriting the final retained
 character's properties.  Keep at least one character in that case.
 Otherwise use `tessera-entry-ellipsis' with STRING's first face.
 METHOD is `head', `middle', or `tail' (the default).
-ENDING is supported only with tail truncation."
+ENDING is supported only with tail truncation.
+NATURAL-WIDTH is STRING's already measured pixel width, if known."
   (setq measure (or measure #'tessera--string-pixel-width))
-  (if (<= (funcall measure string) width)
+  (if (<= (or natural-width (funcall measure string)) width)
       string
     (let ((ellipsis (copy-sequence
                      (or ending tessera-entry-ellipsis)))
@@ -4018,75 +4086,91 @@ CONTEXT's STATE supplies these keys and a descriptive :scope."
       (add-face-text-property 0 (length text) 'header-line t text)
       (tessera--string-pixel-width text))))
 
-(defun tessera--header-line-fit (text width)
+(defun tessera--header-line-fit (text width &optional measure)
   "Fit TEXT into pixel WIDTH, preserving properties on the ellipsis."
   (when (and text (> width 0))
     (let ((fitted
            (tessera--truncate-string-pixels
-            text width #'tessera--header-line-width "…")))
+            text width
+            (or measure #'tessera--header-line-width) "…")))
       (unless (string-empty-p fitted) fitted))))
 
 (defun tessera--header-line-render (window)
   "Compose this buffer's cached header for WINDOW."
-  (let* ((context (make-tessera-header-line-context
-                   :view tessera--header-line-view
-                   :buffer (current-buffer)
-                   :window window
-                   :state tessera--header-line-state
-                   :now (current-time)))
-         (parts
-          (mapcar
-           (lambda (entry)
-             (let ((function (symbol-value (cdr entry))))
-               (when function
-                 (tessera--header-line-region
-                  (car entry) (funcall function context) context))))
-           tessera--header-line-providers))
-         (unit (frame-char-width (window-frame window)))
-         (left (* unit (+ tessera-safe-gap
-                          tessera-header-line-left-padding)))
-         (right (* unit (+ tessera-safe-gap
-                           tessera-header-line-right-padding)))
-         (gap (* unit tessera-flex-gap-min-width))
-         (width (max 0 (- (window-body-width window t) left right)))
-         (field-gap " ")
-         (field-gap-width (tessera--header-line-width field-gap))
-         (action (nth 0 parts))
-         (info (nth 1 parts))
-         (extra-text (nth 2 parts))
-         (stats (tessera--header-line-fit (nth 3 parts) (/ width 2)))
-         (stats-width (tessera--header-line-width (or stats ""))))
-    ;; Keep primary ends legible before spending width on long fields.
-    (setq action
-          (tessera--header-line-fit
-           action (- width gap stats-width)))
-    (let* ((remaining
-            (max 0 (- width gap stats-width
-                      (tessera--header-line-width (or action "")))))
-           (extra-budget (if info (/ remaining 3) remaining)))
-      (setq extra-text
-            (tessera--header-line-fit
-             extra-text
-             (- extra-budget (if stats field-gap-width 0))))
-      (setq info
-            (tessera--header-line-fit
-             info (- remaining
-                     (tessera--header-line-width (or extra-text ""))
-                     (if (and extra-text stats) field-gap-width 0)
-                     (if action field-gap-width 0)))))
-    (let ((lhs (string-join (delq nil (list action info)) field-gap))
-          (rhs (string-join (delq nil (list extra-text stats))
-                            field-gap)))
-      (concat
-       (propertize " " 'display `(space :width (,left)))
-       lhs
-       (propertize
-        " " 'display
-        `(space :align-to
-                (- right
-                   (,(+ right (tessera--header-line-width rhs))))))
-       rhs
-       (propertize " " 'display `(space :width (,right)))))))
+  (let (widths)
+    (cl-labels
+        ((measure (text)
+           (if-let* ((entry
+                      (cl-assoc text widths
+                                :test #'equal-including-properties)))
+               (cdr entry)
+             (let ((width (tessera--header-line-width text)))
+               (push (cons text width) widths)
+               width))))
+      (let* ((context (make-tessera-header-line-context
+                       :view tessera--header-line-view
+                       :buffer (current-buffer)
+                       :window window
+                       :state tessera--header-line-state
+                       :now (current-time)))
+             (parts
+              (mapcar
+               (lambda (entry)
+                 (let ((function (symbol-value (cdr entry))))
+                   (when function
+                     (tessera--header-line-region
+                      (car entry) (funcall function context)
+                      context))))
+               tessera--header-line-providers))
+             (unit (frame-char-width (window-frame window)))
+             (left (* unit (+ tessera-safe-gap
+                              tessera-header-line-left-padding)))
+             (right (* unit (+ tessera-safe-gap
+                               tessera-header-line-right-padding)))
+             (gap (* unit tessera-flex-gap-min-width))
+             (width
+              (max 0 (- (window-body-width window t) left right)))
+             (field-gap " ")
+             (field-gap-width (measure field-gap))
+             (action (nth 0 parts))
+             (info (nth 1 parts))
+             (extra-text (nth 2 parts))
+             (stats (tessera--header-line-fit
+                     (nth 3 parts) (/ width 2) #'measure))
+             (stats-width (measure (or stats ""))))
+        ;; Reserve both ends before allocating the remaining fields.
+        (setq action
+              (tessera--header-line-fit
+               action (- width gap stats-width) #'measure))
+        (let* ((remaining
+                (max 0 (- width gap stats-width
+                          (measure (or action "")))))
+               (extra-budget (if info (/ remaining 3) remaining)))
+          (setq extra-text
+                (tessera--header-line-fit
+                 extra-text
+                 (- extra-budget (if stats field-gap-width 0))
+                 #'measure))
+          (setq info
+                (tessera--header-line-fit
+                 info (- remaining
+                         (measure (or extra-text ""))
+                         (if (and extra-text stats) field-gap-width 0)
+                         (if action field-gap-width 0)) #'measure)))
+        (let ((lhs (string-join (delq nil (list action info))
+                                field-gap))
+              (rhs (string-join (delq nil (list extra-text stats))
+                                field-gap)))
+          (concat
+           (propertize " " 'display `(space :width (,left)))
+           lhs
+           (propertize
+            " " 'display
+            `(space :align-to
+                    (- right
+                       (,(+ right (measure rhs))))))
+           rhs
+           (propertize " " 'display `(space :width (,right)))))))))
 
 (defun tessera--header-line-display ()
   "Return a literal header variable for the window being redisplayed."
