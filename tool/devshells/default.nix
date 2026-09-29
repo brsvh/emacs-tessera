@@ -1,7 +1,7 @@
 {
+  elfmt,
   lib,
   pkgs,
-  projectRoot,
   ...
 }:
 let
@@ -22,12 +22,6 @@ let
   inherit (pkgs.formats)
     toml
     ;
-
-  elfmt = pkgs.callPackage (projectRoot + /tool/elfmt/package.nix) {
-    inherit
-      projectRoot
-      ;
-  };
 
   mbakeConfig = (toml { }).generate "mbake.toml" {
     formatter = {

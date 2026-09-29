@@ -1,6 +1,5 @@
 {
   inputs,
-  projectRoot,
   ...
 }:
 let
@@ -16,6 +15,7 @@ in
   perSystem =
     {
       config,
+      inputs',
       lib,
       pkgs,
       ...
@@ -26,8 +26,9 @@ in
           inherit
             lib
             pkgs
-            projectRoot
             ;
+
+          elfmt = inputs'.elfmt.packages.elfmt;
         };
       };
 

@@ -10,6 +10,20 @@
       url = "git+https://github.com/numtide/devshell.git?ref=main";
     };
 
+    elfmt = {
+      inputs = {
+        flake-parts = {
+          follows = "flake-parts";
+        };
+
+        nixpkgs = {
+          follows = "nixpkgs";
+        };
+      };
+
+      url = "git+https://github.com/brsvh/emacs-elfmt.git?ref=main";
+    };
+
     flake-parts = {
       inputs = {
         nixpkgs-lib = {
