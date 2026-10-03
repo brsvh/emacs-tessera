@@ -59,9 +59,17 @@ Elfeed headers report feed parsing failures as failed updates.  Header
 truncation accounts for the face of the ellipsis, including custom fonts
 and fields containing different font sizes.  Feed update notifications visit
 only registered Elfeed headers and combine changes during batch dispatch.
+Elfeed update status remains active until all queued feeds finish.  Clearing
+the native queue with 'elfeed-unjam' clears the pending header state.  Late
+results from cancelled requests cannot change the status of a later update.
 
 Mu4e query information follows the current Headers buffer.  Mail update and
 context changes refresh headers without recounting unchanged message lists.
+
+** Elfeed Search navigation works with continuous reading.
+Tessera's 'n' and 'p' navigation works with 'elfeed-x-search-follow-mode'
+without extra command configuration.  Marking an entry as read during
+continuous reading preserves its highlight after the row is redrawn.
 
 ** Entry layouts follow buffer-local font scaling.
 Gnus Summary, mu4e Headers, and Elfeed Search refresh cached entry widths

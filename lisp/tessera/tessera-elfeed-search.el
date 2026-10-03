@@ -50,6 +50,7 @@
 (defvar elfeed-search-separator-date-format)
 
 (declare-function elfeed-update "elfeed")
+(declare-function elfeed-queue-count-total "elfeed")
 (declare-function elfeed-entry-id "elfeed-db")
 (declare-function elfeed-entry-feed-id "elfeed-db")
 (defvar elfeed-search-entries)
@@ -658,12 +659,14 @@ return an absolute Emacs time value or nil, without scheduling work."
     (tessera-elfeed-search--sync-months)))
 
 (defun tessera-elfeed-search--update-entries (function &rest entries)
-  "Call native update FUNCTION for ENTRIES, then synchronize months.
+  "Call native update FUNCTION for ENTRIES and restore display state.
 Batch updates rebuild month metadata once, before native actions
-can navigate using the changed records."
+can navigate using the changed records, and restore the highlight."
   (prog1 (apply function entries)
     (tessera--header-line-changed)
-    (tessera-elfeed-search--sync-months)))
+    (tessera-elfeed-search--sync-months)
+    (when tessera-elfeed-search--active
+      (tessera-entry-highlight-current))))
 
 (defun tessera-elfeed-search--post-command ()
   "Reveal a hidden target and update the current entry face."
@@ -747,14 +750,23 @@ can navigate using the changed records."
             (force-mode-line-update)))))))
 
 (defun tessera-elfeed-search--request-finished (token success)
-  "Complete observed request TOKEN, recording SUCCESS."
-  (setq tessera-elfeed-search--requests
-        (delq token tessera-elfeed-search--requests))
-  (unless success (setq tessera-elfeed-search--update-failed t))
-  (when (and (null tessera-elfeed-search--requests)
-             (zerop tessera-elfeed-search--batch-depth))
-    (setq tessera-elfeed-search--last-update (current-time)))
-  (tessera-elfeed-search--update-notify))
+  "Complete observed request TOKEN, recording SUCCESS.
+Ignore callbacks from requests discarded by cancellation or disable."
+  (when (memq token tessera-elfeed-search--requests)
+    (setq tessera-elfeed-search--requests
+          (delq token tessera-elfeed-search--requests))
+    (unless success (setq tessera-elfeed-search--update-failed t))
+    (when (and (null tessera-elfeed-search--requests)
+               (zerop tessera-elfeed-search--batch-depth))
+      (setq tessera-elfeed-search--last-update (current-time)))
+    (tessera-elfeed-search--update-notify)))
+
+(defun tessera-elfeed-search--cancel-update (&rest _ignored)
+  "Discard observed requests after the native queue is reset."
+  (when tessera-elfeed-search--requests
+    (setq tessera-elfeed-search--requests nil
+          tessera-elfeed-search--update-failed t)
+    (tessera-elfeed-search--update-notify)))
 
 (defun tessera-elfeed-search--observe-update (function url &rest args)
   "Observe FUNCTION updating URL with ARGS, including background work.
@@ -762,6 +774,7 @@ Wrap the native fetch completion callback without changing fetching,
 parsing, native hooks, or request ordering."
   (let ((token (list url))
         (fetchers elfeed-fetch-functions)
+        (queued (elfeed-queue-count-total))
         finished dispatched)
     (when (and (null tessera-elfeed-search--requests)
                (zerop tessera-elfeed-search--batch-depth))
@@ -794,7 +807,9 @@ parsing, native hooks, or request ordering."
                              (tessera-elfeed-search--request-finished
                               token success)))))))))))
           (setq dispatched (apply function url args)))
-      (unless (or dispatched finished)
+      ;; Curl can return nil after accepting another queued request.
+      (unless (or dispatched finished
+                  (> (elfeed-queue-count-total) queued))
         (setq finished t)
         (tessera-elfeed-search--request-finished token nil)))))
 
@@ -817,6 +832,13 @@ parsing, native hooks, or request ordering."
 
 (defun tessera-elfeed-search--header-line-track (enable)
   "Observe native update batches when ENABLE is non-nil."
+  (if enable
+      (advice-add 'elfeed-unjam :after
+                  #'tessera-elfeed-search--cancel-update)
+    (advice-remove 'elfeed-unjam
+                   #'tessera-elfeed-search--cancel-update)
+    (setq tessera-elfeed-search--requests nil
+          tessera-elfeed-search--update-failed nil))
   (if enable
       (advice-add 'elfeed--update-feed :around
                   #'tessera-elfeed-search--observe-update)
@@ -875,11 +897,16 @@ Return nil when the requested logical Elfeed entry does not exist."
 (defun tessera-elfeed-search--next (count)
   "Move forward COUNT logical Elfeed entries."
   (interactive "p")
+  ;; Preserve native command identity for post-command consumers.
+  (when (eq this-command 'tessera-elfeed-search--next)
+    (setq this-command 'next-line))
   (tessera-elfeed-search--move count))
 
 (defun tessera-elfeed-search--previous (count)
   "Move backward COUNT logical Elfeed entries."
   (interactive "p")
+  (when (eq this-command 'tessera-elfeed-search--previous)
+    (setq this-command 'previous-line))
   (tessera-elfeed-search--move (- count)))
 
 (defun tessera-elfeed-search--navigation (enable)

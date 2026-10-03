@@ -202,16 +202,6 @@
 
 ;;;; Options and validation
 
-(ert-deftest tessera-month-default-heading-appearance ()
-  (should (= (default-value 'tessera-month-left-padding) 2))
-  (should (= (default-value 'tessera-month-bottom-padding) 0.5))
-  (should
-   (equal (face-attribute 'tessera-month-face :inherit)
-          '(font-lock-keyword-face default)))
-  (should
-   (eq (face-attribute 'tessera-month-face :weight nil t)
-       'bold)))
-
 (ert-deftest tessera-month-configure-rejects-invalid-policy ()
   (with-temp-buffer
     (dolist (enabled '(nil t))

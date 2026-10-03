@@ -14,17 +14,6 @@
 
 ;;;; Options and validation
 
-(ert-deftest tessera-glyph-options-belong-to-their-view ()
-  (dolist (view '(tessera-gnus-summary tessera-mu4e-headers
-                                       tessera-elfeed-search))
-    (let* ((prefix (symbol-name view))
-           (option (intern (concat prefix "-glyphs"))))
-      (should
-       (equal prefix
-              (file-name-base (symbol-file option 'defvar))))
-      (should (get option 'standard-value))
-      (should (assq option (get view 'custom-group))))))
-
 (ert-deftest tessera-glyph-overrides-keep-defaults-immutable ()
   (let* ((defaults (copy-tree tessera-mu4e-headers--glyph-defaults))
          (original (copy-tree defaults))
@@ -398,7 +387,15 @@
                      (when (boundp option)
                        (error "Entry point declared view option: %s"
                               option)))
-                   (mapc #'require ',libraries)))
+                   (dolist (library ',libraries)
+                     (require library)
+                     (let ((option
+                            (intern (concat (symbol-name library)
+                                            "-glyphs"))))
+                       (cl-assert (boundp option))
+                       (cl-assert (get option 'standard-value))
+                       (cl-assert
+                        (assq option (get library 'custom-group)))))))
                (unless (and (null tessera--glyph-change-functions)
                             (= (hash-table-count
                                 tessera--entry-backends) 0))

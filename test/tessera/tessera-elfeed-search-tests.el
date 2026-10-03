@@ -640,6 +640,9 @@ Return the entries, also recording them as native search results."
                     (apply #'elfeed-search-update-entry
                            (seq-take elfeed-search-entries 2)))
                   (should (= syncs 1)))
+                (should tessera--current-entry)
+                (should (= (car tessera--current-entry)
+                           (line-beginning-position)))
                 (should (gethash '(2026 9) tessera--month-folds))
                 (should (= (tessera--month-group-unread
                             (car tessera--month-groups))
@@ -661,6 +664,26 @@ Return the entries, also recording them as native search results."
               (dotimes (_ 3)
                 (should (tessera-entry-layout-applied-p (point)))
                 (forward-line 1)))
+          (tessera-elfeed-search--disable))))))
+
+(ert-deftest tessera-elfeed-navigation-reports-native-commands ()
+  (let ((elfeed-db '(:version 4))
+        (elfeed-db-feeds (make-hash-table :test #'equal)))
+    (with-temp-buffer
+      (setq major-mode 'elfeed-search-mode)
+      (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
+        (unwind-protect
+            (progn
+              (tessera-elfeed-search--enable)
+              (tessera-elfeed-search-tests--insert-entries '(9 8))
+              (goto-char (point-min))
+              (pcase-dolist (`(,key ,native ,line)
+                             '(("n" next-line 2)
+                               ("p" previous-line 1)))
+                (let ((this-command (key-binding (kbd key))))
+                  (call-interactively this-command)
+                  (should (eq this-command native))
+                  (should (= (line-number-at-pos) line)))))
           (tessera-elfeed-search--disable))))))
 
 ;;;; Buffer lifecycle

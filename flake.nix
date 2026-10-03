@@ -36,12 +36,6 @@
         inherit
           inputs
           ;
-
-        specialArgs = {
-          inherit
-            projectRoot
-            ;
-        };
       }
       {
         imports = [

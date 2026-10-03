@@ -49,6 +49,32 @@
    :state state
    :now (seconds-to-time 100000)))
 
+(defmacro tessera-header-tests--with-curl-queue (&rest body)
+  "Run BODY with native curl dispatch and isolated queue state."
+  (declare (indent 0) (debug t))
+  `(let ((elfeed-db '(:version 4))
+         (elfeed-db-feeds (make-hash-table :test #'equal))
+         (elfeed-use-curl t)
+         (elfeed-curl-queue nil)
+         (elfeed-curl-queue-active 0)
+         (elfeed-curl--run-queue-queued t)
+         (elfeed-fetch-functions '(elfeed-fetch-url))
+         (elfeed-update-init-hook nil)
+         (elfeed-update-hook nil)
+         (elfeed-curl-status-code 304)
+         (tessera-elfeed-search--requests nil)
+         (tessera-elfeed-search--last-update nil)
+         (tessera-elfeed-search--update-failed nil)
+         (tessera-elfeed-search--batch-depth 0)
+         (tracked (advice-member-p
+                   #'tessera-elfeed-search--observe-update
+                   'elfeed--update-feed)))
+     (unwind-protect
+         (progn
+           (tessera-elfeed-search--header-line-track t)
+           ,@body)
+       (tessera-elfeed-search--header-line-track tracked))))
+
 ;;;; Fields and statistics
 
 (ert-deftest tessera-header-duration-boundaries ()
@@ -338,6 +364,58 @@
             (should tessera-elfeed-search--update-failed)
             (should (= native-hooks 0)))
         (tessera-elfeed-search--header-line-track tracked)))))
+
+(ert-deftest tessera-header-elfeed-tracks-native-curl-queue ()
+  (tessera-header-tests--with-curl-queue
+    (tessera-elfeed-search--observe-batch
+     (lambda ()
+       (elfeed--update-feed "https://example.invalid/one" t)
+       (elfeed--update-feed "https://example.invalid/two" t)))
+    (should (= (elfeed-queue-count-total) 2))
+    (should (= (length tessera-elfeed-search--requests) 2))
+    (should-not tessera-elfeed-search--update-failed)
+    (funcall (cadr (pop elfeed-curl-queue)) t)
+    (should (= (length tessera-elfeed-search--requests) 1))
+    (should-not tessera-elfeed-search--last-update)
+    (funcall (cadr (pop elfeed-curl-queue)) t)
+    (should-not tessera-elfeed-search--requests)
+    (should-not tessera-elfeed-search--update-failed)
+    (should tessera-elfeed-search--last-update)))
+
+(ert-deftest tessera-header-elfeed-discards-old-callbacks ()
+  (dolist (reset '(unjam disable))
+    (tessera-header-tests--with-curl-queue
+      (elfeed--update-feed "https://example.invalid/old" t)
+      (let ((callback (cadr (car elfeed-curl-queue))))
+        (if (eq reset 'unjam)
+            (progn
+              (elfeed-unjam)
+              (should (zerop (elfeed-queue-count-total)))
+              (should tessera-elfeed-search--update-failed))
+          (tessera-elfeed-search--header-line-track nil)
+          ;; Disabling observation leaves the native request intact.
+          (should (= (elfeed-queue-count-total) 1))
+          (pop elfeed-curl-queue)
+          (tessera-elfeed-search--header-line-track t))
+        (should-not tessera-elfeed-search--requests)
+        (should-not tessera-elfeed-search--last-update)
+        (elfeed--update-feed "https://example.invalid/new" t)
+        (funcall callback t)
+        (should (= (length tessera-elfeed-search--requests) 1))
+        (should-not tessera-elfeed-search--last-update)
+        (should-not tessera-elfeed-search--update-failed)
+        (funcall (cadr (pop elfeed-curl-queue)) t)
+        (let ((last tessera-elfeed-search--last-update))
+          (should last)
+          (funcall callback t)
+          (should (eq last tessera-elfeed-search--last-update)))))))
+
+(ert-deftest tessera-header-elfeed-rejects-undispatched-requests ()
+  (tessera-header-tests--with-curl-queue
+    (let ((elfeed-fetch-functions nil))
+      (elfeed--update-feed "https://example.invalid/unhandled" t))
+    (should-not tessera-elfeed-search--requests)
+    (should tessera-elfeed-search--update-failed)))
 
 (ert-deftest tessera-header-elfeed-notifies-registered-buffers ()
   (let* ((buffers (cl-loop repeat 4 collect

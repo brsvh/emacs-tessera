@@ -61,10 +61,21 @@
                            tessera-x-mu4e-prepare-context
                            tessera-x-elfeed-prepare-context))
           (cl-assert (commandp command)))
-        (dolist (option '(tessera-x-gnus-body-policy
-                          tessera-x-mu4e-subthread-scope
-                          tessera-x-elfeed-fetch-linked-content))
-          (cl-assert (get option 'standard-value)))
+        (dolist (entry '((tessera-x-gnus
+                          body-policy subthread-scope)
+                         (tessera-x-mu4e
+                          subthread-scope today-query-function)
+                         (tessera-x-elfeed
+                          fetch-linked-content
+                          fetch-minimum-characters fetch-timeout
+                          fetch-concurrency fetch-max-bytes)))
+          (dolist (suffix (cdr entry))
+            (let ((option (intern (format "%s-%s"
+                                          (car entry) suffix))))
+              (cl-assert (boundp option))
+              (cl-assert (get option 'standard-value))
+              (cl-assert
+               (assq option (get (car entry) 'custom-group))))))
         (princ "Loading without clients passed\n"))
     (advice-remove 'require #'tessera-x-isolation--check-require)
     (delete-directory directory t)))

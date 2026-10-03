@@ -61,24 +61,6 @@
       (ert-info ((buffer-string))
         (should (equal status 0))))))
 
-(ert-deftest tessera-x-options-belong-to-their-feature ()
-  (dolist (entry '((tessera-x-gnus
-                    body-policy subthread-scope)
-                   (tessera-x-mu4e
-                    subthread-scope today-query-function)
-                   (tessera-x-elfeed
-                    fetch-linked-content fetch-minimum-characters
-                    fetch-timeout fetch-concurrency fetch-max-bytes)))
-    (let ((prefix (symbol-name (car entry))))
-      (dolist (suffix (cdr entry))
-        (let ((option
-               (intern (concat prefix "-" (symbol-name suffix)))))
-          (should (get option 'standard-value))
-          (should
-           (equal prefix
-                  (file-name-base (symbol-file option 'defvar))))
-          (should (assq option (get (car entry) 'custom-group))))))))
-
 ;;;; Native dates
 
 (ert-deftest tessera-x-native-dates-preserve-unknown-and-epoch ()

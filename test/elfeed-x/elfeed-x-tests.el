@@ -147,28 +147,34 @@
             (entry (elfeed-entry--create
                     :id '("feed" . "entry")
                     :title "Elfeed X test"
+                    :date 1755475200.0
+                    :feed-id "feed"
                     :tags '(unread)))
+            (elfeed-db '(:version 4))
+            (elfeed-db-feeds (make-hash-table :test #'equal))
             (elfeed-show-mode-hook nil)
             (elfeed-show-update-hook nil)
             (elfeed-untag-hook nil)
             (elfeed-show-refresh-function #'ignore)
-            (this-command 'next-line)
+            this-command
             article-window)
        (unwind-protect
            (progn
              (delete-other-windows)
              (switch-to-buffer search)
              (setq major-mode 'elfeed-search-mode)
-             (insert (propertize "Entry\n" 'elfeed-entry entry))
+             (use-local-map elfeed-search-mode-map)
+             (setq-local elfeed-search-entries (list entry))
+             (elfeed-search--print-entry entry)
+             (insert "\n")
+             (setq this-command (key-binding (kbd "n")))
              (goto-char (point-min))
              (setq article-window (split-window-below))
              (set-window-buffer article-window article)
              (with-current-buffer article (elfeed-show-mode))
              (cl-letf
                  (((symbol-function 'elfeed-show--buffer-name)
-                   (lambda (_) (buffer-name article)))
-                  ((symbol-function 'elfeed-search-update-entry)
-                   #'ignore))
+                   (lambda (_) (buffer-name article))))
                ,@body))
          (elfeed-x-search-follow-mode -1)
          (kill-buffer search)
@@ -181,7 +187,10 @@
           (elfeed-search-remain-on-entry nil)
           (elfeed-show-entry-switch #'switch-to-buffer))
       (elfeed-x-search-follow-mode 1)
-      (run-hooks 'post-command-hook)
+      (goto-char (point-max))
+      (let ((this-command (key-binding (kbd "p"))))
+        (call-interactively this-command)
+        (run-hooks 'post-command-hook))
       (should (eq (selected-window) window))
       (should (eq (current-buffer) search))
       (should (= (point) position))
