@@ -16,6 +16,8 @@
 (require 'elfeed-x)
 (require 'seq)
 
+(declare-function elfeed--position-save "elfeed-lib")
+(declare-function elfeed--position-restore "elfeed-lib")
 (declare-function elfeed-search-selected "elfeed-search")
 (declare-function elfeed-search-update-entry "elfeed-search")
 (declare-function elfeed-untag "elfeed")
@@ -57,13 +59,17 @@ in cyclic window order."
                          'elfeed-show-entry (window-buffer window)))
         (condition-case err
             (save-selected-window
-              (save-excursion
-                (let ((elfeed-show-entry-switch
-                       (lambda (buffer)
-                         (set-window-buffer window buffer))))
-                  (when (elfeed-untag entry 'unread)
-                    (elfeed-search-update-entry entry))
-                  (elfeed-show-entry entry))))
+              (let ((position (elfeed--position-save 'elfeed-entry)))
+                (unwind-protect
+                    (save-excursion
+                      (let ((elfeed-show-entry-switch
+                             (lambda (buffer)
+                               (set-window-buffer window buffer))))
+                        (when (elfeed-untag entry 'unread)
+                          (elfeed-search-update-entry entry))
+                        (elfeed-show-entry entry)))
+                  (elfeed--position-restore
+                   'elfeed-entry position))))
           (error
            (message "Elfeed X follow: %s"
                     (error-message-string err))))))))

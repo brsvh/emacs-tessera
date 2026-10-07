@@ -221,30 +221,54 @@
         (tessera--entry-backends (make-hash-table :test #'eq)))
     (tessera-entry-tests--register backend)
     (let ((original (gethash backend tessera--entry-backends)))
-      (dolist (reference '((title :grow yes)
-                           (title :min-width -1)
-                           (title :max-width -1)
-                           (title :min-width 2 :max-width 1)
-                           (title :truncate side)
-                           (title :priority high)
-                           (title :optional yes)
-                           (status :reserve yes)
-                           (status :unknown t)))
-        (let ((layout (tessera-entry-tests--layout)))
-          (if (eq (car reference) 'title)
-              (setf (tessera-entry-layout-main-left-segments layout)
-                    (list reference))
-            (setf (tessera-entry-layout-main-glyph-slots layout)
-                  (list reference)))
+      (dolist (options
+               '((:main-left-segments ((title :grow yes)))
+                 (:main-left-segments ((title :min-width -1)))
+                 (:main-left-segments ((title :max-width -1)))
+                 (:main-left-segments
+                  ((title :min-width 2 :max-width 1)))
+                 (:main-left-segments ((title :truncate side)))
+                 (:main-left-segments ((title :priority high)))
+                 (:main-left-segments ((title :optional yes)))
+                 (:main-glyph-slots ((status :reserve yes)))
+                 (:main-glyph-slots ((status :unknown t)))
+                 (:main-glyph-slots ((status :optional sometimes)))
+                 (:glyph-slots-align middle)
+                 (:main-left-segments ((:slots)))
+                 (:main-left-segments ((:slots missing)))
+                 (:main-left-segments ((:slots (status :grow t))))))
+        (ert-info ((format "Layout options: %S" options))
           (should-error
            (tessera-entry-register
             backend :context #'tessera-entry-tests--context
             :segments '((title . tessera-entry-tests--segment)
                         (date . tessera-entry-tests--date))
             :glyph-slots (list (tessera-entry-tests--slot))
-            :layouts `((single-line . ,layout)))))
-        (should (eq original
-                    (gethash backend tessera--entry-backends)))))))
+            :layouts
+            `((single-line
+               . ,(apply #'make-tessera-entry-layout options)))))
+          (should (eq original
+                      (gethash backend tessera--entry-backends))))))))
+
+(ert-deftest tessera-entry-registers-inline-slots-in-all-regions ()
+  (let ((backend (make-symbol "tessera-test-backend"))
+        (tessera--entry-backends (make-hash-table :test #'eq)))
+    (dolist (region '(:main-left-segments
+                      :main-right-segments
+                      :extra-left-segments
+                      :extra-right-segments))
+      (should
+       (eq backend
+           (tessera-entry-register
+            backend :context #'tessera-entry-tests--context
+            :segments nil
+            :glyph-slots (list (tessera-entry-tests--slot))
+            :layouts
+            `((single-line
+               . ,(apply #'make-tessera-entry-layout
+                         (list
+                          region
+                          '((:slots (status :optional t)))))))))))))
 
 (ert-deftest tessera-entry-register-rejects-invalid-glyphs ()
   (let* ((backend (make-symbol "tessera-test-backend"))

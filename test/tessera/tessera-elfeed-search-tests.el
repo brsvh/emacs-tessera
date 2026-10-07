@@ -631,15 +631,8 @@ Return the entries, also recording them as native search results."
               (dolist (tags '(nil (unread long-user-label)))
                 (setf (elfeed-entry-tags
                        (car elfeed-search-entries)) tags)
-                (let ((syncs 0)
-                      (sync (symbol-function 'tessera-month-sync)))
-                  (cl-letf (((symbol-function 'tessera-month-sync)
-                             (lambda ()
-                               (cl-incf syncs)
-                               (funcall sync))))
-                    (apply #'elfeed-search-update-entry
-                           (seq-take elfeed-search-entries 2)))
-                  (should (= syncs 1)))
+                (apply #'elfeed-search-update-entry
+                       (seq-take elfeed-search-entries 2))
                 (should tessera--current-entry)
                 (should (= (car tessera--current-entry)
                            (line-beginning-position)))
@@ -664,6 +657,120 @@ Return the entries, also recording them as native search results."
               (dotimes (_ 3)
                 (should (tessera-entry-layout-applied-p (point)))
                 (forward-line 1)))
+          (tessera-elfeed-search--disable))))))
+
+(ert-deftest tessera-elfeed-read-state-reuses-month-groups ()
+  (dolist (folded '(nil t))
+    (let ((elfeed-db '(:version 4))
+          (elfeed-db-feeds (make-hash-table :test #'equal)))
+      (with-temp-buffer
+        (setq major-mode 'elfeed-search-mode)
+        (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
+          (unwind-protect
+              (progn
+                (tessera-elfeed-search--enable)
+                (tessera-elfeed-search-tests--insert-entries '(9 9 8))
+                (goto-char (point-max))
+                (forward-line -1)
+                (when folded (tessera--month-toggle '(2026 9)))
+                (let ((groups tessera--month-groups)
+                      (redisplay
+                       (symbol-function 'tessera--month-redisplay))
+                      (calls 0))
+                  (dolist (entry (seq-take elfeed-search-entries 2))
+                    (setf (elfeed-entry-tags entry) '(unread)))
+                  (cl-letf
+                      (((symbol-function 'tessera-month-sync)
+                        (lambda () (ert-fail "Rebuilt month data")))
+                       ((symbol-function 'tessera--month-redisplay)
+                        (lambda ()
+                          (cl-incf calls)
+                          (funcall redisplay))))
+                    (apply #'elfeed-search-update-entry
+                           (seq-take elfeed-search-entries 2)))
+                  (should (= calls 1))
+                  (should (eq groups tessera--month-groups))
+                  (should (= (tessera--month-group-unread
+                              (car groups)) 2))
+                  (should (eq folded
+                              (gethash '(2026 9)
+                                       tessera--month-folds)))
+                  (goto-char (point-min))
+                  (should (eq (not folded)
+                              (tessera-month-entry-visible-p
+                               (point))))
+                  (when folded (tessera--month-toggle '(2026 9)))
+                  (goto-char (point-min))
+                  (dotimes (_ 3)
+                    (should (tessera-entry-layout-applied-p (point)))
+                    (forward-line 1))
+                  ;; A changed date needs a fresh grouping, even when
+                  ;; a prior entry in the same batch reused its group.
+                  (setf (elfeed-entry-date
+                         (nth 1 elfeed-search-entries))
+                        (elfeed-entry-date
+                         (nth 2 elfeed-search-entries)))
+                  (let ((sync (symbol-function 'tessera-month-sync))
+                        (syncs 0))
+                    (cl-letf (((symbol-function 'tessera-month-sync)
+                               (lambda ()
+                                 (cl-incf syncs)
+                                 (funcall sync))))
+                      (apply #'elfeed-search-update-entry
+                             (seq-take elfeed-search-entries 2)))
+                    (should (= syncs 1)))
+                  (should
+                   (equal (mapcar #'tessera--month-group-unread
+                                  tessera--month-groups)
+                          '(1 1)))))
+            (tessera-elfeed-search--disable)))))))
+
+(ert-deftest tessera-elfeed-updates-native-rows-under-narrowing ()
+  (let ((elfeed-db '(:version 4))
+        (elfeed-db-feeds (make-hash-table :test #'equal)))
+    (with-temp-buffer
+      (setq major-mode 'elfeed-search-mode)
+      (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
+        (unwind-protect
+            (progn
+              (tessera-elfeed-search--enable)
+              (tessera-elfeed-search-tests--insert-entries '(9 8 7 6))
+              (goto-char (point-min))
+              (forward-line 1)
+              (let* ((start (point))
+                     (entry (nth 1 elfeed-search-entries))
+                     (neighbor (nth 2 elfeed-search-entries))
+                     (print (symbol-function
+                             'elfeed-search--print-entry))
+                     redrawn)
+                (forward-line 2)
+                (narrow-to-region start (point))
+                (goto-char (point-min))
+                (tessera-elfeed-search--position-point)
+                (set-mark (save-excursion
+                            (forward-line 1)
+                            (point)))
+                (setq mark-active t)
+                (setf (elfeed-entry-title entry) "Changed title")
+                (cl-letf (((symbol-function
+                            'elfeed-search--print-entry)
+                           (lambda (item)
+                             (push item redrawn)
+                             (funcall print item))))
+                  (elfeed-search-update-entry entry))
+                (should (equal redrawn (list entry)))
+                (should (looking-at-p "Changed title"))
+                (should (= (point) (tessera-entry-point)))
+                (should (eq (get-text-property (mark) 'elfeed-entry)
+                            neighbor))
+                (should mark-active)
+                (should (eq (get-text-property
+                             (point-min) 'elfeed-entry) entry))
+                (save-restriction
+                  (let ((end (point-max)))
+                    (widen)
+                    (should (eq (get-text-property end 'elfeed-entry)
+                                (nth 3 elfeed-search-entries)))))))
           (tessera-elfeed-search--disable))))))
 
 (ert-deftest tessera-elfeed-navigation-reports-native-commands ()

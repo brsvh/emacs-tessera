@@ -2835,6 +2835,31 @@ first following valid month.  Return non-nil when any date exists."
               (tessera--month-entry-end (car (last entries))))))
     groups))
 
+(defun tessera--month-update-entry (start rendered)
+  "Update cached month data at START from RENDERED when safe.
+Return non-nil only for the same non-threaded entry with unchanged
+bounds and date.  Redisplay the retained groups after insertion."
+  (when-let* ((group (tessera--month-group-at start))
+              (entry
+               (cl-find start (tessera--month-group-entries group)
+                        :key #'tessera--month-entry-start))
+              (old (tessera--month-entry-context entry))
+              (new (get-text-property
+                    0 'tessera-entry-context rendered)))
+    (when (and (= (+ start (length rendered) 1)
+                  (tessera--month-entry-end entry))
+               (eq (tessera-entry-context-object old)
+                   (tessera-entry-context-object new))
+               (not (tessera-entry-context-thread old))
+               (not (tessera-entry-context-thread new))
+               (equal (tessera-entry-context-month-time old)
+                      (tessera-entry-context-month-time new)))
+      (cl-incf (tessera--month-group-unread group)
+               (- (if (tessera-entry-context-month-unread new) 1 0)
+                  (if (tessera-entry-context-month-unread old) 1 0)))
+      (setf (tessera--month-entry-context entry) new)
+      t)))
+
 (defun tessera--month-prune-folds (groups)
   "Retain fold states only for current GROUPS."
   (let ((old (or tessera--month-folds

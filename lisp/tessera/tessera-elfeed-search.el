@@ -32,6 +32,7 @@
 (require 'tessera-elfeed)
 
 (declare-function elfeed-add-properties "elfeed-lib")
+(declare-function elfeed--with-position-f "elfeed-lib")
 (declare-function elfeed--position-save "elfeed-lib")
 (declare-function elfeed--position-restore "elfeed-lib")
 (declare-function elfeed-entry-date "elfeed-db")
@@ -237,7 +238,7 @@ return an absolute Emacs time value or nil, without scheduling work."
   "Non-nil when Tessera renders the current Elfeed search buffer.")
 
 (defvar-local tessera-elfeed-search--months-dirty nil
-  "Non-nil after entry rendering invalidates month metadata.")
+  "Pending month work: nil, `display', or t for a full rebuild.")
 
 (defvar-local tessera-elfeed-search--face-remapping nil
   "Font remapping used for the last complete entry rendering.")
@@ -555,17 +556,30 @@ return an absolute Emacs time value or nil, without scheduling work."
 
 (defun tessera-elfeed-search-print-entry (entry)
   "Insert a Tessera rendering of Elfeed ENTRY."
-  (unless tessera-elfeed-search--months-dirty
-    (tessera--month-clear-display))
-  (setq tessera-elfeed-search--months-dirty t)
-  (let ((start (point)))
-    ;; A single-entry update retains the native terminating newline.
-    (tessera-entry-clear-layout start (min (point-max) (1+ start)))
-    (insert
-     (tessera-entry-render
-      'elfeed-search entry (get-buffer-window (current-buffer))))
-    (when (eq (char-after) ?\n)
-      (tessera-entry-apply-layout start (point)))))
+  (let ((start (point))
+        (single (eq (char-after) ?\n))
+        (groups (unless (eq tessera-elfeed-search--months-dirty t)
+                  tessera--month-groups)))
+    ;; Restore suppressed decorations before replacing any overlays.
+    ;; A failed render must also invalidate cached entry bounds.
+    (unless (eq tessera-elfeed-search--months-dirty t)
+      (tessera--month-clear-display))
+    (setq tessera-elfeed-search--months-dirty t)
+    (let ((rendered
+           (tessera-entry-render
+            'elfeed-search entry
+            (get-buffer-window (current-buffer)))))
+      ;; A single-entry update retains the native terminating newline.
+      (tessera-entry-clear-layout start (min (point-max) (1+ start)))
+      (insert rendered)
+      (when (eq (char-after) ?\n)
+        (tessera-entry-apply-layout start (point)))
+      (when (and groups single
+                 (tessera-elfeed-search--month-enabled-p)
+                 (let ((tessera--month-groups groups))
+                   (tessera--month-update-entry start rendered)))
+        (setq tessera--month-groups groups
+              tessera-elfeed-search--months-dirty 'display)))))
 
 (defun tessera-elfeed-search--refresh ()
   "Refresh the current Elfeed search buffer."
@@ -618,54 +632,65 @@ return an absolute Emacs time value or nil, without scheduling work."
   "Synchronize changed month metadata before display or navigation."
   (when (and tessera-elfeed-search--active
              tessera-elfeed-search--months-dirty)
-    (tessera-month-configure
-     (tessera-elfeed-search--month-enabled-p) 'latest)
+    (if (eq tessera-elfeed-search--months-dirty 'display)
+        (tessera--month-redisplay)
+      (tessera-month-configure
+       (tessera-elfeed-search--month-enabled-p) 'latest))
     (setq tessera-elfeed-search--months-dirty nil)))
+
+(defun tessera-elfeed-search--call-widened (function &rest args)
+  "Call FUNCTION with ARGS over all entries, preserving narrowing.
+Save restriction boundaries by entry and column because native
+redraws delete the text that anchors restriction markers."
+  (let ((bounds
+         (when (buffer-narrowed-p)
+           (let ((positions (list (point-min) (point-max))))
+             (save-excursion
+               (save-restriction
+                 (widen)
+                 (mapcar
+                  (lambda (position)
+                    (goto-char position)
+                    (elfeed--position-save 'elfeed-entry))
+                  positions)))))))
+    (unwind-protect
+        (progn
+          (widen)
+          (apply function args))
+      (when bounds
+        (save-excursion
+          (widen)
+          (let ((positions
+                 (mapcar
+                  (lambda (position)
+                    (elfeed--position-restore 'elfeed-entry position)
+                    (point))
+                  bounds)))
+            (narrow-to-region (car positions) (cadr positions))))))))
 
 (defun tessera-elfeed-search--prepare (&optional _window)
   "Redraw changed fonts and synchronize months before display."
   (when tessera-elfeed-search--active
     (unless (equal face-remapping-alist
                    tessera-elfeed-search--face-remapping)
-      (let ((bounds
-             (when (buffer-narrowed-p)
-               (let ((positions (list (point-min) (point-max))))
-                 (save-excursion
-                   (save-restriction
-                     (widen)
-                     (mapcar
-                      (lambda (position)
-                        (goto-char position)
-                        (elfeed--position-save 'elfeed-entry))
-                      positions)))))))
-        ;; Native redraw erases the buffer, so restriction markers
-        ;; would collapse.  Restore boundaries by entry instead.
-        (unwind-protect
-            (progn
-              (widen)
-              (elfeed-search--update-immediately
-               (current-buffer) :resize))
-          (when bounds
-            (save-excursion
-              (let ((positions
-                     (mapcar
-                      (lambda (position)
-                        (elfeed--position-restore
-                         'elfeed-entry position)
-                        (point))
-                      bounds)))
-                (narrow-to-region
-                 (car positions) (cadr positions))))))))
+      (tessera-elfeed-search--call-widened
+       #'elfeed-search--update-immediately (current-buffer) :resize))
     (tessera-elfeed-search--sync-months)))
 
 (defun tessera-elfeed-search--update-entries (function &rest entries)
   "Call native update FUNCTION for ENTRIES and restore display state.
-Batch updates rebuild month metadata once, before native actions
-can navigate using the changed records, and restore the highlight."
-  (prog1 (apply function entries)
-    (tessera--header-line-changed)
-    (tessera-elfeed-search--sync-months)
-    (when tessera-elfeed-search--active
+Update full-buffer rows even under narrowing.  Preserve point and
+mark by entry, and synchronize month metadata before navigation."
+  (if (not tessera-elfeed-search--active)
+      (apply function entries)
+    (unwind-protect
+        (elfeed--with-position-f
+         'elfeed-entry
+         (lambda ()
+           (apply #'tessera-elfeed-search--call-widened
+                  function entries)))
+      (tessera--header-line-changed)
+      (tessera-elfeed-search--sync-months)
       (tessera-entry-highlight-current))))
 
 (defun tessera-elfeed-search--post-command ()

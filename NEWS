@@ -27,6 +27,7 @@ and its next planned attempt.  They return nil without an active timer.
 'elfeed-x-search-follow-mode' follows 'next-line' and 'previous-line', normally
 bound to 'n' and 'p'.  It retains Search focus and point, marks the displayed
 entry as read, and reuses a non-dedicated article window on the selected frame.
+Point retains its column when marking an unread entry rebuilds the Search row.
 Navigation alone does not open an article window.  Custom commands can be
 added to 'elfeed-x-search-follow-commands'.
 
@@ -120,6 +121,12 @@ retaining earlier paths after successive message updates.
 'tessera-entry-flex-gap-min-width' is now 'tessera-flex-gap-min-width'.
 Entries and month headings share these settings.  Because Tessera is still
 below version 1.0, the old names are not retained as compatibility aliases.
+
+** Elfeed row updates preserve narrowed views and reuse month groups.
+Updating entries redraws their full-buffer rows even when Search is narrowed.
+Point, mark, and narrowing boundaries follow their entries across the redraw.
+When entry identity, date, and row length stay unchanged, updates reuse month
+groups and refresh their counts and display without regrouping all entries.
 
 * Changes in Tessera X 0.1.1
 
