@@ -552,6 +552,9 @@ Return the entries, also recording them as native search results."
            (advice-member-p #'tessera-elfeed-search--update-entries
                             'elfeed-search-update-entry))
           (should
+           (advice-member-p #'tessera-elfeed-search--redraw
+                            'elfeed-search--update-immediately))
+          (should
            (memq 'tessera-elfeed-search--emulation-map-alist
                  emulation-mode-map-alists))
           (kill-buffer second)
@@ -560,6 +563,9 @@ Return the entries, also recording them as native search results."
            (advice-member-p #'tessera-elfeed-search--update-entries
                             'elfeed-search-update-entry))
           (should-not
+           (advice-member-p #'tessera-elfeed-search--redraw
+                            'elfeed-search--update-immediately))
+          (should-not
            (memq 'tessera-elfeed-search--emulation-map-alist
                  emulation-mode-map-alists)))
       (when (buffer-live-p first) (kill-buffer first))
@@ -567,7 +573,7 @@ Return the entries, also recording them as native search results."
 
 ;;;; Content and appearance synchronization
 
-(ert-deftest tessera-elfeed-refreshes-after-appearance-changes ()
+(ert-deftest tessera-elfeed-refreshes-preserve-native-positions ()
   (let* ((elfeed-db '(:version 4))
          (elfeed-db-feeds (make-hash-table :test #'equal))
          (feed-id "https://example.invalid/feed")
@@ -579,60 +585,77 @@ Return the entries, also recording them as native search results."
     (dolist (narrowed '(nil t))
       (with-temp-buffer
         (setq major-mode 'elfeed-search-mode)
-        (setq-local tessera-elfeed-search--active t
-                    elfeed-search-filter ""
-                    elfeed-search-print-entry-function
-                    #'tessera-elfeed-search-print-entry
-                    elfeed-search-update-hook
-                    '(tessera-elfeed-search--apply-layout))
-        (let* ((entries
-                (tessera-elfeed-search-tests--insert-entries
-                 '(9 9 8 8)))
-               (selected (nth 1 entries))
-               (redraws 0)
-               (native (symbol-function
-                        'elfeed-search--update-immediately)))
-          (goto-char (point-min))
-          (forward-line 1)
-          (when narrowed
-            (narrow-to-region (point) (line-beginning-position 3)))
-          (goto-char (+ (tessera-entry-point) 3))
-          (set-mark (+ (line-beginning-position 2) 10))
-          (setq mark-active t)
-          (cl-letf (((symbol-function
-                      'elfeed-search--update-immediately)
-                     (lambda (&rest args)
-                       (cl-incf redraws)
-                       (apply native args))))
-            (tessera-tests--check-redraw-positions
-             'elfeed-entry
-             (lambda ()
-               (text-scale-set 2)
-               (tessera-elfeed-search--prepare)
-               (tessera-elfeed-search--prepare)
-               (should (= redraws 1))
-               (setf (cadr (assq 'default face-remapping-alist)) 1.5)
-               (tessera-elfeed-search--prepare)
-               (tessera-elfeed-search--prepare)
-               (should (= redraws 2))
-               (setq tessera-glyph-color nil)
-               (tessera-elfeed-search--glyphs-changed
-                'tessera-glyph-color)
-               (tessera-elfeed-search--prepare)
-               (should (= redraws 3)))))
-          (should (eq (buffer-narrowed-p) narrowed))
-          (should (= (count-lines (point-min) (point-max))
-                     (if narrowed 2 4)))
-          (should (equal elfeed-search-entries entries))
-          (should (equal elfeed-search-filter ""))
-          (when narrowed
-            (should (eq (get-text-property
-                         (point-min) 'elfeed-entry) selected))
-            (save-restriction
-              (let ((end (point-max)))
-                (widen)
-                (should (eq (get-text-property end 'elfeed-entry)
-                            (nth 3 entries)))))))))))
+        (setq-local elfeed-search-filter "")
+        (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
+          (unwind-protect
+              (progn
+                (tessera-elfeed-search--enable)
+                (let* ((entries
+                        (tessera-elfeed-search-tests--insert-entries
+                         '(9 9 8 8)))
+                       (selected (nth 1 entries))
+                       (source (current-buffer))
+                       (redraws 0)
+                       (native (symbol-function
+                                'elfeed-search--update-immediately)))
+                  (goto-char (point-min))
+                  (forward-line 1)
+                  (when narrowed
+                    (narrow-to-region
+                     (+ (point) 3) (+ (line-beginning-position 3) 7)))
+                  (goto-char (+ (point) 12))
+                  (set-mark (+ (line-beginning-position 2) 10))
+                  (setq mark-active t)
+                  (cl-letf (((symbol-function 'elfeed-search-entries)
+                             (lambda (&rest _) entries))
+                            ((symbol-function
+                              'elfeed-search--update-immediately)
+                             (lambda (&rest args)
+                               (cl-incf redraws)
+                               (apply native args))))
+                    ;; Native resize and asynchronous refresh enter
+                    ;; from other buffers as well as Search itself.
+                    (dolist (method '(:resize :force))
+                      (tessera-tests--check-redraw-positions
+                       'elfeed-entry
+                       (lambda ()
+                         (with-temp-buffer
+                           (elfeed-search--update-immediately
+                            source method)))))
+                    (setq redraws 0)
+                    (tessera-tests--check-redraw-positions
+                     'elfeed-entry
+                     (lambda ()
+                       (text-scale-set 2)
+                       (tessera-elfeed-search--prepare)
+                       (tessera-elfeed-search--prepare)
+                       (should (= redraws 1))
+                       (setf (cadr
+                              (assq 'default face-remapping-alist))
+                             1.5)
+                       (tessera-elfeed-search--prepare)
+                       (tessera-elfeed-search--prepare)
+                       (should (= redraws 2))
+                       (setq tessera-glyph-color nil)
+                       (tessera-elfeed-search--glyphs-changed
+                        'tessera-glyph-color)
+                       (tessera-elfeed-search--prepare)
+                       (should (= redraws 3)))))
+                  (should (eq (buffer-narrowed-p) narrowed))
+                  (should (= (count-lines (point-min) (point-max))
+                             (if narrowed 3 4)))
+                  (should (equal elfeed-search-entries entries))
+                  (should (equal elfeed-search-filter ""))
+                  (when narrowed
+                    (should (eq (get-text-property
+                                 (point-min) 'elfeed-entry) selected))
+                    (save-restriction
+                      (let ((end (point-max)))
+                        (widen)
+                        (should (eq (get-text-property
+                                     end 'elfeed-entry)
+                                    (nth 3 entries))))))))
+            (tessera-elfeed-search--disable)))))))
 
 (ert-deftest tessera-elfeed-batch-update-keeps-position-fallback ()
   (dolist (selected '(49 180 219))

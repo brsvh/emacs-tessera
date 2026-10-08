@@ -71,10 +71,11 @@ context changes refresh headers without recounting unchanged message lists.
 Tessera's 'n' and 'p' navigation works with 'elfeed-x-search-follow-mode'
 without extra command configuration.  Marking an entry as read during
 continuous reading preserves its highlight after the row is redrawn.
-Individual entry updates retain each window's position independently and
-preserve the mark even when it lies outside the narrowed region.  When a batch
-update removes an entry from the results, its saved positions fall back to
-their former row numbers.
+Entry updates, full refreshes, and native window resizing retain each
+window's position independently and preserve the mark even when it lies
+outside the narrowed region.  Narrowing boundaries retain their entries and
+character offsets.  When an update removes an entry from the results, its
+saved positions fall back to their former row numbers.
 
 ** Entry layouts follow buffer-local font scaling.
 Gnus Summary, mu4e Headers, and Elfeed Search refresh cached entry widths

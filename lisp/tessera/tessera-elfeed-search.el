@@ -643,69 +643,50 @@ return an absolute Emacs time value or nil, without scheduling work."
        (tessera-elfeed-search--month-enabled-p) 'latest))
     (setq tessera-elfeed-search--months-dirty nil)))
 
-(defun tessera-elfeed-search--call-widened (function &rest args)
-  "Call FUNCTION with ARGS over all entries, preserving narrowing.
-Save restriction boundaries by entry and column because native
-redraws delete the text that anchors restriction markers."
-  (let ((bounds
-         (when (buffer-narrowed-p)
-           (let ((positions (list (point-min) (point-max))))
-             (save-excursion
-               (save-restriction
-                 (widen)
-                 (mapcar
-                  (lambda (position)
-                    (goto-char position)
-                    (elfeed--position-save 'elfeed-entry))
-                  positions)))))))
+(defun tessera-elfeed-search--call-preserving-positions
+    (function &rest args)
+  "Call FUNCTION with ARGS over all entries, preserving positions."
+  (let ((entries elfeed-search-entries)
+        (positions (tessera--entry-save-positions 'elfeed-entry)))
     (unwind-protect
         (progn
           (widen)
           (apply function args))
-      (when bounds
-        (save-excursion
-          (widen)
-          (let ((positions
-                 (mapcar
-                  (lambda (position)
-                    (elfeed--position-restore 'elfeed-entry position)
-                    (point))
-                  bounds)))
-            (narrow-to-region (car positions) (cadr positions))))))))
+      ;; Native full redraws synchronize every window both now
+      ;; and before redisplay.  Keep their positions independent.
+      (when elfeed--position-restore-wpoint
+        (remove-hook 'pre-redisplay-functions
+                     elfeed--position-restore-wpoint t)
+        (setq elfeed--position-restore-wpoint nil))
+      (tessera--entry-restore-positions
+       positions
+       (lambda (entry)
+         ;; Look up the old row only if its entry disappeared.
+         (when-let* ((index
+                      (cl-position entry entries :test #'eq)))
+           (save-excursion
+             (goto-char (point-min))
+             (forward-line index)
+             (point))))))))
 
-(defun tessera-elfeed-search--call-preserving-positions
-    (function &rest args)
-  "Call FUNCTION with ARGS over all entries, preserving positions."
-  (tessera-elfeed-search--call-widened
-   (lambda ()
-     (let ((entries elfeed-search-entries)
-           (positions (tessera--entry-save-positions 'elfeed-entry)))
-       (unwind-protect
-           (apply function args)
-         ;; Native full redraws synchronize every window both now
-         ;; and before redisplay.  Keep their positions independent.
-         (when elfeed--position-restore-wpoint
-           (remove-hook 'pre-redisplay-functions
-                        elfeed--position-restore-wpoint t)
-           (setq elfeed--position-restore-wpoint nil))
-         (tessera--entry-restore-positions
-          positions
-          (lambda (entry)
-            ;; Look up the old row only if its entry disappeared.
-            (when-let* ((index
-                         (cl-position entry entries :test #'eq)))
-              (save-excursion
-                (goto-char (point-min))
-                (forward-line index)
-                (point))))))))))
+(defun tessera-elfeed-search--redraw (function buffer &rest args)
+  "Call native redraw FUNCTION for BUFFER with ARGS.
+Preserve positions in active adapters, including deferred updates
+and native window resizing initiated from another buffer."
+  (if (not (and (buffer-live-p buffer)
+                (buffer-local-value
+                 'tessera-elfeed-search--active buffer)))
+      (apply function buffer args)
+    (with-current-buffer buffer
+      (apply #'tessera-elfeed-search--call-preserving-positions
+             function buffer args))))
 
 (defun tessera-elfeed-search--prepare (&optional _window)
   "Redraw changed fonts and synchronize months before display."
   (when tessera-elfeed-search--active
     (unless (equal face-remapping-alist
                    tessera-elfeed-search--face-remapping)
-      (tessera-elfeed-search--call-preserving-positions
-       #'elfeed-search--update-immediately (current-buffer) :resize))
+      (elfeed-search--update-immediately (current-buffer) :resize))
     (tessera-elfeed-search--sync-months)))
 
 (defun tessera-elfeed-search--update-entries (function &rest entries)
@@ -971,6 +952,11 @@ Return nil when the requested logical Elfeed entry does not exist."
     (advice-remove 'elfeed-search-update-entry
                    #'tessera-elfeed-search--update-entries))
   (if enable
+      (advice-add 'elfeed-search--update-immediately :around
+                  #'tessera-elfeed-search--redraw)
+    (advice-remove 'elfeed-search--update-immediately
+                   #'tessera-elfeed-search--redraw))
+  (if enable
       (add-to-list 'emulation-mode-map-alists
                    'tessera-elfeed-search--emulation-map-alist)
     (setq emulation-mode-map-alists
@@ -1020,8 +1006,7 @@ Nil requests a full refresh, including glyphs."
            (setq-local tessera--month-enabled
                        (tessera-elfeed-search--month-enabled-p))
            (tessera-elfeed-search--update-date-separator)
-           (tessera-elfeed-search--call-preserving-positions
-            #'elfeed-search--update-immediately
+           (elfeed-search--update-immediately
             (current-buffer) :resize)))))))
 
 ;;;; Buffer lifecycle

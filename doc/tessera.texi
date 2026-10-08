@@ -1707,6 +1707,11 @@ Thread counts and status slots keep their shared alignment.  After
 manually changing individual faces, use @kbd{M-x tessera-refresh-glyphs} to
 refresh resolved hover colors as well as text faces.
 
+  Elfeed Search preserves point, mark, narrowing boundaries, and each
+window's position across entry updates and full redraws, including native
+window resizing.  Positions follow their entries; when an entry no longer
+appears in the results, its positions fall back to the former row number.
+
   In an active Elfeed Search buffer, force a local display update after
 changing a shared layout option by evaluating this form with @kbd{M-:}:
 
