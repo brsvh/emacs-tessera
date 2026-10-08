@@ -32,7 +32,6 @@
 (require 'tessera-elfeed)
 
 (declare-function elfeed-add-properties "elfeed-lib")
-(declare-function elfeed--with-position-f "elfeed-lib")
 (declare-function elfeed--position-save "elfeed-lib")
 (declare-function elfeed--position-restore "elfeed-lib")
 (declare-function elfeed-entry-date "elfeed-db")
@@ -679,16 +678,50 @@ redraws delete the text that anchors restriction markers."
 
 (defun tessera-elfeed-search--update-entries (function &rest entries)
   "Call native update FUNCTION for ENTRIES and restore display state.
-Update full-buffer rows even under narrowing.  Preserve point and
-mark by entry, and synchronize month metadata before navigation."
+Update full-buffer rows even under narrowing.  Preserve point, mark
+and each window point by entry.  Synchronize month metadata before
+navigation."
   (if (not tessera-elfeed-search--active)
       (apply function entries)
     (unwind-protect
-        (elfeed--with-position-f
-         'elfeed-entry
+        (tessera-elfeed-search--call-widened
          (lambda ()
-           (apply #'tessera-elfeed-search--call-widened
-                  function entries)))
+           (let ((position (elfeed--position-save 'elfeed-entry))
+                 (mark-position
+                  (when (mark t)
+                    (save-excursion
+                      (goto-char (mark t))
+                      (elfeed--position-save 'elfeed-entry))))
+                 (mark-active mark-active)
+                 (deactivate-mark deactivate-mark)
+                 (windows
+                  (mapcar
+                   (lambda (window)
+                     (cons window
+                           (save-excursion
+                             (goto-char (window-point window))
+                             (elfeed--position-save 'elfeed-entry))))
+                   (delq (selected-window)
+                         (get-buffer-window-list nil nil t)))))
+             (unwind-protect
+                 (apply function entries)
+               (set-marker
+                (mark-marker)
+                (when mark-position
+                  (save-excursion
+                    (elfeed--position-restore
+                     'elfeed-entry mark-position)
+                    (point))))
+               (dolist (state windows)
+                 (when (and (window-live-p (car state))
+                            (eq (window-buffer (car state))
+                                (current-buffer)))
+                   (save-excursion
+                     (elfeed--position-restore
+                      'elfeed-entry (cdr state))
+                     (set-window-point (car state) (point)))))
+               (elfeed--position-restore
+                'elfeed-entry position)))))
       (tessera--header-line-changed)
       (tessera-elfeed-search--sync-months)
       (tessera-entry-highlight-current))))

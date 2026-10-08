@@ -202,7 +202,7 @@
         (should (eq elfeed-show-entry-switch #'switch-to-buffer))))))
 
 (ert-deftest elfeed-x-follow-retains-tessera-title-anchor ()
-  (skip-unless (require 'tessera-elfeed-search nil t))
+  (require 'tessera-elfeed-search)
   (elfeed-x-tests--with-reading
     (cl-letf (((symbol-function 'elfeed-search-update) #'ignore))
       (unwind-protect

@@ -37,8 +37,10 @@
    :tags tags
    :feed-id "https://example.invalid/feed"))
 
-(defun tessera-elfeed-search-tests--insert-entries (months)
+(defun tessera-elfeed-search-tests--insert-entries
+    (months &optional tags)
   "Insert native entries for MONTHS in an enabled search adapter.
+Give each entry TAGS.
 Return the entries, also recording them as native search results."
   (setq-local
    elfeed-search-entries
@@ -47,7 +49,7 @@ Return the entries, also recording them as native search results."
             collect
             (let ((entry
                    (tessera-elfeed-search-tests--entry
-                    nil nil (cons "feed" index))))
+                    tags nil (cons "feed" index))))
               (setf (elfeed-entry-date entry)
                     (float-time
                      (encode-time 0 0 12 1 month 2026)))
@@ -498,6 +500,21 @@ Return the entries, also recording them as native search results."
                            (tessera-entry-point)))))
             (should (= (window-point second-window) third-position))
             (with-current-buffer buffer
+              (setf (elfeed-entry-title (car elfeed-search-entries))
+                    "A changed title shifts later entries")
+              (elfeed-search-update-entry
+               (car elfeed-search-entries)
+               (nth 2 elfeed-search-entries))
+              (run-hook-with-args
+               'pre-redisplay-functions first-window)
+              (should (= (point) (tessera-entry-point)))
+              (should (eq (get-text-property (point) 'elfeed-entry)
+                          (nth 1 elfeed-search-entries)))
+              (save-excursion
+                (goto-char (point-min))
+                (forward-line 2)
+                (should (= (window-point second-window)
+                           (tessera-entry-point))))
               (tessera-elfeed-search--disable)))
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
@@ -610,21 +627,8 @@ Return the entries, also recording them as native search results."
         (unwind-protect
             (progn
               (tessera-elfeed-search--enable)
-              (setq-local
-               elfeed-search-entries
-               (cl-loop for month in '(9 8 7)
-                        collect
-                        (let ((entry
-                               (tessera-elfeed-search-tests--entry
-                                '(unread) nil (cons "feed" month))))
-                          (setf (elfeed-entry-date entry)
-                                (float-time
-                                 (encode-time 0 0 12 1 month 2026)))
-                          entry)))
-              (dolist (entry elfeed-search-entries)
-                (elfeed-search--print-entry entry)
-                (insert "\n"))
-              (tessera-elfeed-search--apply-layout)
+              (tessera-elfeed-search-tests--insert-entries
+               '(9 8 7) '(unread))
               (goto-char (point-min))
               (forward-line 1)
               (tessera--month-toggle '(2026 9))
@@ -772,6 +776,48 @@ Return the entries, also recording them as native search results."
                     (should (eq (get-text-property end 'elfeed-entry)
                                 (nth 3 elfeed-search-entries)))))))
           (tessera-elfeed-search--disable))))))
+
+(ert-deftest tessera-elfeed-update-preserves-mark-outside-narrowing ()
+  (dolist (index '(0 3))
+    (dolist (active '(nil t))
+      (let ((elfeed-db '(:version 4))
+            (elfeed-db-feeds (make-hash-table :test #'equal)))
+        (with-temp-buffer
+          (setq major-mode 'elfeed-search-mode)
+          (cl-letf (((symbol-function 'elfeed-search-update)
+                     #'ignore))
+            (unwind-protect
+                (progn
+                  (tessera-elfeed-search--enable)
+                  (tessera-elfeed-search-tests--insert-entries
+                   '(9 8 7 6))
+                  (goto-char (point-min))
+                  (forward-line index)
+                  (move-to-column 10)
+                  (set-mark (point))
+                  (setq mark-active active)
+                  (goto-char (point-min))
+                  (forward-line 1)
+                  (let ((start (point))
+                        (marked (nth index elfeed-search-entries)))
+                    (forward-line 2)
+                    (narrow-to-region start (point))
+                    (goto-char (point-min))
+                    (tessera-elfeed-search--position-point)
+                    (setf (elfeed-entry-title marked)
+                          "A changed title outside narrowing")
+                    (elfeed-search-update-entry
+                     marked (nth 1 elfeed-search-entries))
+                    (should (= (point) (tessera-entry-point)))
+                    (should (eq mark-active active))
+                    (should (buffer-narrowed-p))
+                    (save-restriction
+                      (widen)
+                      (goto-char (mark t))
+                      (should (eq (get-text-property
+                                   (point) 'elfeed-entry) marked))
+                      (should (= (current-column) 10)))))
+              (tessera-elfeed-search--disable))))))))
 
 (ert-deftest tessera-elfeed-navigation-reports-native-commands ()
   (let ((elfeed-db '(:version 4))

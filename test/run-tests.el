@@ -6,6 +6,7 @@
 ;; Set TESSERA_TEST_PACKAGE_DIRS to test installed bytecode.
 ;; TESSERA_TEST_PACKAGE selects tessera, tessera-x, or elfeed-x.
 ;; Each package's tests live in its matching subdirectory here.
+;; Elfeed X tests also exercise integration with the selected Tessera.
 
 ;;; Code:
 
@@ -26,7 +27,8 @@
 
 (defvar tessera-tests--libraries
   (if (equal tessera-tests--package "elfeed-x")
-      '("elfeed-x" "elfeed-x-search" "elfeed-x-webkit")
+      '("elfeed-x" "elfeed-x-search" "elfeed-x-webkit"
+        "tessera" "tessera-elfeed" "tessera-elfeed-search")
     (append
      '("tessera"
        "tessera-gnus" "tessera-gnus-article" "tessera-gnus-summary"
@@ -49,10 +51,18 @@
       (unless (file-equal-p file expected)
         (error "Expected library %s, loaded %s" expected file)))))
 
+(defun tessera-tests--load-libraries (libraries)
+  "Load the exact selected production files for LIBRARIES."
+  (dolist (library libraries)
+    (require
+     (intern library)
+     (cdr (assoc library tessera-tests--expected-libraries)))))
+
 (let* ((directory (file-name-directory load-file-name))
        (packages
         (pcase tessera-tests--package
           ("tessera-x" '("tessera" "tessera-x"))
+          ("elfeed-x" '("tessera" "elfeed-x"))
           (_ (list tessera-tests--package))))
        (test-directory
         (expand-file-name tessera-tests--package directory))
@@ -108,16 +118,22 @@
         (error "Start tests before loading `%s'" library))))
   (let ((after-load-functions
          (cons #'tessera-tests--check-library-source
-               after-load-functions)))
-    (dolist (library tessera-tests--libraries)
-      (require
-       (intern library)
-       (cdr (assoc library tessera-tests--expected-libraries))))
+               after-load-functions))
+        (deferred
+         (when (equal tessera-tests--package "elfeed-x")
+           (seq-filter (lambda (library)
+                         (string-prefix-p "tessera" library))
+                       tessera-tests--libraries))))
+    (tessera-tests--load-libraries
+     (seq-difference tessera-tests--libraries deferred))
     (message "Testing %s %s from %s" tessera-tests--package
              (if package-path "bytecode" "source")
              (string-join library-directories ", "))
     (dolist (file (directory-files
                    test-directory t "-tests\\.el\\'"))
       (require (intern (file-name-base file)) file))
+    ;; Suites have now recorded the package's initial loading state.
+    ;; Load optional integration dependencies from the selected files.
+    (tessera-tests--load-libraries deferred)
     (ert-run-tests-batch-and-exit)))
 ;;; run-tests.el ends here

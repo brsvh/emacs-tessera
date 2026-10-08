@@ -549,7 +549,9 @@ make test
 
 Select one package with ~make test PACKAGE=tessera~ or
 ~make test PACKAGE=tessera-x~.  Use ~make test PACKAGE=elfeed-x~ for the extra
-Elfeed features.  Core tests do not load Tessera X or Elfeed X.
+Elfeed features and their Tessera integration.  These tests use the selected
+Tessera sources and also verify that loading Elfeed X does not load Tessera.
+Core tests do not load Tessera X or Elfeed X.
 
 The target uses ~EMACS~ (default: ~emacs~) with ~-Q --batch~.  If external
 libraries are not already available, provide their directories explicitly:
@@ -565,7 +567,8 @@ a nonzero status if a test fails.
 *** Installed Package Tests
 
 Run the same command with ~TESSERA_TEST_PACKAGE_DIRS~ set to the colon-separated
-directories of the selected packages and their Tessera dependencies.
+directories of the selected package and its test dependencies.  Both Tessera X
+and Elfeed X tests also require the Tessera directory.
 Each must contain its ~.el~ sources
 and ~.elc~ bytecode.  The runner checks that production libraries load from those
 installed copies.
