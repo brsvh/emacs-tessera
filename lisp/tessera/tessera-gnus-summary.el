@@ -1585,14 +1585,20 @@ Preserve point, narrowing, and month folds while row widths change."
   (tessera-gnus-summary--post-command))
 
 (defun tessera-gnus-summary--refresh ()
-  "Recompile the native summary format and regenerate articles."
+  "Regenerate articles, preserving positions and narrowing."
   (when gnus-newsgroup-headers
-    (let ((article (get-text-property (point) 'gnus-number))
+    (let ((positions (tessera--entry-save-positions 'gnus-number))
           (gnus-summary-buffer (current-buffer)))
-      (gnus-update-format-specifications nil 'summary)
-      (gnus-update-summary-mark-positions)
-      (gnus-summary-prepare)
-      (when article (gnus-summary-goto-subject article)))))
+      (unwind-protect
+          (progn
+            (widen)
+            (gnus-update-format-specifications nil 'summary)
+            (gnus-update-summary-mark-positions)
+            (gnus-summary-prepare))
+        (tessera--entry-restore-positions positions)))
+    (when tessera-gnus-summary--active
+      (tessera-month-reveal-point)
+      (tessera-entry-highlight-current))))
 
 ;;;; Header line providers
 

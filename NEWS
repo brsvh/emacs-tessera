@@ -93,9 +93,11 @@ glyph settings also preserves each window's entry and offset.
 Gnus Summary, mu4e Headers, and Elfeed Search entries are grouped beneath
 month headings without copying or replacing native records.  Gnus temporarily
 uses matching native date sorting while grouping is active; the prior sorting
-and its buffer locality are restored when grouping is disabled.  Groups start
-expanded and can be folded with mouse button 1.  A folded heading shows read
-and unread record counts using the backend's configured status glyphs.
+and its buffer locality are restored when grouping is disabled.  Regenerating
+a Gnus summary after a grouping or date-policy change preserves point, mark,
+narrowing boundaries, and each window's position.  Groups start expanded and
+can be folded with mouse button 1.  A folded heading shows read and unread
+record counts using the backend's configured status glyphs.
 
 Native next and previous commands skip folded groups.  Commands that select a
 hidden record reveal its group, as does Isearch.  The global thread-date

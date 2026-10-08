@@ -559,52 +559,78 @@
 
 ;;;; Content synchronization
 
-(ert-deftest tessera-gnus-refreshes-after-font-remapping ()
+(ert-deftest tessera-gnus-refreshes-preserve-native-positions ()
   (dolist (narrowed '(nil t))
     (dolist (active '(nil t))
       (with-temp-buffer
+        (gnus-summary-mode)
         (let ((gnus-show-threads nil)
+              (gnus-summary-display-while-building nil)
               (tessera-month-grouping nil)
               (tessera-glyph-style 'ascii)
+              (inhibit-read-only t)
               (sync (symbol-function
                      'tessera-gnus-summary--sync-buffer))
               (syncs 0))
-          (setq major-mode 'gnus-summary-mode)
-          (setq-local tessera-gnus-summary--active t)
           (tessera-tests--gnus-rows '(0 0 0))
-          (tessera-gnus-summary--prepare)
-          (forward-char 20)
-          (set-mark (point))
-          (setq mark-active active)
-          (forward-line 1)
-          (forward-char 10)
-          (when narrowed
-            (narrow-to-region
-             (+ (point-min) 10)
-             (save-excursion
-               (goto-char (point-max))
-               (forward-line -1)
-               (+ (point) 25))))
-          (cl-letf (((symbol-function
-                      'tessera-gnus-summary--sync-buffer)
-                     (lambda (force)
-                       (should force)
-                       (cl-incf syncs)
-                       (funcall sync force))))
-            (tessera-gnus-summary--post-command)
-            (should (zerop syncs))
-            (tessera-tests--check-redraw-positions
-             'gnus-number
-             (lambda ()
-               (setq-local face-remapping-alist
-                           (copy-tree '((default (:height 2.0)))))
-               (tessera-gnus-summary--post-command)
-               (should (= syncs 1))
-               (setf (plist-get (cadar face-remapping-alist)
-                                :height) 1.5)
-               (tessera-gnus-summary--post-command)
-               (tessera-gnus-summary--post-command)))
-            (should (= syncs 2))))))))
+          (setq-local
+           gnus-newsgroup-headers
+           (mapcar #'gnus-data-header gnus-newsgroup-data)
+           gnus-newsgroup-name "test"
+           gnus-newsgroup-limit '(1 2 3)
+           gnus-newsgroup-unreads '(1 2 3))
+          (unwind-protect
+              (progn
+                (tessera-gnus-summary--enable)
+                (goto-char (point-min))
+                (forward-char 20)
+                (set-mark (point))
+                (setq mark-active active)
+                (forward-line 1)
+                (forward-char 10)
+                (when narrowed
+                  (narrow-to-region
+                   (+ (point-min) 10)
+                   (save-excursion
+                     (goto-char (point-max))
+                     (forward-line -1)
+                     (+ (point) 25))))
+                (tessera-tests--check-redraw-positions
+                 'gnus-number
+                 (lambda ()
+                   (tessera-gnus-summary--refresh)
+                   (setq tessera-month-grouping t)
+                   (tessera-gnus-summary--months-changed
+                    'tessera-month-grouping)))
+                (should
+                 (= (tessera--current-entry-start)
+                    (line-beginning-position)))
+                ;; Settle the width after hiding the helper windows.
+                (tessera-gnus-summary--post-command)
+                (cl-letf
+                    (((symbol-function
+                       'tessera-gnus-summary--sync-buffer)
+                      (lambda (force)
+                        (should force)
+                        (cl-incf syncs)
+                        (funcall sync force))))
+                  (tessera-gnus-summary--post-command)
+                  (should (zerop syncs))
+                  (tessera-tests--check-redraw-positions
+                   'gnus-number
+                   (lambda ()
+                     (setq-local face-remapping-alist
+                                 (copy-tree
+                                  '((default (:height 2.0)))))
+                     (tessera-gnus-summary--post-command)
+                     (should (= syncs 1))
+                     (setf (plist-get
+                            (cadar face-remapping-alist) :height)
+                           1.5)
+                     (tessera-gnus-summary--post-command)
+                     (tessera-gnus-summary--post-command)))
+                  (should (= syncs 2))))
+            (tessera-gnus-summary--disable)))))))
 
 (ert-deftest tessera-gnus-mark-update-keeps-native-identity ()
   (with-temp-buffer

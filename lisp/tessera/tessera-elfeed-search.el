@@ -32,8 +32,6 @@
 (require 'tessera-elfeed)
 
 (declare-function elfeed-add-properties "elfeed-lib")
-(declare-function elfeed--position-save "elfeed-lib")
-(declare-function elfeed--position-restore "elfeed-lib")
 (declare-function elfeed-entry-date "elfeed-db")
 (declare-function elfeed-entry-enclosures "elfeed-db")
 (declare-function elfeed-entry-feed "elfeed-db")

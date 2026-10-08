@@ -1707,6 +1707,10 @@ Thread counts and status slots keep their shared alignment.  After
 manually changing individual faces, use @kbd{M-x tessera-refresh-glyphs} to
 refresh resolved hover colors as well as text faces.
 
+  Gnus Summary retains point, mark, narrowing boundaries, and each
+window's position when changing month grouping or its date policy
+regenerates the summary.
+
   Elfeed Search preserves point, mark, narrowing boundaries, and each
 window's position across entry updates and full redraws, including native
 window resizing.  Positions follow their entries; when an entry no longer
