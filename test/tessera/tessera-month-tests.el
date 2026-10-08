@@ -656,7 +656,14 @@
     (should (= (tessera--month-visible-entry-position 1 1) 15))
     (goto-char (point-max))
     (should (= (tessera--month-visible-entry-position -1 1) 25))
-    (should-not (tessera--month-visible-entry-position -1 3))))
+    (should-not (tessera--month-visible-entry-position -1 3))
+    (widen)
+    (narrow-to-region 7 29)
+    (goto-char 16)
+    (should (= (tessera--month-visible-entry-position -1 1) 7))
+    (narrow-to-region 16 16)
+    (should-not (tessera--month-visible-entry-position -1 1))
+    (should-not (tessera--month-visible-entry-position 1 1))))
 
 (ert-deftest tessera-month-toggle-restores-highlight-and-point ()
   (tessera-month-tests--with-buffer
@@ -811,7 +818,7 @@
   (tessera-month-tests--with-buffer
       (cl-loop for month from 5 downto 2
                collect
-               (list :title (number-to-string month)
+               (list :title (format "Month %d" month)
                      :time (tessera-month-tests--time
                             2026 month 20)))
     (let ((start (tessera--month-group-start
@@ -849,7 +856,21 @@
       (narrow-to-region (1+ start) (+ start 2))
       (goto-char (point-min))
       (tessera--month-toggle '(2026 4))
-      (should-not (gethash '(2026 4) tessera--month-folds)))))
+      (should-not (gethash '(2026 4) tessera--month-folds))
+      ;; A partial first entry remains a destination from another
+      ;; month.
+      (widen)
+      (narrow-to-region (1+ start) end)
+      (goto-char (tessera--month-group-start
+                  (nth 2 tessera--month-groups)))
+      (should (= (tessera--month-expanded-count) 2))
+      (tessera--month-toggle '(2026 3))
+      (should (gethash '(2026 3) tessera--month-folds))
+      (should (= (point) (point-min)))
+      (tessera--month-toggle '(2026 4))
+      (should-not (gethash '(2026 4) tessera--month-folds))
+      (narrow-to-region (point) (point))
+      (should (zerop (tessera--month-expanded-count))))))
 
 ;;;; Refresh scope and callbacks
 
@@ -932,7 +953,7 @@
                 (lambda (&rest _) (push major-mode visited)))
                ((symbol-function 'tessera-mu4e-headers--refresh)
                 (lambda (&rest _) (push major-mode visited)))
-               ((symbol-function 'tessera-elfeed-search--refresh)
+               ((symbol-function 'elfeed-search--update-immediately)
                 (lambda (&rest _) (push major-mode visited))))
             (dolist (refresh
                      (list #'tessera-refresh-glyphs
@@ -964,7 +985,7 @@
                             tessera-mu4e-headers--refresh)
          (elfeed-search-mode tessera-elfeed-search--active
                              tessera-elfeed-search--months-changed
-                             tessera-elfeed-search--refresh)))
+                             elfeed-search--update-immediately)))
     (let ((buffers (list (generate-new-buffer " *month-error*")
                          (generate-new-buffer " *month-success*")))
           visited)

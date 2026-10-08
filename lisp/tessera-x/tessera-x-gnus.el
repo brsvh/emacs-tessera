@@ -232,12 +232,14 @@ BOUNDS is a pair of Emacs times.  No articles or headers are fetched."
       (setq gnus-newsgroup-undownloaded
             (gnus-sorted-ndifference
              gnus-newsgroup-undownloaded numbers))
-      (save-excursion
-        (save-restriction
-          (widen)
-          (dolist (number numbers)
-            (when (gnus-summary-goto-subject number nil t)
-              (gnus-summary-update-download-mark number))))))))
+      (let ((positions (tessera--entry-save-positions)))
+        (unwind-protect
+            (progn
+              (widen)
+              (dolist (number numbers)
+                (when (gnus-summary-goto-subject number nil t)
+                  (gnus-summary-update-download-mark number))))
+          (tessera--entry-restore-positions positions))))))
 
 (defun tessera-x-gnus--download (items)
   "Download missing ITEMS into their native Agent groups.
@@ -295,8 +297,12 @@ Download missing bodies unless LOCAL-ONLY forbids it."
         (progn
           (unless (or local-only
                       (eq tessera-x-gnus-body-policy 'local-only))
-            (save-window-excursion
-              (save-excursion (tessera-x-gnus--download items))))
+            (let ((positions (tessera--entry-save-positions)))
+              (unwind-protect
+                  (save-window-excursion
+                    (save-current-buffer
+                      (tessera-x-gnus--download items)))
+                (tessera--entry-restore-positions positions))))
           (dolist (item items) (tessera-x-gnus--read-body item))
           (setf (tessera-x-context-items context)
                 (tessera-x-group-threads items))

@@ -1646,7 +1646,7 @@ Nil requests a full refresh, including glyphs and sorting."
                            tessera-mu4e-headers-month-thread-date)))
     (when (gethash 'mu4e-headers tessera--entry-backends)
       (tessera-mu4e-headers--register))
-    (save-window-excursion
+    (save-selected-window
       (tessera--map-mode-buffers
        'mu4e-headers-mode
        (lambda ()

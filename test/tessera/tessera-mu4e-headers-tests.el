@@ -502,7 +502,7 @@
 
 ;;;; Appearance synchronization
 
-(ert-deftest tessera-mu4e-refreshes-after-font-remapping ()
+(ert-deftest tessera-mu4e-refreshes-after-appearance-changes ()
   (dolist (narrowed '(nil t))
     (dolist (active '(nil t))
       (let ((mu4e-headers-mode-hook nil)
@@ -510,7 +510,8 @@
             (mu4e-search-threads nil)
             (mu4e-search-hide-enabled nil)
             (tessera-month-grouping nil)
-            (tessera-glyph-style 'ascii))
+            (tessera-glyph-style 'ascii)
+            (tessera-glyph-color t))
         (with-temp-buffer
           (mu4e-headers-mode)
           (let ((inhibit-read-only t)
@@ -559,8 +560,13 @@
                        (setf (plist-get (cadar face-remapping-alist)
                                         :height) 1.5)
                        (tessera-mu4e-headers--refresh)
+                       (tessera-mu4e-headers--refresh)
+                       (should (= syncs 2))
+                       (setq tessera-glyph-color nil)
+                       (tessera-mu4e-headers--glyphs-changed
+                        'tessera-glyph-color)
                        (tessera-mu4e-headers--refresh)))
-                    (should (= syncs 2))))
+                    (should (= syncs 3))))
               (tessera-mu4e-headers--disable))))))))
 
 ;;;; Buffer lifecycle

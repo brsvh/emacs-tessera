@@ -644,16 +644,23 @@
       (tessera-gnus-summary--register)
       (tessera-tests--gnus-rows '(0 0 0))
       (tessera-gnus-summary--prepare)
+      (forward-char 15)
+      (set-mark (point))
+      (forward-line 1)
+      (forward-char 10)
       (setq tessera-glyph-color nil
             tessera-gnus-summary--dirty t)
       (cl-letf (((symbol-function 'tessera-gnus-summary--sync-buffer)
                  (lambda (&optional force)
                    (push force calls)
                    (funcall sync force))))
-        (tessera-gnus-summary--glyphs-changed 'tessera-glyph-color)
-        (should (equal calls '(t)))
-        (tessera-gnus-summary--post-command)
-        (should (equal calls '(t)))))))
+        (tessera-tests--check-redraw-positions
+         'gnus-number
+         (lambda ()
+           (tessera-gnus-summary--glyphs-changed 'tessera-glyph-color)
+           (should (equal calls '(t)))
+           (tessera-gnus-summary--post-command)
+           (should (equal calls '(t)))))))))
 
 (ert-deftest tessera-gnus-layout-update-is-idempotent ()
   (with-temp-buffer

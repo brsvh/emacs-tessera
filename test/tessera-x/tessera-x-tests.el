@@ -13,6 +13,7 @@
 (require 'tessera-x-mu4e)
 (require 'tessera-x-gnus)
 (require 'tessera-gnus-test-support)
+(require 'tessera-test-support)
 (require 'gnus-agent)
 (require 'gnus-topic)
 (require 'elfeed-search)
@@ -1090,45 +1091,81 @@
                          "shared,Registry label,News")))))))
 
 (ert-deftest tessera-x-gnus-download-marks-respect-narrowing ()
-  (with-temp-buffer
-    (gnus-summary-mode)
-    (let ((inhibit-read-only t))
-      (tessera-tests--gnus-rows '(0 0 0)))
-    (setq-local gnus-newsgroup-name "group")
-    (setq-local gnus-newsgroup-undownloaded '(1 2 3))
-    (setq-local gnus-newsgroup-agentized t)
-    (setq-local gnus-summary-mark-positions '((download . 2)))
-    (let ((gnus-summary-default-score nil))
-      (dolist (number '(1 2 3))
-        (gnus-summary-goto-subject number nil t)
-        (gnus-summary-update-download-mark number))
-      (goto-char (point-min))
-      (forward-line 1)
-      (narrow-to-region (point) (line-beginning-position 2))
-      (let ((start (point-min))
-            (end (point-max))
-            (position (point))
-            (visible (buffer-string)))
-        (cl-letf (((symbol-function 'tessera-x-gnus--available-p)
-                   (lambda (_item) t)))
-          (tessera-x-gnus--refresh-downloads
-           (mapcar (lambda (number)
-                     (make-tessera-x-item :id (cons "group" number)))
-                   '(1 3))))
-        (should (= (point-min) start))
-        (should (= (point-max) end))
-        (should (= (point) position))
-        (should (equal (buffer-string) visible))
-        (should (equal gnus-newsgroup-undownloaded '(2)))
-        (save-restriction
-          (widen)
+  (dolist (adapter '(nil flat months))
+    (tessera-x-tests--with-snapshots
+      (with-temp-buffer
+        (gnus-summary-mode)
+        (let ((gnus-agent t)
+              (gnus-show-threads nil)
+              (gnus-summary-default-score 0)
+              (tessera-glyph-style 'ascii)
+              (tessera-month-grouping (eq adapter 'months))
+              (tessera-x-gnus-body-policy 'download)
+              (tessera-x-context-ready-hook nil)
+              downloaded)
+          (let ((inhibit-read-only t))
+            (tessera-tests--gnus-rows '(0 0 0)))
+          (setq-local gnus-newsgroup-name "group"
+                      gnus-newsgroup-undownloaded '(1 2 3)
+                      gnus-newsgroup-agentized t
+                      gnus-summary-mark-positions '((download . 2)))
           (dolist (number '(1 2 3))
             (gnus-summary-goto-subject number nil t)
-            (should
-             (eq (char-after (+ (line-beginning-position) 2))
-                 (if (= number 2)
-                     gnus-undownloaded-mark
-                   gnus-downloaded-mark)))))))))
+            (gnus-summary-update-download-mark number))
+          (when adapter
+            (setq-local tessera-gnus-summary--active t
+                        tessera--month-enabled
+                        (eq adapter 'months))
+            (tessera-gnus-summary--register)
+            (tessera-gnus-summary--prepare)
+            (add-hook 'gnus-summary-update-hook
+                      #'tessera-gnus-summary--update-line t t))
+          (goto-char (point-min))
+          (forward-line 2)
+          (forward-char 6)
+          (set-mark (point))
+          (setq mark-active t)
+          (goto-char (+ (point-min) 7))
+          (narrow-to-region
+           (+ (point-min) 5)
+           (save-excursion (forward-line 1) (+ (point) 8)))
+          (cl-letf
+              (((symbol-function 'tessera-x-gnus--available-p)
+                (lambda (_item) downloaded))
+               ((symbol-function 'gnus-find-method-for-group)
+                (lambda (_) '(nnmaildir "fixture")))
+               ((symbol-function 'gnus-agent-method-p)
+                (lambda (_) t))
+               ((symbol-function 'gnus-agent-fetch-articles)
+                (lambda (_group numbers)
+                  (should (equal numbers '(1 3)))
+                  (setq downloaded t)))
+               ((symbol-function 'tessera-x-gnus--read-body)
+                (lambda (item)
+                  (setf (tessera-x-item-body item) "Downloaded"))))
+            (tessera-tests--check-redraw-positions
+             'gnus-number
+             (lambda ()
+               (let* ((items
+                       (mapcar
+                        (lambda (number)
+                          (make-tessera-x-item
+                           :id (cons "group" number)))
+                        '(1 3)))
+                      (context (tessera-x-gnus--build-context
+                                items "Selected" nil)))
+                 (should (eq (tessera-x-context-state context)
+                             'ready))))))
+          (should (equal gnus-newsgroup-undownloaded '(2)))
+          (save-restriction
+            (widen)
+            (dolist (number '(1 2 3))
+              (gnus-summary-goto-subject number nil t)
+              (should
+               (eq (char-after (+ (line-beginning-position) 2))
+                   (if (= number 2)
+                       gnus-undownloaded-mark
+                     gnus-downloaded-mark))))))))))
 
 (ert-deftest tessera-x-gnus-agent-policy-keeps-local-today-offline ()
   (tessera-x-tests--with-snapshots

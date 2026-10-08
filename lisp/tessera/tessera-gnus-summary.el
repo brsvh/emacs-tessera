@@ -1974,7 +1974,7 @@ Nil requests a full refresh, including glyphs and sorting."
                            tessera-gnus-summary-month-thread-date)))
     (when (gethash 'gnus-summary tessera--entry-backends)
       (tessera-gnus-summary--register))
-    (save-window-excursion
+    (save-selected-window
       (tessera--map-mode-buffers
        'gnus-summary-mode
        (lambda ()

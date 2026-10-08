@@ -3264,12 +3264,16 @@ Preserve any narrowing while including records outside it."
      (cdr string-position) 'tessera-month-key
      (car string-position))))
 
+(defun tessera--month-entry-accessible-position (entry)
+  "Return the first accessible position in ENTRY, or nil."
+  (let ((start (max (point-min) (tessera--month-entry-start entry)))
+        (end (min (point-max) (tessera--month-entry-end entry))))
+    (when (< start end) start)))
+
 (defun tessera--month-accessible-entries (group)
   "Return GROUP's entries accessible under the current restriction."
   (cl-remove-if-not
-   (lambda (entry)
-     (<= (point-min) (tessera--month-entry-start entry)
-         (1- (point-max))))
+   #'tessera--month-entry-accessible-position
    (tessera--month-group-entries group)))
 
 (defun tessera--month-expanded-count ()
@@ -3419,10 +3423,8 @@ target lies beyond the accessible buffer boundary."
     (let* ((origin (or current (if (> direction 0) (1- low) low)))
            (target (+ origin (* direction count))))
       (when (and (<= 0 target) (< target (length entries)))
-        (let ((position
-               (tessera--month-entry-start (aref entries target))))
-          (when (<= (point-min) position (1- (point-max)))
-            position))))))
+        (tessera--month-entry-accessible-position
+         (aref entries target))))))
 
 ;;;; Entry navigation
 

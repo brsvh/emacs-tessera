@@ -453,7 +453,20 @@ Return the entries, also recording them as native search results."
                       (should
                        (eq (nth (- 3 count) entries)
                            (tessera-elfeed-search--entry-at-point)))
-                      (should (= (point) (tessera-entry-point)))))))
+                      (should (= (point) (tessera-entry-point)))))
+                  (goto-char (point-min))
+                  (narrow-to-region (+ (tessera-entry-point) 3)
+                                    (point-max))
+                  (forward-line 1)
+                  (call-interactively (key-binding (kbd "p")))
+                  (should (= (point) (point-min)))
+                  (should
+                   (eq (car entries)
+                       (tessera-elfeed-search--entry-at-point)))
+                  (call-interactively (key-binding (kbd "n")))
+                  (should
+                   (eq (cadr entries)
+                       (tessera-elfeed-search--entry-at-point)))))
             (tessera-elfeed-search--disable))
           (should (eq (key-binding (kbd "n"))
                       (lookup-key elfeed-search-mode-map (kbd "n"))))
@@ -554,11 +567,12 @@ Return the entries, also recording them as native search results."
 
 ;;;; Content and appearance synchronization
 
-(ert-deftest tessera-elfeed-search-refreshes-after-font-remapping ()
+(ert-deftest tessera-elfeed-refreshes-after-appearance-changes ()
   (let* ((elfeed-db '(:version 4))
          (elfeed-db-feeds (make-hash-table :test #'equal))
          (feed-id "https://example.invalid/feed")
          (tessera-glyph-style 'ascii)
+         (tessera-glyph-color t)
          (tessera-elfeed-search-month-grouping nil))
     (puthash feed-id (elfeed-feed--create :id feed-id :title "Feed")
              elfeed-db-feeds)
@@ -600,7 +614,12 @@ Return the entries, also recording them as native search results."
                (setf (cadr (assq 'default face-remapping-alist)) 1.5)
                (tessera-elfeed-search--prepare)
                (tessera-elfeed-search--prepare)
-               (should (= redraws 2)))))
+               (should (= redraws 2))
+               (setq tessera-glyph-color nil)
+               (tessera-elfeed-search--glyphs-changed
+                'tessera-glyph-color)
+               (tessera-elfeed-search--prepare)
+               (should (= redraws 3)))))
           (should (eq (buffer-narrowed-p) narrowed))
           (should (= (count-lines (point-min) (point-max))
                      (if narrowed 2 4)))

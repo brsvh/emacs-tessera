@@ -1012,7 +1012,7 @@ Nil requests a full refresh, including glyphs."
                            tessera-elfeed-search-month-grouping)))
     (when (gethash 'elfeed-search tessera--entry-backends)
       (tessera-elfeed-search--register))
-    (save-window-excursion
+    (save-selected-window
       (tessera--map-mode-buffers
        'elfeed-search-mode
        (lambda ()
@@ -1020,7 +1020,9 @@ Nil requests a full refresh, including glyphs."
            (setq-local tessera--month-enabled
                        (tessera-elfeed-search--month-enabled-p))
            (tessera-elfeed-search--update-date-separator)
-           (tessera-elfeed-search--refresh)))))))
+           (tessera-elfeed-search--call-preserving-positions
+            #'elfeed-search--update-immediately
+            (current-buffer) :resize)))))))
 
 ;;;; Buffer lifecycle
 

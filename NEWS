@@ -85,7 +85,8 @@ and truncation use measured text widths, including font scaling and mixed
 faces.  Spacing options retain their character-column units.
 Redrawing entries preserves point and mark within their entries and keeps
 positions independent in each window displaying the buffer.  Narrowing
-boundaries retain their offsets within entries when fonts change.
+boundaries retain their offsets within entries when fonts change.  Changing
+glyph settings also preserves each window's entry and offset.
 
 ** Interactive month groups in entry views.
 Gnus Summary, mu4e Headers, and Elfeed Search entries are grouped beneath
@@ -116,7 +117,8 @@ navigation uses their cached entry positions.
 Gnus and Elfeed batch month updates when a command changes several records.
 Changing month title formatting or spacing redraws only the headings.
 In narrowed buffers, folding keeps point within the accessible region and
-leaves at least one accessible month expanded.
+leaves at least one accessible month expanded.  A partially visible first entry
+remains a navigation and folding destination.
 
 ** Lower memory use when updating deep threads.
 Gnus and mu4e share current thread paths across unchanged rows instead of
@@ -161,6 +163,11 @@ timers, subprocesses, and temporary buffers.  This applies to MIME extraction,
 snapshot completion, mu index queries, and Elfeed linked-page retrieval.
 Quitting during linked-page response processing cancels the pending request
 and retains the previous successful snapshot.
+
+** Gnus context preparation preserves Summary positions.
+Downloading bodies to the Agent preserves point, mark, narrowing boundaries,
+and other windows' positions while updating availability marks.  This also
+applies when Tessera redraws the affected Summary rows.
 
 ** Missing and invalid dates no longer prevent snapshot preparation.
 Snapshots display 'unknown' for unusable dates, including mu4e's no-date
