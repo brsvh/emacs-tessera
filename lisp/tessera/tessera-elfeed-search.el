@@ -676,8 +676,12 @@ and native window resizing initiated from another buffer."
                  'tessera-elfeed-search--active buffer)))
       (apply function buffer args)
     (with-current-buffer buffer
-      (apply #'tessera-elfeed-search--call-preserving-positions
-             function buffer args))))
+      (prog1
+          (apply #'tessera-elfeed-search--call-preserving-positions
+                 function buffer args)
+        ;; Native redraw hooks run in another window's point context.
+        (tessera-month-reveal-point)
+        (tessera-entry-highlight-current)))))
 
 (defun tessera-elfeed-search--prepare (&optional _window)
   "Redraw changed fonts and synchronize months before display."

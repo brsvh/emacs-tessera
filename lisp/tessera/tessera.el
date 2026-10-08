@@ -3784,52 +3784,54 @@ Return the original and styled overlay strings for restoration."
 Keep native content faces and mouse interactions, and exclude
 vertical padding and virtual thread headings.  Restore the previous
 entry before moving the highlight.  This function is suitable for
-`post-command-hook'."
-  (let* ((start (line-beginning-position))
-         (end (min (point-max) (1+ (line-end-position))))
-         (layout (get-text-property start 'tessera--entry-layout)))
-    (unless (and tessera--current-entry
-                 (= start (nth 0 tessera--current-entry))
-                 (= end (nth 1 tessera--current-entry))
-                 (eq layout (nth 2 tessera--current-entry)))
-      (tessera-entry-clear-current)
-      (when layout
-        (with-silent-modifications
-          (let ((inhibit-read-only t)
-                (position start))
-            (while (< position end)
-              (let ((next
-                     (min (next-single-property-change
-                           position 'face nil end)
-                          (next-single-property-change
-                           position 'tessera--thread-heading
-                           nil end))))
-                (unless (get-text-property
-                         position 'tessera--thread-heading)
-                  (put-text-property
-                   position next 'tessera--current-face
-                   (list (get-text-property position 'face)))
-                  (add-face-text-property
-                   position next 'tessera-entry-current-face))
-                (setq position next)))
-            (let ((position start))
+`post-command-hook'.  Preserve narrowing while styling complete rows."
+  (save-restriction
+    (widen)
+    (let* ((start (line-beginning-position))
+           (end (min (point-max) (1+ (line-end-position))))
+           (layout (get-text-property start 'tessera--entry-layout)))
+      (unless (and tessera--current-entry
+                   (= start (nth 0 tessera--current-entry))
+                   (= end (nth 1 tessera--current-entry))
+                   (eq layout (nth 2 tessera--current-entry)))
+        (tessera-entry-clear-current)
+        (when layout
+          (with-silent-modifications
+            (let ((inhibit-read-only t)
+                  (position start))
               (while (< position end)
-                (let ((next (next-single-property-change
-                             position 'display nil end)))
-                  (when (and (equal (get-text-property
-                                     position 'display) "\n")
-                             (not (get-text-property
-                                   position
-                                   'tessera--thread-heading)))
+                (let ((next
+                       (min (next-single-property-change
+                             position 'face nil end)
+                            (next-single-property-change
+                             position 'tessera--thread-heading
+                             nil end))))
+                  (unless (get-text-property
+                           position 'tessera--thread-heading)
+                    (put-text-property
+                     position next 'tessera--current-face
+                     (list (get-text-property position 'face)))
                     (add-face-text-property
-                     position next '(:extend t)))
-                  (setq position next))))
-            (when (eq (char-before end) ?\n)
-              (add-face-text-property (1- end) end '(:extend t)))))
-        (setq tessera--current-entry
-              (list (copy-marker start) (copy-marker end) layout
-                    (tessera--current-entry-decorations
-                     start end)))))))
+                     position next 'tessera-entry-current-face))
+                  (setq position next)))
+              (let ((position start))
+                (while (< position end)
+                  (let ((next (next-single-property-change
+                               position 'display nil end)))
+                    (when (and (equal (get-text-property
+                                       position 'display) "\n")
+                               (not (get-text-property
+                                     position
+                                     'tessera--thread-heading)))
+                      (add-face-text-property
+                       position next '(:extend t)))
+                    (setq position next))))
+              (when (eq (char-before end) ?\n)
+                (add-face-text-property (1- end) end '(:extend t)))))
+          (setq tessera--current-entry
+                (list (copy-marker start) (copy-marker end) layout
+                      (tessera--current-entry-decorations
+                       start end))))))))
 
 ;;;; Header line options and faces
 

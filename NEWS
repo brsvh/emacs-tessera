@@ -71,11 +71,11 @@ context changes refresh headers without recounting unchanged message lists.
 Tessera's 'n' and 'p' navigation works with 'elfeed-x-search-follow-mode'
 without extra command configuration.  Marking an entry as read during
 continuous reading preserves its highlight after the row is redrawn.
-Entry updates, full refreshes, and native window resizing retain each
-window's position independently and preserve the mark even when it lies
-outside the narrowed region.  Narrowing boundaries retain their entries and
-character offsets.  When an update removes an entry from the results, its
-saved positions fall back to their former row numbers.
+Entry updates, full refreshes, and native window resizing preserve the current
+entry's highlight, retain each window's position independently, and preserve the
+mark even when it lies outside the narrowed region.  Narrowing boundaries retain
+their entries and character offsets.  When an update removes an entry from the
+results, its saved positions fall back to their former row numbers.
 
 ** Entry layouts follow buffer-local font scaling.
 Gnus Summary, mu4e Headers, and Elfeed Search refresh cached entry widths
@@ -87,7 +87,8 @@ faces.  Spacing options retain their character-column units.
 Redrawing entries preserves point and mark within their entries and keeps
 positions independent in each window displaying the buffer.  Narrowing
 boundaries retain their offsets within entries when fonts change.  Changing
-glyph settings also preserves each window's entry and offset.
+glyph settings also preserves each window's entry and offset.  The current
+entry remains highlighted when narrowing begins partway through its row.
 
 ** Interactive month groups in entry views.
 Gnus Summary, mu4e Headers, and Elfeed Search entries are grouped beneath

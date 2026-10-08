@@ -619,9 +619,20 @@ Return the entries, also recording them as native search results."
                       (tessera-tests--check-redraw-positions
                        'elfeed-entry
                        (lambda ()
-                         (with-temp-buffer
-                           (elfeed-search--update-immediately
-                            source method)))))
+                         (let ((background (split-window-below)))
+                           (unwind-protect
+                               (with-temp-buffer
+                                 (set-window-buffer
+                                  background (current-buffer))
+                                 (with-selected-window background
+                                   (elfeed-search--update-immediately
+                                    source method)))
+                             (delete-window background)))
+                         (should
+                          (= (tessera--current-entry-start)
+                             (save-restriction
+                               (widen)
+                               (line-beginning-position)))))))
                     (setq redraws 0)
                     (tessera-tests--check-redraw-positions
                      'elfeed-entry
