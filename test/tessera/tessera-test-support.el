@@ -72,10 +72,12 @@ Use current point and mark, with another window on the last row."
       (set-window-buffer other (current-buffer))
       (set-window-point
        other (save-excursion
-               (goto-char (point-max))
-               (forward-line -1)
-               (forward-char 10)
-               (point)))
+               (save-restriction
+                 (widen)
+                 (goto-char (point-max))
+                 (forward-line -1)
+                 (forward-char 10)
+                 (point))))
       (cl-labels
           ((position (where)
              (when where
@@ -84,8 +86,13 @@ Use current point and mark, with another window on the last row."
                    (widen)
                    (goto-char where)
                    (list (get-text-property (point) property)
-                         (- (point) (line-beginning-position))))))))
-        (let ((point (position (point)))
+                         (- (point) (line-beginning-position)))))))
+           (restriction ()
+             (when (buffer-narrowed-p)
+               (list (position (point-min))
+                     (position (point-max))))))
+        (let ((bounds (restriction))
+              (point (position (point)))
               (mark (position (mark t)))
               (window (position (window-point other))))
           (funcall function)
@@ -96,6 +103,7 @@ Use current point and mark, with another window on the last row."
           (should (equal mark (position (mark t))))
           (should (eq active mark-active))
           (should (eq deactivate deactivate-mark))
+          (should (equal bounds (restriction)))
           (should (equal window
                          (position (window-point other)))))))))
 

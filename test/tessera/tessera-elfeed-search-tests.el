@@ -575,7 +575,6 @@ Return the entries, also recording them as native search results."
                 (tessera-elfeed-search-tests--insert-entries
                  '(9 9 8 8)))
                (selected (nth 1 entries))
-               (marked (nth 2 entries))
                (redraws 0)
                (native (symbol-function
                         'elfeed-search--update-immediately)))
@@ -605,11 +604,6 @@ Return the entries, also recording them as native search results."
           (should (eq (buffer-narrowed-p) narrowed))
           (should (= (count-lines (point-min) (point-max))
                      (if narrowed 2 4)))
-          (should (eq (get-text-property (point) 'elfeed-entry)
-                      selected))
-          (should (eq (get-text-property (mark) 'elfeed-entry)
-                      marked))
-          (should mark-active)
           (should (equal elfeed-search-entries entries))
           (should (equal elfeed-search-filter ""))
           (when narrowed
@@ -620,6 +614,85 @@ Return the entries, also recording them as native search results."
                 (widen)
                 (should (eq (get-text-property end 'elfeed-entry)
                             (nth 3 entries)))))))))))
+
+(ert-deftest tessera-elfeed-batch-update-keeps-position-fallback ()
+  (dolist (selected '(49 180 219))
+    (let ((elfeed-db '(:version 4))
+          (elfeed-db-feeds (make-hash-table :test #'equal))
+          (elfeed-search-max-entries nil)
+          (tessera-month-grouping nil)
+          (tessera-glyph-style 'ascii))
+      (save-window-excursion
+        (with-temp-buffer
+          (rename-buffer "*elfeed-search*")
+          (switch-to-buffer (current-buffer))
+          (delete-other-windows)
+          (setq major-mode 'elfeed-search-mode)
+          (unwind-protect
+              (progn
+                (cl-letf (((symbol-function 'elfeed-search-update)
+                           #'ignore))
+                  (tessera-elfeed-search--enable))
+                (let* ((entries
+                        (tessera-elfeed-search-tests--insert-entries
+                         (make-list 220 9) '(unread)))
+                       (changed (if (= selected 219)
+                                    (nthcdr 119 entries)
+                                  (seq-take entries 101)))
+                       (other (split-window-below)))
+                  (goto-char (point-min))
+                  (forward-line 90)
+                  (forward-char 12)
+                  (set-mark (point))
+                  (setq mark-active t)
+                  (forward-line -10)
+                  (forward-char 14)
+                  (set-window-point other (point))
+                  (goto-char (point-min))
+                  (forward-line selected)
+                  (forward-char 10)
+                  (dolist (entry changed)
+                    (setf (elfeed-entry-tags entry) nil))
+                  ;; Keep native batch dispatch and full redraw.
+                  (cl-letf (((symbol-function 'elfeed-search-entries)
+                             (lambda (&rest _)
+                               (seq-filter
+                                (lambda (entry)
+                                  (memq 'unread
+                                        (elfeed-entry-tags entry)))
+                                entries))))
+                    (apply #'elfeed-search-update-entry changed))
+                  (dolist (window (list other (selected-window)))
+                    (run-hook-with-args
+                     'pre-redisplay-functions window))
+                  (should (= (length elfeed-search-entries) 119))
+                  (if (= selected 219)
+                      (should (eobp))
+                    (should
+                     (eq (get-text-property (point) 'elfeed-entry)
+                         (nth (if (= selected 49) 150 180) entries)))
+                    (should (= (- (point) (line-beginning-position))
+                               10)))
+                  (save-excursion
+                    (goto-char (mark))
+                    (should (eq (get-text-property
+                                 (point) 'elfeed-entry)
+                                (nth (if (= selected 219) 90 191)
+                                     entries)))
+                    (should (= (- (point) (line-beginning-position))
+                               12)))
+                  (save-excursion
+                    (goto-char (window-point other))
+                    (should (eq (get-text-property
+                                 (point) 'elfeed-entry)
+                                (nth (if (= selected 219) 80 181)
+                                     entries)))
+                    (should (= (- (point) (line-beginning-position))
+                               14)))
+                  (should mark-active)))
+            (cl-letf (((symbol-function 'elfeed-search-update)
+                       #'ignore))
+              (tessera-elfeed-search--disable))))))))
 
 (ert-deftest tessera-elfeed-rebuilds-layout-on-single-update ()
   (let ((elfeed-db '(:version 4))

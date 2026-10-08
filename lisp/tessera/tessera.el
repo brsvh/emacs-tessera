@@ -3610,71 +3610,94 @@ positions retain their character offset.  Release the saved marker."
       (set-marker origin nil))))
 
 (defun tessera--entry-save-positions (&optional property)
-  "Save point, mark and window points before redrawing entries.
+  "Save point, mark, window points and narrowing before a redraw.
 PROPERTY, when non-nil, identifies entries across full-buffer
 replacement.  Otherwise each entry's line start must survive.
 Call `tessera--entry-restore-positions' even if redrawing fails."
-  (save-restriction
-    (widen)
-    (cl-labels
-        ((save-position ()
-           (append (tessera-entry-save-point)
-                   (list (and property
-                              (get-text-property
-                               (line-beginning-position) property))
-                         (eobp)))))
-      (list
-       property (save-position)
-       (when (mark t)
-         (save-excursion (goto-char (mark t)) (save-position)))
-       mark-active deactivate-mark
-       (mapcar
-        (lambda (window)
-          (cons window
-                (save-excursion
-                  (goto-char (window-point window))
-                  (save-position))))
-        (delq (selected-window)
-              (get-buffer-window-list nil nil t)))))))
-
-(defun tessera--entry-restore-positions (snapshot)
-  "Restore entry positions from SNAPSHOT and release its markers."
-  (pcase-let ((`(,property ,point ,mark ,active ,deactivate ,windows)
-               snapshot))
+  (let ((bounds (when (buffer-narrowed-p)
+                  (list (point-min) (point-max)))))
     (save-restriction
       (widen)
       (cl-labels
-          ((restore (state)
-             (pcase-let ((`(,origin ,offset ,anchor ,identity ,end)
-                          state))
-               (cond
-                (end (set-marker origin (point-max)))
-                ((and identity
-                      (not (eq (get-text-property origin property)
-                               identity)))
-                 (when-let* ((position
-                              (text-property-any
-                               (point-min) (point-max)
-                               property identity)))
-                   (set-marker origin position))))
-               (tessera-entry-restore-point
-                (list origin offset anchor)))))
-        (unwind-protect
-            (progn
-              (set-marker
-               (mark-marker)
-               (when mark
-                 (save-excursion (restore mark) (point))))
-              (dolist (state windows)
-                (when (and (window-live-p (car state))
-                           (eq (window-buffer (car state))
-                               (current-buffer)))
+          ((save-position ()
+             (append (tessera-entry-save-point)
+                     (list (and property
+                                (get-text-property
+                                 (line-beginning-position) property))
+                           (eobp)))))
+        (list
+         property (save-position)
+         (when (mark t)
+           (save-excursion (goto-char (mark t)) (save-position)))
+         mark-active deactivate-mark
+         (mapcar
+          (lambda (window)
+            (cons window
                   (save-excursion
-                    (restore (cdr state))
-                    (set-window-point (car state) (point)))))
-              (restore point))
+                    (goto-char (window-point window))
+                    (save-position))))
+          (delq (selected-window)
+                (get-buffer-window-list nil nil t)))
+         (mapcar
+          (lambda (position)
+            (save-excursion
+              (goto-char position)
+              (let ((state (save-position)))
+                ;; Restriction boundaries retain exact offsets.
+                (setf (nth 2 state) nil)
+                state)))
+          bounds))))))
+
+(defun tessera--entry-restore-positions (snapshot &optional missing)
+  "Restore positions and narrowing from SNAPSHOT; release markers.
+MISSING, when non-nil, receives an entry identity absent after the
+redraw and returns its fallback line start, or nil."
+  (pcase-let ((`(,property ,point ,mark ,active ,deactivate
+                           ,windows ,bounds)
+               snapshot))
+    (widen)
+    (cl-labels
+        ((restore (state)
+           (pcase-let ((`(,origin ,offset ,anchor ,identity ,end)
+                        state))
+             (cond
+              (end (set-marker origin (point-max)))
+              ((and identity
+                    (not (eq (get-text-property origin property)
+                             identity)))
+               (when-let* ((position
+                            (or (text-property-any
+                                 (point-min) (point-max)
+                                 property identity)
+                                (and missing
+                                     (funcall missing identity)))))
+                 (set-marker origin position))))
+             (tessera-entry-restore-point
+              (list origin offset anchor)))))
+      (unwind-protect
+          (progn
+            (set-marker
+             (mark-marker)
+             (when mark
+               (save-excursion (restore mark) (point))))
+            (dolist (state windows)
+              (when (and (window-live-p (car state))
+                         (eq (window-buffer (car state))
+                             (current-buffer)))
+                (save-excursion
+                  (restore (cdr state))
+                  (set-window-point (car state) (point)))))
+            (restore point))
+        (unwind-protect
+            (when bounds
+              (let ((limits
+                     (mapcar
+                      (lambda (state)
+                        (save-excursion (restore state) (point)))
+                      bounds)))
+                (narrow-to-region (car limits) (cadr limits))))
           (setq mark-active active deactivate-mark deactivate)
-          (dolist (state (append (list point mark)
+          (dolist (state (append (list point mark) bounds
                                  (mapcar #'cdr windows)))
             (when state (set-marker (car state) nil))))))))
 

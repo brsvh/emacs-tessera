@@ -1121,40 +1121,39 @@ THREAD-PATHS caches shared ancestor comparisons for this update."
 (defun tessera-mu4e-headers--sync (native &optional force)
   "Synchronize the result buffer, using NATIVE presentation if set.
 FORCE also redraws unchanged messages after presentation changes."
-  (save-restriction
-    (widen)
-    (tessera--month-clear-display)
-    (let ((tessera-mu4e-headers--updating t)
-          (thread-paths (make-hash-table :test #'eq))
-          (inhibit-read-only t)
-          (inhibit-modification-hooks t)
-          (positions (tessera--entry-save-positions)))
-      (unwind-protect
-          (progn
-            (tessera-entry-clear-current)
-            (when native (tessera-entry-clear-layout))
-            (remove-overlays nil nil 'tessera-mu4e-footer t)
-            (unless native
-              (tessera-mu4e-headers--build-threads)
-              (let ((width (tessera-mu4e-headers--measure)))
-                (unless (= width tessera-mu4e-headers--leading-width)
-                  (setq force t))
-                (setq tessera-mu4e-headers--leading-width width)))
-            (goto-char (point-min))
-            (while (< (point) (point-max))
-              (tessera-mu4e-headers--sync-line
-               native force thread-paths)
-              (forward-line 1))
-            (when tessera-mu4e-headers--active
-              (if mu4e-search-threads
-                  (tessera-mu4e-thread-pad-folds
-                   tessera-mu4e-headers--threads)
-                (remove-overlays nil nil
-                                 'tessera-mu4e-fold-padding t))
-              (tessera-mu4e-headers--hide-footer)))
-        (tessera--entry-restore-positions positions))
-      (when (and tessera-mu4e-headers--active (not native))
-        (tessera-month-sync)))))
+  (let ((positions (tessera--entry-save-positions))
+        (tessera-mu4e-headers--updating t)
+        (thread-paths (make-hash-table :test #'eq))
+        (inhibit-read-only t)
+        (inhibit-modification-hooks t))
+    (unwind-protect
+        (progn
+          (widen)
+          (tessera--month-clear-display)
+          (tessera-entry-clear-current)
+          (when native (tessera-entry-clear-layout))
+          (remove-overlays nil nil 'tessera-mu4e-footer t)
+          (unless native
+            (tessera-mu4e-headers--build-threads)
+            (let ((width (tessera-mu4e-headers--measure)))
+              (unless (= width tessera-mu4e-headers--leading-width)
+                (setq force t))
+              (setq tessera-mu4e-headers--leading-width width)))
+          (goto-char (point-min))
+          (while (< (point) (point-max))
+            (tessera-mu4e-headers--sync-line
+             native force thread-paths)
+            (forward-line 1))
+          (when tessera-mu4e-headers--active
+            (if mu4e-search-threads
+                (tessera-mu4e-thread-pad-folds
+                 tessera-mu4e-headers--threads)
+              (remove-overlays nil nil
+                               'tessera-mu4e-fold-padding t))
+            (tessera-mu4e-headers--hide-footer)))
+      (tessera--entry-restore-positions positions))
+    (when (and tessera-mu4e-headers--active (not native))
+      (tessera-month-sync))))
 
 (defun tessera-mu4e-headers--appearance ()
   "Return native and shared options affecting the presentation."

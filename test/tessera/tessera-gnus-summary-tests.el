@@ -560,43 +560,51 @@
 ;;;; Content synchronization
 
 (ert-deftest tessera-gnus-refreshes-after-font-remapping ()
-  (dolist (active '(nil t))
-    (with-temp-buffer
-      (let ((gnus-show-threads nil)
-            (tessera-month-grouping nil)
-            (tessera-glyph-style 'ascii)
-            (sync (symbol-function
-                   'tessera-gnus-summary--sync-buffer))
-            (syncs 0))
-        (setq major-mode 'gnus-summary-mode)
-        (setq-local tessera-gnus-summary--active t)
-        (tessera-tests--gnus-rows '(0 0 0))
-        (tessera-gnus-summary--prepare)
-        (forward-char 20)
-        (set-mark (point))
-        (setq mark-active active)
-        (forward-line 1)
-        (forward-char 10)
-        (cl-letf (((symbol-function
-                    'tessera-gnus-summary--sync-buffer)
-                   (lambda (force)
-                     (should force)
-                     (cl-incf syncs)
-                     (funcall sync force))))
-          (tessera-gnus-summary--post-command)
-          (should (zerop syncs))
-          (tessera-tests--check-redraw-positions
-           'gnus-number
-           (lambda ()
-             (setq-local face-remapping-alist
-                         (copy-tree '((default (:height 2.0)))))
-             (tessera-gnus-summary--post-command)
-             (should (= syncs 1))
-             (setf (plist-get (cadar face-remapping-alist)
-                              :height) 1.5)
-             (tessera-gnus-summary--post-command)
-             (tessera-gnus-summary--post-command)))
-          (should (= syncs 2)))))))
+  (dolist (narrowed '(nil t))
+    (dolist (active '(nil t))
+      (with-temp-buffer
+        (let ((gnus-show-threads nil)
+              (tessera-month-grouping nil)
+              (tessera-glyph-style 'ascii)
+              (sync (symbol-function
+                     'tessera-gnus-summary--sync-buffer))
+              (syncs 0))
+          (setq major-mode 'gnus-summary-mode)
+          (setq-local tessera-gnus-summary--active t)
+          (tessera-tests--gnus-rows '(0 0 0))
+          (tessera-gnus-summary--prepare)
+          (forward-char 20)
+          (set-mark (point))
+          (setq mark-active active)
+          (forward-line 1)
+          (forward-char 10)
+          (when narrowed
+            (narrow-to-region
+             (+ (point-min) 10)
+             (save-excursion
+               (goto-char (point-max))
+               (forward-line -1)
+               (+ (point) 25))))
+          (cl-letf (((symbol-function
+                      'tessera-gnus-summary--sync-buffer)
+                     (lambda (force)
+                       (should force)
+                       (cl-incf syncs)
+                       (funcall sync force))))
+            (tessera-gnus-summary--post-command)
+            (should (zerop syncs))
+            (tessera-tests--check-redraw-positions
+             'gnus-number
+             (lambda ()
+               (setq-local face-remapping-alist
+                           (copy-tree '((default (:height 2.0)))))
+               (tessera-gnus-summary--post-command)
+               (should (= syncs 1))
+               (setf (plist-get (cadar face-remapping-alist)
+                                :height) 1.5)
+               (tessera-gnus-summary--post-command)
+               (tessera-gnus-summary--post-command)))
+            (should (= syncs 2))))))))
 
 (ert-deftest tessera-gnus-mark-update-keeps-native-identity ()
   (with-temp-buffer

@@ -678,7 +678,8 @@ redraws delete the text that anchors restriction markers."
   "Call FUNCTION with ARGS over all entries, preserving positions."
   (tessera-elfeed-search--call-widened
    (lambda ()
-     (let ((positions (tessera--entry-save-positions 'elfeed-entry)))
+     (let ((entries elfeed-search-entries)
+           (positions (tessera--entry-save-positions 'elfeed-entry)))
        (unwind-protect
            (apply function args)
          ;; Native full redraws synchronize every window both now
@@ -687,7 +688,16 @@ redraws delete the text that anchors restriction markers."
            (remove-hook 'pre-redisplay-functions
                         elfeed--position-restore-wpoint t)
            (setq elfeed--position-restore-wpoint nil))
-         (tessera--entry-restore-positions positions))))))
+         (tessera--entry-restore-positions
+          positions
+          (lambda (entry)
+            ;; Look up the old row only if its entry disappeared.
+            (when-let* ((index
+                         (cl-position entry entries :test #'eq)))
+              (save-excursion
+                (goto-char (point-min))
+                (forward-line index)
+                (point))))))))))
 
 (defun tessera-elfeed-search--prepare (&optional _window)
   "Redraw changed fonts and synchronize months before display."

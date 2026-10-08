@@ -1472,51 +1472,52 @@ THREAD-PATHS caches shared ancestor comparisons for that update."
             (tessera-entry-apply-layout start end)))))))
 
 (defun tessera-gnus-summary--sync-buffer (&optional force)
-  "Synchronize all entries, preserving point within its article.
+  "Synchronize all entries, preserving positions and narrowing.
 FORCE also redraws entries with unchanged marks."
-  (save-restriction
-    (widen)
-    (tessera--month-clear-display)
-    (let ((width tessera-gnus-summary--thread-width))
-      (tessera-gnus-summary--build-threads)
-      (when (/= width tessera-gnus-summary--thread-width)
-        (setq force t)))
-    (let ((positions (tessera--entry-save-positions))
-          (face-index (tessera-gnus-summary--face-index))
-          (thread-paths (make-hash-table :test #'eq))
-          (tessera-gnus-summary--batching t)
-          (tessera-gnus-summary--updating t))
-      (unwind-protect
-          (progn
-            (goto-char (point-min))
-            (while (< (point) (point-max))
-              (tessera-gnus-summary--sync-line
-               force face-index thread-paths)
-              (forward-line 1)))
-        (unwind-protect
-            (tessera-gnus-summary--reindex)
-          (tessera--entry-restore-positions positions))))
-    (when tessera-gnus-summary--active
-      (tessera-month-sync))))
+  (let ((positions (tessera--entry-save-positions)))
+    (unwind-protect
+        (progn
+          (widen)
+          (tessera--month-clear-display)
+          (let ((width tessera-gnus-summary--thread-width))
+            (tessera-gnus-summary--build-threads)
+            (when (/= width tessera-gnus-summary--thread-width)
+              (setq force t)))
+          (let ((face-index (tessera-gnus-summary--face-index))
+                (thread-paths (make-hash-table :test #'eq))
+                (tessera-gnus-summary--batching t)
+                (tessera-gnus-summary--updating t))
+            (unwind-protect
+                (progn
+                  (goto-char (point-min))
+                  (while (< (point) (point-max))
+                    (tessera-gnus-summary--sync-line
+                     force face-index thread-paths)
+                    (forward-line 1)))
+              (tessera-gnus-summary--reindex))))
+      (tessera--entry-restore-positions positions)))
+  (when tessera-gnus-summary--active
+    (tessera-month-sync)))
 
 (defun tessera-gnus-summary--refresh-content (article)
   "Refresh ARTICLE after observing new MIME state.
 Preserve point, narrowing, and month folds while row widths change."
-  (save-restriction
-    (widen)
-    (when-let* ((position
-                 (text-property-any (point-min) (point-max)
-                                    'gnus-number article)))
-      (let ((positions (tessera--entry-save-positions))
-            (tessera-gnus-summary--updating t))
-        (tessera-entry-clear-current)
-        (tessera--month-clear-display)
-        (unwind-protect
-            (progn
+  (let ((positions (tessera--entry-save-positions))
+        position)
+    (unwind-protect
+        (progn
+          (widen)
+          (setq position
+                (text-property-any (point-min) (point-max)
+                                   'gnus-number article))
+          (when position
+            (let ((tessera-gnus-summary--updating t))
+              (tessera-entry-clear-current)
+              (tessera--month-clear-display)
               (goto-char position)
-              (tessera-gnus-summary--sync-line t))
-          (tessera--entry-restore-positions positions)
-          (tessera-month-sync)))))
+              (tessera-gnus-summary--sync-line t))))
+      (tessera--entry-restore-positions positions)
+      (when position (tessera-month-sync))))
   (tessera-entry-highlight-current))
 
 (defun tessera-gnus-summary--update-line ()
@@ -1530,7 +1531,9 @@ Preserve point, narrowing, and month folds while row widths change."
       (let ((tessera-gnus-summary--updating t)
             (positions (tessera--entry-save-positions)))
         (unwind-protect
-            (tessera-gnus-summary--sync-line)
+            (progn
+              (widen)
+              (tessera-gnus-summary--sync-line))
           (tessera--entry-restore-positions positions))))))
 
 (defun tessera-gnus-summary--prepare ()

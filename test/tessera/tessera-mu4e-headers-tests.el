@@ -503,57 +503,65 @@
 ;;;; Appearance synchronization
 
 (ert-deftest tessera-mu4e-refreshes-after-font-remapping ()
-  (dolist (active '(nil t))
-    (let ((mu4e-headers-mode-hook nil)
-          (mu4e-headers-fields '((:subject)))
-          (mu4e-search-threads nil)
-          (mu4e-search-hide-enabled nil)
-          (tessera-month-grouping nil)
-          (tessera-glyph-style 'ascii))
-      (with-temp-buffer
-        (mu4e-headers-mode)
-        (let ((inhibit-read-only t)
-              (buffer (current-buffer))
-              (sync (symbol-function 'tessera-mu4e-headers--sync))
-              (syncs 0))
-          (cl-letf (((symbol-function 'mu4e-get-headers-buffer)
-                     (lambda (&rest _) buffer)))
-            (dotimes (index 3)
-              (mu4e~headers-insert-header
-               (list :docid (1+ index) :subject "A native message"
-                     :date (encode-time 0 0 12 1 9 2026))
-               (point-max))))
-          (unwind-protect
-              (progn
-                (tessera-mu4e--enable-headers)
-                (goto-char (+ (point-min) 20))
-                (set-mark (point))
-                (setq mark-active active)
-                (forward-line 1)
-                (forward-char 10)
-                (cl-letf
-                    (((symbol-function 'tessera-mu4e-headers--sync)
-                      (lambda (native force)
-                        (should-not native)
-                        (should force)
-                        (cl-incf syncs)
-                        (funcall sync native force))))
-                  (tessera-mu4e-headers--refresh)
-                  (should (zerop syncs))
-                  (tessera-tests--check-redraw-positions
-                   'docid
-                   (lambda ()
-                     (setq-local face-remapping-alist
-                                 (copy-tree
-                                  '((default (:height 2.0)))))
-                     (tessera-mu4e-headers--refresh)
-                     (should (= syncs 1))
-                     (setf (plist-get (cadar face-remapping-alist)
-                                      :height) 1.5)
-                     (tessera-mu4e-headers--refresh)
-                     (tessera-mu4e-headers--refresh)))
-                  (should (= syncs 2))))
-            (tessera-mu4e-headers--disable)))))))
+  (dolist (narrowed '(nil t))
+    (dolist (active '(nil t))
+      (let ((mu4e-headers-mode-hook nil)
+            (mu4e-headers-fields '((:subject)))
+            (mu4e-search-threads nil)
+            (mu4e-search-hide-enabled nil)
+            (tessera-month-grouping nil)
+            (tessera-glyph-style 'ascii))
+        (with-temp-buffer
+          (mu4e-headers-mode)
+          (let ((inhibit-read-only t)
+                (buffer (current-buffer))
+                (sync (symbol-function 'tessera-mu4e-headers--sync))
+                (syncs 0))
+            (cl-letf (((symbol-function 'mu4e-get-headers-buffer)
+                       (lambda (&rest _) buffer)))
+              (dotimes (index 3)
+                (mu4e~headers-insert-header
+                 (list :docid (1+ index) :subject "A native message"
+                       :date (encode-time 0 0 12 1 9 2026))
+                 (point-max))))
+            (unwind-protect
+                (progn
+                  (tessera-mu4e--enable-headers)
+                  (goto-char (+ (point-min) 20))
+                  (set-mark (point))
+                  (setq mark-active active)
+                  (forward-line 1)
+                  (forward-char 10)
+                  (when narrowed
+                    (narrow-to-region
+                     (+ (point-min) 10)
+                     (save-excursion
+                       (goto-char (point-max))
+                       (forward-line -1)
+                       (+ (point) 25))))
+                  (cl-letf
+                      (((symbol-function 'tessera-mu4e-headers--sync)
+                        (lambda (native force)
+                          (should-not native)
+                          (should force)
+                          (cl-incf syncs)
+                          (funcall sync native force))))
+                    (tessera-mu4e-headers--refresh)
+                    (should (zerop syncs))
+                    (tessera-tests--check-redraw-positions
+                     'docid
+                     (lambda ()
+                       (setq-local face-remapping-alist
+                                   (copy-tree
+                                    '((default (:height 2.0)))))
+                       (tessera-mu4e-headers--refresh)
+                       (should (= syncs 1))
+                       (setf (plist-get (cadar face-remapping-alist)
+                                        :height) 1.5)
+                       (tessera-mu4e-headers--refresh)
+                       (tessera-mu4e-headers--refresh)))
+                    (should (= syncs 2))))
+              (tessera-mu4e-headers--disable))))))))
 
 ;;;; Buffer lifecycle
 
