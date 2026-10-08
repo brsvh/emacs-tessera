@@ -48,6 +48,7 @@
 (defvar elfeed-search-print-entry-function)
 (defvar elfeed-search-update-hook)
 (defvar elfeed-search-separator-date-format)
+(defvar elfeed--position-restore-wpoint)
 
 (declare-function elfeed-update "elfeed")
 (declare-function elfeed-queue-count-total "elfeed")
@@ -558,7 +559,9 @@ return an absolute Emacs time value or nil, without scheduling work."
   (let ((start (point))
         (single (eq (char-after) ?\n))
         (groups (unless (eq tessera-elfeed-search--months-dirty t)
-                  tessera--month-groups)))
+                  tessera--month-groups))
+        (index tessera--month-entry-index)
+        (visible tessera--month-visible-entries))
     ;; Restore suppressed decorations before replacing any overlays.
     ;; A failed render must also invalidate cached entry bounds.
     (unless (eq tessera-elfeed-search--months-dirty t)
@@ -575,9 +578,12 @@ return an absolute Emacs time value or nil, without scheduling work."
         (tessera-entry-apply-layout start (point)))
       (when (and groups single
                  (tessera-elfeed-search--month-enabled-p)
-                 (let ((tessera--month-groups groups))
+                 (let ((tessera--month-groups groups)
+                       (tessera--month-entry-index index))
                    (tessera--month-update-entry start rendered)))
         (setq tessera--month-groups groups
+              tessera--month-entry-index index
+              tessera--month-visible-entries visible
               tessera-elfeed-search--months-dirty 'display)))))
 
 (defun tessera-elfeed-search--refresh ()
@@ -632,7 +638,7 @@ return an absolute Emacs time value or nil, without scheduling work."
   (when (and tessera-elfeed-search--active
              tessera-elfeed-search--months-dirty)
     (if (eq tessera-elfeed-search--months-dirty 'display)
-        (tessera--month-redisplay)
+        (tessera--month-redisplay t)
       (tessera-month-configure
        (tessera-elfeed-search--month-enabled-p) 'latest))
     (setq tessera-elfeed-search--months-dirty nil)))
@@ -667,12 +673,28 @@ redraws delete the text that anchors restriction markers."
                   bounds)))
             (narrow-to-region (car positions) (cadr positions))))))))
 
+(defun tessera-elfeed-search--call-preserving-positions
+    (function &rest args)
+  "Call FUNCTION with ARGS over all entries, preserving positions."
+  (tessera-elfeed-search--call-widened
+   (lambda ()
+     (let ((positions (tessera--entry-save-positions 'elfeed-entry)))
+       (unwind-protect
+           (apply function args)
+         ;; Native full redraws synchronize every window both now
+         ;; and before redisplay.  Keep their positions independent.
+         (when elfeed--position-restore-wpoint
+           (remove-hook 'pre-redisplay-functions
+                        elfeed--position-restore-wpoint t)
+           (setq elfeed--position-restore-wpoint nil))
+         (tessera--entry-restore-positions positions))))))
+
 (defun tessera-elfeed-search--prepare (&optional _window)
   "Redraw changed fonts and synchronize months before display."
   (when tessera-elfeed-search--active
     (unless (equal face-remapping-alist
                    tessera-elfeed-search--face-remapping)
-      (tessera-elfeed-search--call-widened
+      (tessera-elfeed-search--call-preserving-positions
        #'elfeed-search--update-immediately (current-buffer) :resize))
     (tessera-elfeed-search--sync-months)))
 
@@ -684,44 +706,8 @@ navigation."
   (if (not tessera-elfeed-search--active)
       (apply function entries)
     (unwind-protect
-        (tessera-elfeed-search--call-widened
-         (lambda ()
-           (let ((position (elfeed--position-save 'elfeed-entry))
-                 (mark-position
-                  (when (mark t)
-                    (save-excursion
-                      (goto-char (mark t))
-                      (elfeed--position-save 'elfeed-entry))))
-                 (mark-active mark-active)
-                 (deactivate-mark deactivate-mark)
-                 (windows
-                  (mapcar
-                   (lambda (window)
-                     (cons window
-                           (save-excursion
-                             (goto-char (window-point window))
-                             (elfeed--position-save 'elfeed-entry))))
-                   (delq (selected-window)
-                         (get-buffer-window-list nil nil t)))))
-             (unwind-protect
-                 (apply function entries)
-               (set-marker
-                (mark-marker)
-                (when mark-position
-                  (save-excursion
-                    (elfeed--position-restore
-                     'elfeed-entry mark-position)
-                    (point))))
-               (dolist (state windows)
-                 (when (and (window-live-p (car state))
-                            (eq (window-buffer (car state))
-                                (current-buffer)))
-                   (save-excursion
-                     (elfeed--position-restore
-                      'elfeed-entry (cdr state))
-                     (set-window-point (car state) (point)))))
-               (elfeed--position-restore
-                'elfeed-entry position)))))
+        (apply #'tessera-elfeed-search--call-preserving-positions
+               function entries)
       (tessera--header-line-changed)
       (tessera-elfeed-search--sync-months)
       (tessera-entry-highlight-current))))

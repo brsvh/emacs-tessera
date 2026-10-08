@@ -2571,6 +2571,9 @@ on buffer text, and all decorative spaces live in overlay strings."
 (defvar-local tessera--month-groups nil
   "Month groups produced by the most recent synchronization.")
 
+(defvar-local tessera--month-entry-index nil
+  "Map rendered line starts to entries in the current month groups.")
+
 (defvar-local tessera--month-overlays nil
   "Overlays owned by month grouping in the current buffer.")
 
@@ -2613,8 +2616,9 @@ on buffer text, and all decorative spaces live in overlay strings."
       (assq tessera--month-invisibility
             buffer-invisibility-spec)))
 
-(defun tessera--month-clear-display ()
-  "Remove month overlays and restore decorations they suppressed."
+(defun tessera--month-clear-display (&optional keep-entries)
+  "Remove month overlays and restore decorations they suppressed.
+KEEP-ENTRIES retains cached groups, positions and their index."
   (dolist (overlay tessera--month-overlays)
     (dolist (saved (overlay-get overlay 'tessera-month-suppressed))
       (pcase-let ((`(,other ,property ,value) saved))
@@ -2632,8 +2636,10 @@ on buffer text, and all decorative spaces live in overlay strings."
   (when tessera--month-invisibility-installed
     (remove-from-invisibility-spec tessera--month-invisibility)
     (setq tessera--month-invisibility-installed nil))
-  (setq tessera--month-groups nil
-        tessera--month-visible-entries []))
+  (unless keep-entries
+    (setq tessera--month-groups nil
+          tessera--month-entry-index nil
+          tessera--month-visible-entries [])))
 
 (defun tessera-month-clear (&optional preserve-state)
   "Remove month display from the current buffer.
@@ -2840,9 +2846,8 @@ first following valid month.  Return non-nil when any date exists."
 Return non-nil only for the same non-threaded entry with unchanged
 bounds and date.  Redisplay the retained groups after insertion."
   (when-let* ((group (tessera--month-group-at start))
-              (entry
-               (cl-find start (tessera--month-group-entries group)
-                        :key #'tessera--month-entry-start))
+              (entry (and tessera--month-entry-index
+                          (gethash start tessera--month-entry-index)))
               (old (tessera--month-entry-context entry))
               (new (get-text-property
                     0 'tessera-entry-context rendered)))
@@ -3184,18 +3189,27 @@ Remember them on FOLD for exact restoration."
                              (tessera--month-heading-appearance)))))
     (tessera--month-refresh-headings)))
 
-(defun tessera--month-display-groups (groups)
-  "Display GROUPS and cache the entries outside folded months."
+(defun tessera--month-display-groups (groups &optional reuse-visible)
+  "Display GROUPS and cache the entries outside folded months.
+REUSE-VISIBLE retains visible positions when only counts changed."
   (setq tessera--month-groups groups)
-  (let (visible)
+  (let ((index (or tessera--month-entry-index
+                   (make-hash-table :test #'eql)))
+        visible)
     (dolist (group groups)
+      (unless tessera--month-entry-index
+        (dolist (entry (tessera--month-group-entries group))
+          (puthash (tessera--month-entry-start entry) entry index)))
       (if (gethash (tessera--month-group-key group)
                    tessera--month-folds)
           (tessera--month-install-fold group)
-        (dolist (entry (tessera--month-group-entries group))
-          (push entry visible))))
-    (setq tessera--month-visible-entries
-          (vconcat (nreverse visible))))
+        (unless reuse-visible
+          (dolist (entry (tessera--month-group-entries group))
+            (push entry visible)))))
+    (setq tessera--month-entry-index index)
+    (unless reuse-visible
+      (setq tessera--month-visible-entries
+            (vconcat (nreverse visible)))))
   (when groups
     (unless (tessera--month-invisibility-present-p)
       (add-to-invisibility-spec tessera--month-invisibility)
@@ -3206,13 +3220,15 @@ Remember them on FOLD for exact restoration."
     (add-hook 'post-command-hook
               #'tessera--month-window-change t t)))
 
-(defun tessera--month-redisplay ()
-  "Apply fold state to the already synchronized month groups."
+(defun tessera--month-redisplay (&optional reuse-visible)
+  "Apply fold state to the already synchronized month groups.
+REUSE-VISIBLE retains visible positions when fold states did not
+change, as during an update to read counts only."
   (save-restriction
     (widen)
-    (let ((groups tessera--month-groups))
-      (tessera--month-clear-display)
-      (tessera--month-display-groups groups))))
+    (tessera--month-clear-display t)
+    (tessera--month-display-groups
+     tessera--month-groups reuse-visible)))
 
 (defun tessera-month-sync ()
   "Rebuild month headings and folds for the whole current buffer.
@@ -3592,6 +3608,75 @@ positions retain their character offset.  Release the saved marker."
              (or (and anchored (tessera-entry-point))
                  (min (+ (point) offset) (line-end-position))))))
       (set-marker origin nil))))
+
+(defun tessera--entry-save-positions (&optional property)
+  "Save point, mark and window points before redrawing entries.
+PROPERTY, when non-nil, identifies entries across full-buffer
+replacement.  Otherwise each entry's line start must survive.
+Call `tessera--entry-restore-positions' even if redrawing fails."
+  (save-restriction
+    (widen)
+    (cl-labels
+        ((save-position ()
+           (append (tessera-entry-save-point)
+                   (list (and property
+                              (get-text-property
+                               (line-beginning-position) property))
+                         (eobp)))))
+      (list
+       property (save-position)
+       (when (mark t)
+         (save-excursion (goto-char (mark t)) (save-position)))
+       mark-active deactivate-mark
+       (mapcar
+        (lambda (window)
+          (cons window
+                (save-excursion
+                  (goto-char (window-point window))
+                  (save-position))))
+        (delq (selected-window)
+              (get-buffer-window-list nil nil t)))))))
+
+(defun tessera--entry-restore-positions (snapshot)
+  "Restore entry positions from SNAPSHOT and release its markers."
+  (pcase-let ((`(,property ,point ,mark ,active ,deactivate ,windows)
+               snapshot))
+    (save-restriction
+      (widen)
+      (cl-labels
+          ((restore (state)
+             (pcase-let ((`(,origin ,offset ,anchor ,identity ,end)
+                          state))
+               (cond
+                (end (set-marker origin (point-max)))
+                ((and identity
+                      (not (eq (get-text-property origin property)
+                               identity)))
+                 (when-let* ((position
+                              (text-property-any
+                               (point-min) (point-max)
+                               property identity)))
+                   (set-marker origin position))))
+               (tessera-entry-restore-point
+                (list origin offset anchor)))))
+        (unwind-protect
+            (progn
+              (set-marker
+               (mark-marker)
+               (when mark
+                 (save-excursion (restore mark) (point))))
+              (dolist (state windows)
+                (when (and (window-live-p (car state))
+                           (eq (window-buffer (car state))
+                               (current-buffer)))
+                  (save-excursion
+                    (restore (cdr state))
+                    (set-window-point (car state) (point)))))
+              (restore point))
+          (setq mark-active active deactivate-mark deactivate)
+          (dolist (state (append (list point mark)
+                                 (mapcar #'cdr windows)))
+            (when state (set-marker (car state) nil))))))))
 
 ;;;; Current entry highlighting
 

@@ -60,5 +60,44 @@ COUNT, when non-nil, is the native repeated-click count."
       (when unread-command-events
         (error "Month click did not consume its release")))))
 
+(defun tessera-tests--check-redraw-positions (property function)
+  "Check that FUNCTION preserves positions identified by PROPERTY.
+Use current point and mark, with another window on the last row."
+  (save-window-excursion
+    (switch-to-buffer (current-buffer))
+    (delete-other-windows)
+    (let ((other (split-window-below))
+          (active mark-active)
+          (deactivate deactivate-mark))
+      (set-window-buffer other (current-buffer))
+      (set-window-point
+       other (save-excursion
+               (goto-char (point-max))
+               (forward-line -1)
+               (forward-char 10)
+               (point)))
+      (cl-labels
+          ((position (where)
+             (when where
+               (save-excursion
+                 (save-restriction
+                   (widen)
+                   (goto-char where)
+                   (list (get-text-property (point) property)
+                         (- (point) (line-beginning-position))))))))
+        (let ((point (position (point)))
+              (mark (position (mark t)))
+              (window (position (window-point other))))
+          (funcall function)
+          ;; Native redraws can install a delayed window-point reset.
+          (dolist (win (list other (selected-window)))
+            (run-hook-with-args 'pre-redisplay-functions win))
+          (should (equal point (position (point))))
+          (should (equal mark (position (mark t))))
+          (should (eq active mark-active))
+          (should (eq deactivate deactivate-mark))
+          (should (equal window
+                         (position (window-point other)))))))))
+
 (provide 'tessera-test-support)
 ;;; tessera-test-support.el ends here

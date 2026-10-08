@@ -1128,7 +1128,7 @@ FORCE also redraws unchanged messages after presentation changes."
           (thread-paths (make-hash-table :test #'eq))
           (inhibit-read-only t)
           (inhibit-modification-hooks t)
-          (saved-point (tessera-entry-save-point)))
+          (positions (tessera--entry-save-positions)))
       (unwind-protect
           (progn
             (tessera-entry-clear-current)
@@ -1152,7 +1152,7 @@ FORCE also redraws unchanged messages after presentation changes."
                 (remove-overlays nil nil
                                  'tessera-mu4e-fold-padding t))
               (tessera-mu4e-headers--hide-footer)))
-        (tessera-entry-restore-point saved-point))
+        (tessera--entry-restore-positions positions))
       (when (and tessera-mu4e-headers--active (not native))
         (tessera-month-sync)))))
 

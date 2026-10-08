@@ -584,21 +584,24 @@ Return the entries, also recording them as native search results."
           (when narrowed
             (narrow-to-region (point) (line-beginning-position 3)))
           (goto-char (+ (tessera-entry-point) 3))
-          (set-mark (line-beginning-position 2))
+          (set-mark (+ (line-beginning-position 2) 10))
           (setq mark-active t)
           (cl-letf (((symbol-function
                       'elfeed-search--update-immediately)
                      (lambda (&rest args)
                        (cl-incf redraws)
                        (apply native args))))
-            (text-scale-set 2)
-            (tessera-elfeed-search--prepare)
-            (tessera-elfeed-search--prepare)
-            (should (= redraws 1))
-            (setf (cadr (assq 'default face-remapping-alist)) 1.5)
-            (tessera-elfeed-search--prepare)
-            (tessera-elfeed-search--prepare)
-            (should (= redraws 2)))
+            (tessera-tests--check-redraw-positions
+             'elfeed-entry
+             (lambda ()
+               (text-scale-set 2)
+               (tessera-elfeed-search--prepare)
+               (tessera-elfeed-search--prepare)
+               (should (= redraws 1))
+               (setf (cadr (assq 'default face-remapping-alist)) 1.5)
+               (tessera-elfeed-search--prepare)
+               (tessera-elfeed-search--prepare)
+               (should (= redraws 2)))))
           (should (eq (buffer-narrowed-p) narrowed))
           (should (= (count-lines (point-min) (point-max))
                      (if narrowed 2 4)))
@@ -678,6 +681,7 @@ Return the entries, also recording them as native search results."
                 (forward-line -1)
                 (when folded (tessera--month-toggle '(2026 9)))
                 (let ((groups tessera--month-groups)
+                      (visible tessera--month-visible-entries)
                       (redisplay
                        (symbol-function 'tessera--month-redisplay))
                       (calls 0))
@@ -687,13 +691,14 @@ Return the entries, also recording them as native search results."
                       (((symbol-function 'tessera-month-sync)
                         (lambda () (ert-fail "Rebuilt month data")))
                        ((symbol-function 'tessera--month-redisplay)
-                        (lambda ()
+                        (lambda (&optional reuse-visible)
                           (cl-incf calls)
-                          (funcall redisplay))))
+                          (funcall redisplay reuse-visible))))
                     (apply #'elfeed-search-update-entry
                            (seq-take elfeed-search-entries 2)))
                   (should (= calls 1))
                   (should (eq groups tessera--month-groups))
+                  (should (eq visible tessera--month-visible-entries))
                   (should (= (tessera--month-group-unread
                               (car groups)) 2))
                   (should (eq folded

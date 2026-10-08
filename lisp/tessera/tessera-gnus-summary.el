@@ -1481,7 +1481,7 @@ FORCE also redraws entries with unchanged marks."
       (tessera-gnus-summary--build-threads)
       (when (/= width tessera-gnus-summary--thread-width)
         (setq force t)))
-    (let ((saved-point (tessera-entry-save-point))
+    (let ((positions (tessera--entry-save-positions))
           (face-index (tessera-gnus-summary--face-index))
           (thread-paths (make-hash-table :test #'eq))
           (tessera-gnus-summary--batching t)
@@ -1493,8 +1493,9 @@ FORCE also redraws entries with unchanged marks."
               (tessera-gnus-summary--sync-line
                force face-index thread-paths)
               (forward-line 1)))
-        (tessera-gnus-summary--reindex)
-        (tessera-entry-restore-point saved-point)))
+        (unwind-protect
+            (tessera-gnus-summary--reindex)
+          (tessera--entry-restore-positions positions))))
     (when tessera-gnus-summary--active
       (tessera-month-sync))))
 
@@ -1506,7 +1507,7 @@ Preserve point, narrowing, and month folds while row widths change."
     (when-let* ((position
                  (text-property-any (point-min) (point-max)
                                     'gnus-number article)))
-      (let ((saved-point (tessera-entry-save-point))
+      (let ((positions (tessera--entry-save-positions))
             (tessera-gnus-summary--updating t))
         (tessera-entry-clear-current)
         (tessera--month-clear-display)
@@ -1514,7 +1515,7 @@ Preserve point, narrowing, and month folds while row widths change."
             (progn
               (goto-char position)
               (tessera-gnus-summary--sync-line t))
-          (tessera-entry-restore-point saved-point)
+          (tessera--entry-restore-positions positions)
           (tessera-month-sync)))))
   (tessera-entry-highlight-current))
 
@@ -1527,10 +1528,10 @@ Preserve point, narrowing, and month folds while row widths change."
     ;; counts once after the command, when all marks have settled.
     (unless tessera--month-enabled
       (let ((tessera-gnus-summary--updating t)
-            (saved-point (tessera-entry-save-point)))
+            (positions (tessera--entry-save-positions)))
         (unwind-protect
             (tessera-gnus-summary--sync-line)
-          (tessera-entry-restore-point saved-point))))))
+          (tessera--entry-restore-positions positions))))))
 
 (defun tessera-gnus-summary--prepare ()
   "Attach entry layouts after Gnus has generated a summary."
