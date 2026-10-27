@@ -38,6 +38,13 @@ separately.  The fitting mode has no effect without xwidget support.
 
 * Changes in Tessera 0.1.1
 
+** Emphasized text follows the standard italic faces' fontsets.
+Gnus authors, mu4e contacts, and Elfeed feed names and URLs inherit 'italic'
+when read and 'bold-italic' when unread.  This includes flat and threaded
+mail views.  Fontsets on these standard faces apply to mixed-script text;
+the bold-italic fontset takes precedence over the ordinary italic fontset.
+Native state colors remain effective.
+
 ** Shared header lines for native entry views.
 Elfeed Search, Gnus Summary, and mu4e Headers display update actions,
 query or source information, optional extra information, and statistics.

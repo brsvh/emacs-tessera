@@ -406,16 +406,14 @@ return an absolute Emacs time value or nil, without scheduling work."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-read-author-face
-  '((t :inherit gnus-summary-normal-read
+  '((t :inherit (italic gnus-summary-normal-read)
        :weight normal
-       :slant italic
        :extend nil))
   "Face for read authors outside thread layouts."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-unread-author-face
-  '((t :inherit (bold gnus-summary-normal-unread)
-       :slant italic
+  '((t :inherit (bold-italic gnus-summary-normal-unread)
        :extend nil))
   "Face for unread authors outside thread layouts."
   :group 'tessera-gnus-summary)
@@ -464,7 +462,7 @@ return an absolute Emacs time value or nil, without scheduling work."
   :group 'tessera-gnus-summary)
 
 (defface tessera-gnus-summary-header-line-group-face
-  '((t :weight bold :slant italic))
+  '((t :inherit bold-italic))
   "Face for the source group name in the summary header."
   :group 'tessera-gnus-summary)
 
@@ -1059,17 +1057,16 @@ value.  Signal an error if neither value is an ASCII character."
   (propertize
    (plist-get (tessera-entry-context-metadata context) :author)
    'face
-   ;; Keep italics and unread emphasis above native attributes.
-   (cons
-    'italic
-    (if (tessera-entry-context-thread context)
-        (append
-         (when (tessera-gnus-summary--unread-p context) '(bold))
-         (tessera-gnus-summary--state-face
-          context 'tessera-gnus-summary-author-face))
-      (list (if (tessera-gnus-summary--unread-p context)
-                'tessera-gnus-summary-unread-author-face
-              'tessera-gnus-summary-read-author-face))))
+   (if (tessera-entry-context-thread context)
+       ;; Thread state faces can override the base author's font.
+       (cons
+        (if (tessera-gnus-summary--unread-p context)
+            'bold-italic 'italic)
+        (tessera-gnus-summary--state-face
+         context 'tessera-gnus-summary-author-face))
+     (list (if (tessera-gnus-summary--unread-p context)
+               'tessera-gnus-summary-unread-author-face
+             'tessera-gnus-summary-read-author-face)))
    'help-echo
    (let* ((header (tessera-entry-context-object context))
           (to (tessera-gnus-summary-header-field "To" header)))

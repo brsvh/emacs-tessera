@@ -9,6 +9,13 @@
 (require 'ert)
 (require 'tessera-gnus-summary)
 (require 'tessera-gnus-test-support)
+(require 'tessera-test-support)
+
+(ert-deftest tessera-gnus-faces-inherit-emphasis-fontsets ()
+  (tessera-tests--check-emphasis-fontsets
+   '(tessera-gnus-summary-read-author-face)
+   '(tessera-gnus-summary-unread-author-face
+     tessera-gnus-summary-header-line-group-face)))
 
 ;;;; Native face selection
 
@@ -73,7 +80,7 @@
                          :native-face 'gnus-summary-low-ticked)))
          (text (tessera-gnus-summary--author context))
          (face (get-text-property 0 'face text)))
-    (should (eq (car face) 'italic))
+    (should (eq (car face) 'bold-italic))
     (should (member '(:extend nil) face))
     (should (memq 'gnus-summary-low-ticked face))
     (should (memq 'tessera-gnus-summary-author-face face))))
@@ -132,10 +139,10 @@
                 (pcase (car spec)
                   ('spam 'tessera-gnus-summary-spam-face)
                   ('expirable 'tessera-gnus-summary-expirable-face))))
-          (should (eq (car face) 'italic))
           (when node
-            (should (eq (and (memq 'bold face) t)
-                        (not (gnus-read-mark-p (aref marks 0))))))
+            (should (eq (car face)
+                        (if (gnus-read-mark-p (aref marks 0))
+                            'italic 'bold-italic))))
           (unless node
             (let ((subject (get-text-property
                             0 'face
@@ -147,13 +154,14 @@
                       (if read
                           'tessera-gnus-summary-read-author-face
                         'tessera-gnus-summary-unread-author-face)))
-                (should (equal face (list 'italic role)))
+                (should (equal face (list role)))
                 (should (eq (face-attribute role :weight nil t)
                             (if read 'normal 'bold)))
                 (should
                  (equal (face-attribute role :inherit)
-                        (if read 'gnus-summary-normal-read
-                          '(bold gnus-summary-normal-unread)))))))
+                        (if read '(italic gnus-summary-normal-read)
+                          '(bold-italic
+                            gnus-summary-normal-unread)))))))
           (when special
             (if node (should (memq special face))
               (should-not (memq special face)))))))))

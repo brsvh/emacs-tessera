@@ -10,6 +10,14 @@
 (require 'cl-lib)
 (require 'mu4e-headers)
 (require 'tessera-mu4e-headers)
+(require 'tessera-test-support)
+
+(ert-deftest tessera-mu4e-contacts-inherit-emphasis-fontsets ()
+  (tessera-tests--check-emphasis-fontsets
+   '(tessera-mu4e-headers-read-contact-face
+     tessera-mu4e-headers-thread-contact-face)
+   '(tessera-mu4e-headers-unread-contact-face
+     tessera-mu4e-headers-thread-unread-contact-face)))
 
 (ert-deftest tessera-mu4e-headers-faces-preserve-native-subject-state
     ()

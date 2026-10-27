@@ -365,17 +365,14 @@ return an absolute Emacs time value or nil, without scheduling work."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-read-contact-face
-  '((t :inherit (mu4e-header-face default)
+  '((t :inherit (italic mu4e-header-face default)
        :weight normal
-       :slant italic
        :extend nil))
   "Read contacts, independent of special message states."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-unread-contact-face
-  '((t :inherit (mu4e-unread-face default)
-       :weight bold
-       :slant italic
+  '((t :inherit (bold-italic mu4e-unread-face default)
        :extend nil))
   "Unread contacts, independent of special message states."
   :group 'tessera-mu4e-headers)
@@ -397,13 +394,13 @@ return an absolute Emacs time value or nil, without scheduling work."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-thread-contact-face
-  '((t :slant italic :extend nil))
+  '((t :inherit italic :extend nil))
   "Contact adjustments over each message's native state."
   :group 'tessera-mu4e-headers)
 
 (defface tessera-mu4e-headers-thread-unread-contact-face
-  '((t :inherit tessera-mu4e-headers-thread-contact-face
-       :weight bold
+  '((t :inherit (bold-italic
+                 tessera-mu4e-headers-thread-contact-face)
        :extend nil))
   "Unread contacts retaining their native state and italics."
   :group 'tessera-mu4e-headers)

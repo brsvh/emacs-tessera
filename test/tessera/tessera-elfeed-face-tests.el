@@ -9,6 +9,13 @@
 (require 'ert)
 (require 'elfeed-search)
 (require 'tessera-elfeed-search)
+(require 'tessera-test-support)
+
+(ert-deftest tessera-elfeed-faces-inherit-emphasis-fontsets ()
+  (tessera-tests--check-emphasis-fontsets
+   '(tessera-elfeed-search-feed-face tessera-elfeed-search-url-face)
+   '(tessera-elfeed-search-unread-feed-face
+     tessera-elfeed-search-unread-url-face)))
 
 (ert-deftest tessera-elfeed-faces-feed-and-date-follow-unread ()
   (let* ((feed (elfeed-feed--create :id "test-feed" :title "Feed"))

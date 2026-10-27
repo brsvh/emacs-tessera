@@ -179,15 +179,14 @@ return an absolute Emacs time value or nil, without scheduling work."
   :group 'tessera-elfeed-search)
 
 (defface tessera-elfeed-search-feed-face
-  '((t :inherit elfeed-search-feed-face
+  '((t :inherit (italic elfeed-search-feed-face)
        :weight normal
-       :slant italic
        :extend nil))
   "Face used for feed titles of read entries."
   :group 'tessera-elfeed-search)
 
 (defface tessera-elfeed-search-unread-feed-face
-  '((t :inherit (bold tessera-elfeed-search-feed-face)
+  '((t :inherit (bold-italic tessera-elfeed-search-feed-face)
        :extend nil))
   "Face used for feed titles of unread entries."
   :group 'tessera-elfeed-search)
@@ -214,17 +213,15 @@ return an absolute Emacs time value or nil, without scheduling work."
   :group 'tessera-elfeed-search)
 
 (defface tessera-elfeed-search-url-face
-  '((t :inherit (tessera-elfeed-search-date-face link)
-       :slant italic
+  '((t :inherit (italic tessera-elfeed-search-date-face link)
        :underline nil
        :extend nil))
   "Face used for read URLs, with the read date color."
   :group 'tessera-elfeed-search)
 
 (defface tessera-elfeed-search-unread-url-face
-  '((t :inherit (tessera-elfeed-search-unread-date-face
-                 tessera-elfeed-search-url-face)
-       :slant italic
+  '((t :inherit (bold-italic tessera-elfeed-search-unread-date-face
+                             tessera-elfeed-search-url-face)
        :underline nil
        :extend nil))
   "Face used for unread URLs, with unread date color and weight."

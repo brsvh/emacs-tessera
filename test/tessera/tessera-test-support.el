@@ -7,6 +7,45 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'ert)
+
+(defun tessera-tests--check-emphasis-fontsets (read unread)
+  "Check READ and UNREAD faces against standard emphasis fontsets.
+Use font families to check the same precedence on text terminals."
+  (let* ((frame (selected-frame))
+         (attribute (if (display-graphic-p frame) :fontset :family))
+         (faces '(italic bold-italic))
+         (saved
+          (mapcar
+           (lambda (face)
+             (let ((backup (intern (format "tessera-tests--%s"
+                                           face))))
+               (copy-face face backup frame frame)
+               (cons face backup)))
+           faces)))
+    (unwind-protect
+        (progn
+          (dolist (face faces)
+            (if (display-graphic-p frame)
+                (let ((name (if (eq face 'italic)
+                                "fontset-tesseratestitalic"
+                              "fontset-tesseratestbolditalic")))
+                  (set-face-attribute
+                   face frame :fontset
+                   (or (query-fontset name)
+                       (create-fontset-from-fontset-spec
+                        (concat "-*-*-*-*-*-*-*-*-*-*-*-*-" name)))))
+              (set-face-attribute face frame
+                                  :family (symbol-name face))))
+          (dolist (entry (list (cons 'italic read)
+                               (cons 'bold-italic unread)))
+            (dolist (face (cdr entry))
+              (should
+               (equal (face-attribute face attribute frame t)
+                      (face-attribute
+                       (car entry) attribute frame t))))))
+      (dolist (entry saved)
+        (copy-face (cdr entry) (car entry) frame frame)))))
 
 (defun tessera-tests--pixel-width (text &optional face)
   "Measure TEXT with buffer font remapping and optional base FACE."

@@ -208,6 +208,13 @@ options.  The backend groups are @code{tessera-gnus},
 theme-sensitive and can be customized through the usual Emacs face
 interface.
 
+  Gnus authors, mu4e contacts, and Elfeed feed names and URLs inherit
+@code{italic} when read and @code{bold-italic} when unread.  These
+standard faces take precedence over native state faces and base faces
+for font attributes, including @code{:fontset}.  Customizing their
+fontsets therefore also applies to mixed-script text in Tessera, while
+native state colors remain effective.
+
   Shared layout options are ordinary user options; a buffer-local
 binding can specialize one view.  Set a local layout after the adapter
 has activated, because activation installs its initial local layout.  An
